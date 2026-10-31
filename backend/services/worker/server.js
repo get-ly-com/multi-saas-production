@@ -13,4 +13,5 @@ app.get('/jobs', (req, res) => {
   });
 });
 
-console.log('⚙️ Worker Service running (processing async jobs and cron tasks)');
+const PORT = process.env.PORT || 3012;
+app.listen(PORT, () => console.log(`⚙️ Worker Service on ${PORT}`));

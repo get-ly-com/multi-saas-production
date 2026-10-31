@@ -40,11 +40,12 @@ const serviceRoutes = [
   { path: '/api/integration', service: 'integration-service', port: 3011 },
 ];
 
+const serviceHost = (service) =>
+  process.env.NODE_ENV === 'production' ? `${service}.railway.internal` : 'localhost';
+
 // Setup proxies
 serviceRoutes.forEach(({ path, service, port }) => {
-  const serviceUrl = process.env.NODE_ENV === 'production'
-    ? `http://${service}:${port}`
-    : `http://localhost:${port}`;
+  const serviceUrl = `http://${serviceHost(service)}:${port}`;
 
   app.use(path, httpProxy(serviceUrl, {
     proxyReqPathResolver: (req) => req.url,
@@ -56,7 +57,7 @@ serviceRoutes.forEach(({ path, service, port }) => {
 });
 
 // WebSocket proxy (if needed)
-app.use('/ws', httpProxy('http://websocket-service:3009', {
+app.use('/ws', httpProxy(`http://${serviceHost('websocket-service')}:3009`, {
   ws: true
 }));
 
@@ -75,10 +76,9 @@ app.get('/status', async (req, res) => {
 
   for (const { service, port } of serviceRoutes) {
     try {
-      const response = await fetch(
-        `http://${process.env.NODE_ENV === 'production' ? service : 'localhost'}:${port}/health`,
-        { timeout: 2000 }
-      );
+      const response = await fetch(`http://${serviceHost(service)}:${port}/health`, {
+        signal: AbortSignal.timeout(2000)
+      });
       statuses[service] = response.ok ? 'up' : 'down';
     } catch {
       statuses[service] = 'down';

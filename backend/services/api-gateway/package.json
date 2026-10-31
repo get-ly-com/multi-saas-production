@@ -10,7 +10,7 @@
   },
   "dependencies": {
     "express": "^4.18.2",
-    "express-http-proxy": "^1.6.13",
+    "express-http-proxy": "^2.1.2",
     "cors": "^2.8.5",
     "morgan": "^1.10.0",
     "helmet": "^7.0.0",
