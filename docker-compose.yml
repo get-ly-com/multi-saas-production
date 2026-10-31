@@ -1,0 +1,71 @@
+version: '3.8'
+
+services:
+  api-gateway:
+    build: ./backend/services/api-gateway
+    ports:
+      - "3000:3000"
+    environment:
+      PORT: 3000
+      NODE_ENV: development
+    depends_on:
+      - accounting-service
+      - crm-service
+      - inventory-service
+
+  accounting-service:
+    build: ./backend/services/accounting-service
+    ports:
+      - "3001:3001"
+    environment:
+      PORT: 3001
+      SUPABASE_URL: ${SUPABASE_URL}
+      SUPABASE_SERVICE_KEY: ${SUPABASE_SERVICE_KEY}
+
+  crm-service:
+    build: ./backend/services/crm-service
+    ports:
+      - "3002:3002"
+    environment:
+      PORT: 3002
+      SUPABASE_URL: ${SUPABASE_URL}
+      SUPABASE_SERVICE_KEY: ${SUPABASE_SERVICE_KEY}
+
+  inventory-service:
+    build: ./backend/services/inventory-service
+    ports:
+      - "3003:3003"
+    environment:
+      PORT: 3003
+      SUPABASE_URL: ${SUPABASE_URL}
+      SUPABASE_SERVICE_KEY: ${SUPABASE_SERVICE_KEY}
+
+  chatbot-service:
+    build: ./backend/services/chatbot-service
+    ports:
+      - "3004:3004"
+    environment:
+      PORT: 3004
+
+  video-service:
+    build: ./backend/services/video-service
+    ports:
+      - "3005:3005"
+    environment:
+      PORT: 3005
+
+  scheduler-service:
+    build: ./backend/services/scheduler-service
+    ports:
+      - "3006:3006"
+    environment:
+      PORT: 3006
+
+  frontend:
+    build:
+      context: ./frontend
+      dockerfile: Dockerfile
+    ports:
+      - "3100:3100"
+    environment:
+      NEXT_PUBLIC_API_BASE_URL: http://api-gateway:3000

@@ -1,0 +1,19 @@
+{
+  "name": "multi-saas-backend",
+  "version": "1.0.0",
+  "private": true,
+  "workspaces": [
+    "services/*"
+  ],
+  "scripts": {
+    "dev": "concurrently \"npm run dev --workspace=api-gateway\" \"npm run dev --workspace=accounting-service\" \"npm run dev --workspace=crm-service\"",
+    "build": "npm run build --workspaces",
+    "test": "npm test --workspaces",
+    "lint": "eslint . --ext .ts,.js"
+  },
+  "devDependencies": {
+    "concurrently": "^8.0.0",
+    "eslint": "^8.0.0",
+    "typescript": "^5.0.0"
+  }
+}
