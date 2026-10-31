@@ -1,0 +1,81 @@
+{
+  "$schema": "https://railway.app/railway.schema.json",
+  "build": {
+    "builder": "DOCKERFILE",
+    "context": "."
+  },
+  "deploy": {
+    "restartPolicyType": "ON_FAILURE",
+    "restartPolicyMaxRetries": 5
+  },
+  "services": {
+    "api-gateway": {
+      "buildCommand": "npm install && npm run build",
+      "startCommand": "npm start",
+      "rootDirectory": "backend/services/api-gateway",
+      "port": 3000,
+      "environment": {
+        "NODE_ENV": "production"
+      }
+    },
+    "accounting-service": {
+      "rootDirectory": "backend/services/accounting-service",
+      "port": 3001,
+      "startCommand": "npm start"
+    },
+    "crm-service": {
+      "rootDirectory": "backend/services/crm-service",
+      "port": 3002,
+      "startCommand": "npm start"
+    },
+    "inventory-service": {
+      "rootDirectory": "backend/services/inventory-service",
+      "port": 3003,
+      "startCommand": "npm start"
+    },
+    "chatbot-service": {
+      "rootDirectory": "backend/services/chatbot-service",
+      "port": 3004,
+      "startCommand": "npm start"
+    },
+    "video-service": {
+      "rootDirectory": "backend/services/video-service",
+      "port": 3005,
+      "startCommand": "npm start"
+    },
+    "scheduler-service": {
+      "rootDirectory": "backend/services/scheduler-service",
+      "port": 3006,
+      "startCommand": "npm start"
+    },
+    "hr-service": {
+      "rootDirectory": "backend/services/hr-service",
+      "port": 3007,
+      "startCommand": "npm start"
+    },
+    "social-media-service": {
+      "rootDirectory": "backend/services/social-media-service",
+      "port": 3008,
+      "startCommand": "npm start"
+    },
+    "websocket-service": {
+      "rootDirectory": "backend/services/websocket-service",
+      "port": 3009,
+      "startCommand": "npm start"
+    },
+    "analytics-service": {
+      "rootDirectory": "backend/services/analytics-service",
+      "port": 3010,
+      "startCommand": "npm start"
+    },
+    "integration-service": {
+      "rootDirectory": "backend/services/integration-service",
+      "port": 3011,
+      "startCommand": "npm start"
+    },
+    "worker": {
+      "rootDirectory": "backend/services/worker",
+      "startCommand": "npm start"
+    }
+  }
+}
