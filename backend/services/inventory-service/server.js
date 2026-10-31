@@ -4,12 +4,18 @@ const { createClient } = require('@supabase/supabase-js');
 
 const app = express();
 const PORT = process.env.PORT || 3003;
-const supabase = createClient(process.env.SUPABASE_URL, process.env.SUPABASE_SERVICE_KEY);
+
+// Queries run as the signed-in user, so database policies apply to them
+const supabaseFor = (authorization) =>
+  createClient(process.env.SUPABASE_URL, process.env.SUPABASE_ANON_KEY, {
+    global: { headers: { Authorization: authorization } },
+    auth: { persistSession: false, autoRefreshToken: false }
+  });
 
 const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 
-const db = () => supabase.schema('inventory');
-const items = () => db().from('items');
+const db = (req) => req.db.schema('inventory');
+const items = (req) => db(req).from('items');
 
 const sendError = (res, error) => {
   if (error.code === '23505') return res.status(409).json({ error: 'That SKU already exists' });
@@ -30,9 +36,9 @@ const parsePrice = (value) => {
   return parsed;
 };
 
-const adjustStock = async (tenantId, itemId, change, reason) => {
-  const { data, error } = await db().rpc('adjust_stock', {
-    p_tenant: tenantId,
+const adjustStock = async (req, itemId, change, reason) => {
+  const { data, error } = await db(req).rpc('adjust_stock', {
+    p_tenant: req.tenantId,
     p_item: itemId,
     p_change: change,
     p_reason: reason || null
@@ -48,15 +54,16 @@ app.get('/health', (req, res) => res.json({ status: 'ok', service: 'inventory-se
 // Only the gateway reaches this service, and it sets the tenant
 app.use((req, res, next) => {
   req.tenantId = req.headers['x-tenant-id'];
-  if (!UUID.test(req.tenantId || '')) {
+  if (!UUID.test(req.tenantId || '') || !req.headers.authorization) {
     return res.status(400).json({ error: 'Missing tenant' });
   }
+  req.db = supabaseFor(req.headers.authorization);
   next();
 });
 
 app.get('/items', async (req, res) => {
   try {
-    const { data, error } = await items().select('*').eq('tenant_id', req.tenantId).order('name');
+    const { data, error } = await items(req).select('*').eq('tenant_id', req.tenantId).order('name');
     if (error) throw error;
     res.json(data || []);
   } catch (error) {
@@ -70,7 +77,7 @@ app.post('/items', async (req, res) => {
     if (!sku || !name) throw new Error('SKU and name are required');
     const opening = parseWhole(quantity || 0, 'Quantity');
 
-    const { data, error } = await items()
+    const { data, error } = await items(req)
       .insert([{
         tenant_id: req.tenantId,
         sku,
@@ -82,7 +89,7 @@ app.post('/items', async (req, res) => {
 
     if (error) throw error;
     const item = opening > 0
-      ? await adjustStock(req.tenantId, data[0].id, opening, 'Opening stock')
+      ? await adjustStock(req, data[0].id, opening, 'Opening stock')
       : data[0];
     res.status(201).json(item);
   } catch (error) {
@@ -107,7 +114,7 @@ app.put('/items/:id', async (req, res) => {
     if (price !== undefined) updates.price = parsePrice(price);
     if (reorder_level !== undefined) updates.reorder_level = parseWhole(reorder_level, 'Reorder level');
 
-    const { data, error } = await items()
+    const { data, error } = await items(req)
       .update(updates)
       .eq('id', req.params.id)
       .eq('tenant_id', req.tenantId)
@@ -123,7 +130,7 @@ app.put('/items/:id', async (req, res) => {
 
 app.delete('/items/:id', async (req, res) => {
   try {
-    const { data, error } = await items()
+    const { data, error } = await items(req)
       .delete()
       .eq('id', req.params.id)
       .eq('tenant_id', req.tenantId)
@@ -143,7 +150,7 @@ app.post('/items/:id/adjust', async (req, res) => {
     if (!Number.isInteger(change) || change === 0) {
       throw new Error('Change must be a whole number, positive or negative');
     }
-    res.json(await adjustStock(req.tenantId, req.params.id, change, req.body.reason));
+    res.json(await adjustStock(req, req.params.id, change, req.body.reason));
   } catch (error) {
     sendError(res, error);
   }
@@ -151,7 +158,7 @@ app.post('/items/:id/adjust', async (req, res) => {
 
 app.get('/items/:id/movements', async (req, res) => {
   try {
-    const { data, error } = await db()
+    const { data, error } = await db(req)
       .from('movements')
       .select('*')
       .eq('item_id', req.params.id)

@@ -125,7 +125,6 @@ serviceRoutes.forEach(({ path, service, port }) => {
     proxyReqPathResolver: (req) => req.url,
     proxyReqOptDecorator: (proxyReqOpts, req) => {
       proxyReqOpts.headers['x-tenant-id'] = req.tenantId;
-      delete proxyReqOpts.headers.authorization;
       return proxyReqOpts;
     },
     proxyErrorHandler: (err, res, next) => {

@@ -5,17 +5,18 @@ const { createClient } = require('@supabase/supabase-js');
 const app = express();
 const PORT = process.env.PORT || 3001;
 
-// Initialize Supabase
-const supabase = createClient(
-  process.env.SUPABASE_URL,
-  process.env.SUPABASE_SERVICE_KEY
-);
+// Queries run as the signed-in user, so database policies apply to them
+const supabaseFor = (authorization) =>
+  createClient(process.env.SUPABASE_URL, process.env.SUPABASE_ANON_KEY, {
+    global: { headers: { Authorization: authorization } },
+    auth: { persistSession: false, autoRefreshToken: false }
+  });
 
 const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 const INVOICE_STATUSES = ['draft', 'sent', 'paid', 'void'];
 
-const invoices = () => supabase.schema('accounting').from('invoices');
-const expenses = () => supabase.schema('accounting').from('expenses');
+const invoices = (req) => req.db.schema('accounting').from('invoices');
+const expenses = (req) => req.db.schema('accounting').from('expenses');
 
 const sendError = (res, error) => {
   console.error('Accounting error:', error);
@@ -54,10 +55,10 @@ const parseAmount = (value) => {
   return amount;
 };
 
-const nextInvoiceNumber = async (tenantId) => {
-  const { data, error } = await invoices()
+const nextInvoiceNumber = async (req) => {
+  const { data, error } = await invoices(req)
     .select('invoice_number')
-    .eq('tenant_id', tenantId)
+    .eq('tenant_id', req.tenantId)
     .order('created_at', { ascending: false })
     .limit(1);
 
@@ -76,16 +77,17 @@ app.get('/health', (req, res) => {
 // Only the gateway reaches this service, and it sets the tenant
 app.use((req, res, next) => {
   req.tenantId = req.headers['x-tenant-id'];
-  if (!UUID.test(req.tenantId || '')) {
+  if (!UUID.test(req.tenantId || '') || !req.headers.authorization) {
     return res.status(400).json({ error: 'Missing tenant' });
   }
+  req.db = supabaseFor(req.headers.authorization);
   next();
 });
 
 // Get invoices
 app.get('/invoices', async (req, res) => {
   try {
-    const { data, error } = await invoices()
+    const { data, error } = await invoices(req)
       .select('*')
       .eq('tenant_id', req.tenantId)
       .order('created_at', { ascending: false });
@@ -103,10 +105,10 @@ app.post('/invoices', async (req, res) => {
     const { customer_name, customer_email, due_date, description, invoice_number, line_items } = req.body;
     if (!customer_name) throw new Error('Customer name is required');
 
-    const { data, error } = await invoices()
+    const { data, error } = await invoices(req)
       .insert([{
         tenant_id: req.tenantId,
-        invoice_number: invoice_number || await nextInvoiceNumber(req.tenantId),
+        invoice_number: invoice_number || await nextInvoiceNumber(req),
         customer_name,
         customer_email: customer_email || null,
         due_date: due_date || null,
@@ -143,7 +145,7 @@ app.put('/invoices/:id', async (req, res) => {
       updates.paid_at = status === 'paid' ? new Date().toISOString() : null;
     }
 
-    const { data, error } = await invoices()
+    const { data, error } = await invoices(req)
       .update(updates)
       .eq('id', req.params.id)
       .eq('tenant_id', req.tenantId)
@@ -160,7 +162,7 @@ app.put('/invoices/:id', async (req, res) => {
 // Delete invoice
 app.delete('/invoices/:id', async (req, res) => {
   try {
-    const { data, error } = await invoices()
+    const { data, error } = await invoices(req)
       .delete()
       .eq('id', req.params.id)
       .eq('tenant_id', req.tenantId)
@@ -177,7 +179,7 @@ app.delete('/invoices/:id', async (req, res) => {
 // Get expenses
 app.get('/expenses', async (req, res) => {
   try {
-    const { data, error } = await expenses()
+    const { data, error } = await expenses(req)
       .select('*')
       .eq('tenant_id', req.tenantId)
       .order('expense_date', { ascending: false });
@@ -201,7 +203,7 @@ app.post('/expenses', async (req, res) => {
     };
     if (expense_date) row.expense_date = expense_date;
 
-    const { data, error } = await expenses().insert([row]).select();
+    const { data, error } = await expenses(req).insert([row]).select();
 
     if (error) throw error;
     res.status(201).json(data[0]);
@@ -221,7 +223,7 @@ app.put('/expenses/:id', async (req, res) => {
     if (description !== undefined) updates.description = description || null;
     if (expense_date) updates.expense_date = expense_date;
 
-    const { data, error } = await expenses()
+    const { data, error } = await expenses(req)
       .update(updates)
       .eq('id', req.params.id)
       .eq('tenant_id', req.tenantId)
@@ -238,7 +240,7 @@ app.put('/expenses/:id', async (req, res) => {
 // Delete expense
 app.delete('/expenses/:id', async (req, res) => {
   try {
-    const { data, error } = await expenses()
+    const { data, error } = await expenses(req)
       .delete()
       .eq('id', req.params.id)
       .eq('tenant_id', req.tenantId)
@@ -255,11 +257,11 @@ app.delete('/expenses/:id', async (req, res) => {
 // Analytics endpoint
 app.get('/analytics', async (req, res) => {
   try {
-    const { data: invoiceRows, error: invError } = await invoices()
+    const { data: invoiceRows, error: invError } = await invoices(req)
       .select('amount, status, due_date')
       .eq('tenant_id', req.tenantId);
 
-    const { data: expenseRows, error: expError } = await expenses()
+    const { data: expenseRows, error: expError } = await expenses(req)
       .select('amount')
       .eq('tenant_id', req.tenantId);
 

@@ -4,21 +4,27 @@ const { createClient } = require('@supabase/supabase-js');
 
 const app = express();
 const PORT = process.env.PORT || 3002;
-const supabase = createClient(process.env.SUPABASE_URL, process.env.SUPABASE_SERVICE_KEY);
+
+// Queries run as the signed-in user, so database policies apply to them
+const supabaseFor = (authorization) =>
+  createClient(process.env.SUPABASE_URL, process.env.SUPABASE_ANON_KEY, {
+    global: { headers: { Authorization: authorization } },
+    auth: { persistSession: false, autoRefreshToken: false }
+  });
 
 const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 const DEAL_STAGES = ['prospecting', 'qualified', 'proposal', 'won', 'lost'];
 
-const contacts = () => supabase.schema('crm').from('contacts');
-const deals = () => supabase.schema('crm').from('deals');
+const contacts = (req) => req.db.schema('crm').from('contacts');
+const deals = (req) => req.db.schema('crm').from('deals');
 
 // A deal may only point at a contact in the same company
-const assertContactInTenant = async (contactId, tenantId) => {
+const assertContactInTenant = async (req, contactId) => {
   if (!contactId) return;
-  const { data, error } = await contacts()
+  const { data, error } = await contacts(req)
     .select('id')
     .eq('id', contactId)
-    .eq('tenant_id', tenantId)
+    .eq('tenant_id', req.tenantId)
     .maybeSingle();
 
   if (error) throw error;
@@ -39,16 +45,17 @@ app.get('/health', (req, res) => res.json({ status: 'ok', service: 'crm-service'
 // Only the gateway reaches this service, and it sets the tenant
 app.use((req, res, next) => {
   req.tenantId = req.headers['x-tenant-id'];
-  if (!UUID.test(req.tenantId || '')) {
+  if (!UUID.test(req.tenantId || '') || !req.headers.authorization) {
     return res.status(400).json({ error: 'Missing tenant' });
   }
+  req.db = supabaseFor(req.headers.authorization);
   next();
 });
 
 // Contacts endpoints
 app.get('/contacts', async (req, res) => {
   try {
-    const { data, error } = await contacts()
+    const { data, error } = await contacts(req)
       .select('*')
       .eq('tenant_id', req.tenantId)
       .order('created_at', { ascending: false });
@@ -65,7 +72,7 @@ app.post('/contacts', async (req, res) => {
     const { name, email, phone, company, notes } = req.body;
     if (!name) throw new Error('Name is required');
 
-    const { data, error } = await contacts()
+    const { data, error } = await contacts(req)
       .insert([{ tenant_id: req.tenantId, name, email, phone, company, notes }])
       .select();
 
@@ -81,7 +88,7 @@ app.put('/contacts/:id', async (req, res) => {
     const { name, email, phone, company, notes } = req.body;
     if (name !== undefined && !name) throw new Error('Name is required');
 
-    const { data, error } = await contacts()
+    const { data, error } = await contacts(req)
       .update({ name, email, phone, company, notes, updated_at: new Date().toISOString() })
       .eq('id', req.params.id)
       .eq('tenant_id', req.tenantId)
@@ -97,7 +104,7 @@ app.put('/contacts/:id', async (req, res) => {
 
 app.delete('/contacts/:id', async (req, res) => {
   try {
-    const { data, error } = await contacts()
+    const { data, error } = await contacts(req)
       .delete()
       .eq('id', req.params.id)
       .eq('tenant_id', req.tenantId)
@@ -114,7 +121,7 @@ app.delete('/contacts/:id', async (req, res) => {
 // Deals endpoints
 app.get('/deals', async (req, res) => {
   try {
-    const { data, error } = await deals()
+    const { data, error } = await deals(req)
       .select('*, contact:contacts(id, name, company)')
       .eq('tenant_id', req.tenantId)
       .order('created_at', { ascending: false });
@@ -131,9 +138,9 @@ app.post('/deals', async (req, res) => {
     const { contact_id, title, value, stage } = req.body;
     if (!title) throw new Error('Title is required');
     if (stage && !DEAL_STAGES.includes(stage)) throw new Error('Unknown deal stage');
-    await assertContactInTenant(contact_id, req.tenantId);
+    await assertContactInTenant(req, contact_id);
 
-    const { data, error } = await deals()
+    const { data, error } = await deals(req)
       .insert([{
         tenant_id: req.tenantId,
         contact_id: contact_id || null,
@@ -165,11 +172,11 @@ app.put('/deals/:id', async (req, res) => {
       updates.stage = stage;
     }
     if (contact_id !== undefined) {
-      await assertContactInTenant(contact_id, req.tenantId);
+      await assertContactInTenant(req, contact_id);
       updates.contact_id = contact_id || null;
     }
 
-    const { data, error } = await deals()
+    const { data, error } = await deals(req)
       .update(updates)
       .eq('id', req.params.id)
       .eq('tenant_id', req.tenantId)
@@ -185,7 +192,7 @@ app.put('/deals/:id', async (req, res) => {
 
 app.delete('/deals/:id', async (req, res) => {
   try {
-    const { data, error } = await deals()
+    const { data, error } = await deals(req)
       .delete()
       .eq('id', req.params.id)
       .eq('tenant_id', req.tenantId)
