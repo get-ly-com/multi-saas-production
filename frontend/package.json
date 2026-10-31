@@ -3,7 +3,7 @@
   "version": "1.0.0",
   "private": true,
   "scripts": {
-    "dev": "next dev",
+    "dev": "next dev -p 3100",
     "build": "next build",
     "start": "next start",
     "lint": "next lint"
@@ -12,9 +12,7 @@
     "next": "^14.0.0",
     "react": "^18.2.0",
     "react-dom": "^18.2.0",
-    "@supabase/supabase-js": "^2.38.0",
-    "axios": "^1.4.0",
-    "zustand": "^4.4.0"
+    "@supabase/supabase-js": "^2.38.0"
   },
   "devDependencies": {
     "@types/node": "^20.0.0",

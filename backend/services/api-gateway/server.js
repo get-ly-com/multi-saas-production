@@ -4,15 +4,24 @@ const httpProxy = require('express-http-proxy');
 const cors = require('cors');
 const morgan = require('morgan');
 const helmet = require('helmet');
+const rateLimit = require('express-rate-limit');
+const { createClient } = require('@supabase/supabase-js');
 
 const app = express();
 const PORT = process.env.PORT || 3000;
 
+const allowedOrigins = (process.env.ALLOWED_ORIGINS || 'http://localhost:3100')
+  .split(',')
+  .map((origin) => origin.trim());
+
+// Railway terminates TLS in front of the gateway
+app.set('trust proxy', 1);
+
 // Middleware
 app.use(helmet());
-app.use(cors());
+app.use(cors({ origin: allowedOrigins, allowedHeaders: ['Authorization', 'Content-Type'] }));
 app.use(morgan('combined'));
-app.use(express.json());
+app.use(rateLimit({ windowMs: 60 * 1000, limit: 300, standardHeaders: true, legacyHeaders: false }));
 
 // Request logging
 app.use((req, res, next) => {
@@ -20,10 +29,75 @@ app.use((req, res, next) => {
   next();
 });
 
-// Tenant ID extraction middleware
-app.use((req, res, next) => {
-  req.tenantId = req.headers['x-tenant-id'] || 'default';
-  next();
+// Queries run as the signed-in user, so database policies apply to them
+const supabaseFor = (token) =>
+  createClient(process.env.SUPABASE_URL, process.env.SUPABASE_ANON_KEY, {
+    global: { headers: { Authorization: `Bearer ${token}` } },
+    auth: { persistSession: false, autoRefreshToken: false }
+  });
+
+const requireUser = async (req, res, next) => {
+  const [scheme, token] = (req.headers.authorization || '').split(' ');
+  if (scheme !== 'Bearer' || !token) {
+    return res.status(401).json({ error: 'Sign in required' });
+  }
+
+  try {
+    const db = supabaseFor(token);
+    const { data, error } = await db.auth.getUser(token);
+    if (error || !data.user) {
+      return res.status(401).json({ error: 'Sign in required' });
+    }
+    req.user = data.user;
+    req.db = db;
+    next();
+  } catch (error) {
+    next(error);
+  }
+};
+
+const findMembership = async (req) => {
+  const { data, error } = await req.db
+    .from('tenant_members')
+    .select('role, tenant:tenants(id, name)')
+    .eq('user_id', req.user.id)
+    .maybeSingle();
+
+  if (error) throw error;
+  return data;
+};
+
+// The tenant always comes from the membership, never from the client
+const requireTenant = async (req, res, next) => {
+  try {
+    const membership = await findMembership(req);
+    if (!membership) {
+      return res.status(403).json({ error: 'Create a company first' });
+    }
+    req.tenantId = membership.tenant.id;
+    next();
+  } catch (error) {
+    next(error);
+  }
+};
+
+// Account
+app.get('/api/me', requireUser, async (req, res, next) => {
+  try {
+    const membership = await findMembership(req);
+    res.json({
+      user: { id: req.user.id, email: req.user.email },
+      tenant: membership ? { ...membership.tenant, role: membership.role } : null
+    });
+  } catch (error) {
+    next(error);
+  }
+});
+
+app.post('/api/tenants', requireUser, express.json(), async (req, res) => {
+  const { data, error } = await req.db.rpc('create_tenant', { company_name: req.body?.name });
+  if (error) return res.status(400).json({ error: error.message });
+  res.status(201).json(data);
 });
 
 // Service routing - internal services
@@ -47,8 +121,13 @@ const serviceHost = (service) =>
 serviceRoutes.forEach(({ path, service, port }) => {
   const serviceUrl = `http://${serviceHost(service)}:${port}`;
 
-  app.use(path, httpProxy(serviceUrl, {
+  app.use(path, requireUser, requireTenant, httpProxy(serviceUrl, {
     proxyReqPathResolver: (req) => req.url,
+    proxyReqOptDecorator: (proxyReqOpts, req) => {
+      proxyReqOpts.headers['x-tenant-id'] = req.tenantId;
+      delete proxyReqOpts.headers.authorization;
+      return proxyReqOpts;
+    },
     proxyErrorHandler: (err, res, next) => {
       console.error(`[ERROR] ${service}: ${err.message}`);
       res.status(503).json({ error: `${service} unavailable` });
@@ -57,7 +136,7 @@ serviceRoutes.forEach(({ path, service, port }) => {
 });
 
 // WebSocket proxy (if needed)
-app.use('/ws', httpProxy(`http://${serviceHost('websocket-service')}:3009`, {
+app.use('/ws', requireUser, requireTenant, httpProxy(`http://${serviceHost('websocket-service')}:3009`, {
   ws: true
 }));
 
@@ -71,7 +150,7 @@ app.get('/health', (req, res) => {
 });
 
 // Service status endpoint
-app.get('/status', async (req, res) => {
+app.get('/status', requireUser, async (req, res) => {
   const statuses = {};
 
   for (const { service, port } of serviceRoutes) {
@@ -100,10 +179,7 @@ app.use((req, res) => {
 // Error handler
 app.use((err, req, res, next) => {
   console.error('[ERROR]', err);
-  res.status(500).json({
-    error: 'Internal server error',
-    message: err.message
-  });
+  res.status(500).json({ error: 'Internal server error' });
 });
 
 // Start server

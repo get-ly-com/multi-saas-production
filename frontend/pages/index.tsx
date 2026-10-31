@@ -1,55 +1,26 @@
 import Link from 'next/link';
 
-const APPS = [
-  { name: 'Accounting', path: '/saas/accounting', emoji: '📊' },
-  { name: 'CRM', path: '/saas/crm', emoji: '👥' },
-  { name: 'Inventory', path: '/saas/inventory', emoji: '📦' },
-  { name: 'Chatbot', path: '/saas/chatbot', emoji: '🤖' },
-  { name: 'Video', path: '/saas/video', emoji: '📹' },
-  { name: 'Scheduler', path: '/saas/scheduler', emoji: '📅' },
-  { name: 'HR', path: '/saas/hr', emoji: '👔' },
-  { name: 'Social Media', path: '/saas/social-media', emoji: '📱' },
-  { name: 'Analytics', path: '/saas/analytics', emoji: '📈' },
-  { name: 'Integration', path: '/saas/integration', emoji: '🔗' },
-  { name: 'WebSocket', path: '/saas/websocket', emoji: '🔌' },
-  { name: 'Worker', path: '/saas/worker', emoji: '⚙️' },
+const PRODUCTS = [
+  { name: 'Accounting', path: '/saas/accounting', about: 'Send invoices, track what is owed and record expenses.' },
+  { name: 'CRM', path: '/saas/crm', about: 'Keep your contacts in one place and move deals through a pipeline.' },
+  { name: 'Inventory', path: '/saas/inventory', about: 'Track stock, see what is running low and keep a full history.' }
 ];
 
 export default function Home() {
   return (
-    <div style={{ padding: '40px', maxWidth: '1200px', margin: '0 auto' }}>
-      <h1>🚀 Multi-SaaS Platform</h1>
-      <p>13 Microservices. One Deploy. Zero Downtime.</p>
-
-      <div style={{
-        display: 'grid',
-        gridTemplateColumns: 'repeat(auto-fit, minmax(250px, 1fr))',
-        gap: '20px',
-        marginTop: '30px'
-      }}>
-        {APPS.map((app) => (
-          <Link href={app.path} key={app.path}>
-            <a style={{
-              padding: '20px',
-              border: '1px solid #ddd',
-              borderRadius: '8px',
-              textDecoration: 'none',
-              color: 'inherit',
-              transition: 'all 0.2s'
-            }}>
-              <div style={{ fontSize: '40px', marginBottom: '10px' }}>{app.emoji}</div>
-              <h3>{app.name}</h3>
-            </a>
+    <div className="page">
+      <div className="hero">
+        <h1>Run your business from one place</h1>
+        <p>Accounting, CRM and inventory under a single login, with your company&apos;s data kept separate.</p>
+        <Link href="/login" className="button primary">Sign in or create an account</Link>
+      </div>
+      <div className="products">
+        {PRODUCTS.map(({ name, path, about }) => (
+          <Link href={path} key={path} className="card">
+            <h2>{name}</h2>
+            <p>{about}</p>
           </Link>
         ))}
-      </div>
-
-      <div style={{ marginTop: '50px', padding: '20px', backgroundColor: '#f0f0f0', borderRadius: '8px' }}>
-        <h2>Status</h2>
-        <p>✅ All 13 services deployed</p>
-        <p>✅ Database: Multi-tenant Supabase</p>
-        <p>✅ Infrastructure: Railway</p>
-        <p>✅ Frontend: Vercel</p>
       </div>
     </div>
   );
