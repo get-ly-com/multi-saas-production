@@ -15,7 +15,7 @@ app.get('/contacts', async (req, res) => {
   try {
     const tenantId = req.headers['x-tenant-id'];
     const { data, error } = await supabase
-      .from('crm.contacts')
+      .schema('crm').from('contacts')
       .select('*')
       .eq('tenant_id', tenantId)
       .order('created_at', { ascending: false });
@@ -33,7 +33,7 @@ app.post('/contacts', async (req, res) => {
     const { name, email, phone, company } = req.body;
 
     const { data, error } = await supabase
-      .from('crm.contacts')
+      .schema('crm').from('contacts')
       .insert([{ tenant_id: tenantId, name, email, phone, company }])
       .select();
 
@@ -49,7 +49,7 @@ app.get('/deals', async (req, res) => {
   try {
     const tenantId = req.headers['x-tenant-id'];
     const { data, error } = await supabase
-      .from('crm.deals')
+      .schema('crm').from('deals')
       .select('*, contact:crm.contacts(*)')
       .eq('tenant_id', tenantId)
       .order('created_at', { ascending: false });
@@ -67,7 +67,7 @@ app.post('/deals', async (req, res) => {
     const { contact_id, title, value, stage } = req.body;
 
     const { data, error } = await supabase
-      .from('crm.deals')
+      .schema('crm').from('deals')
       .insert([{ tenant_id: tenantId, contact_id, title, value, stage: stage || 'prospecting' }])
       .select();
 

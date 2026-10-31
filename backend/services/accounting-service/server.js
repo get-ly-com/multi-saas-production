@@ -23,7 +23,7 @@ app.get('/invoices', async (req, res) => {
   try {
     const tenantId = req.headers['x-tenant-id'];
     const { data, error } = await supabase
-      .from('accounting.invoices')
+      .schema('accounting').from('invoices')
       .select('*')
       .eq('tenant_id', tenantId);
 
@@ -42,7 +42,7 @@ app.post('/invoices', async (req, res) => {
     const { invoice_number, amount, status, description } = req.body;
 
     const { data, error } = await supabase
-      .from('accounting.invoices')
+      .schema('accounting').from('invoices')
       .insert([{
         tenant_id: tenantId,
         invoice_number,
@@ -68,7 +68,7 @@ app.put('/invoices/:id', async (req, res) => {
     const updates = req.body;
 
     const { data, error } = await supabase
-      .from('accounting.invoices')
+      .schema('accounting').from('invoices')
       .update(updates)
       .eq('id', id)
       .eq('tenant_id', tenantId)
@@ -89,7 +89,7 @@ app.delete('/invoices/:id', async (req, res) => {
     const { id } = req.params;
 
     const { error } = await supabase
-      .from('accounting.invoices')
+      .schema('accounting').from('invoices')
       .delete()
       .eq('id', id)
       .eq('tenant_id', tenantId);
@@ -107,7 +107,7 @@ app.get('/expenses', async (req, res) => {
   try {
     const tenantId = req.headers['x-tenant-id'];
     const { data, error } = await supabase
-      .from('accounting.expenses')
+      .schema('accounting').from('expenses')
       .select('*')
       .eq('tenant_id', tenantId)
       .order('created_at', { ascending: false });
@@ -127,7 +127,7 @@ app.post('/expenses', async (req, res) => {
     const { amount, category, description } = req.body;
 
     const { data, error } = await supabase
-      .from('accounting.expenses')
+      .schema('accounting').from('expenses')
       .insert([{
         tenant_id: tenantId,
         amount,
@@ -150,12 +150,12 @@ app.get('/analytics', async (req, res) => {
     const tenantId = req.headers['x-tenant-id'];
 
     const { data: invoices, error: invError } = await supabase
-      .from('accounting.invoices')
+      .schema('accounting').from('invoices')
       .select('amount, status')
       .eq('tenant_id', tenantId);
 
     const { data: expenses, error: expError } = await supabase
-      .from('accounting.expenses')
+      .schema('accounting').from('expenses')
       .select('amount, category')
       .eq('tenant_id', tenantId);
 

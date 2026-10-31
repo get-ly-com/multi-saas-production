@@ -87,12 +87,13 @@ ALTER TABLE crm.contacts ENABLE ROW LEVEL SECURITY;
 ALTER TABLE crm.deals ENABLE ROW LEVEL SECURITY;
 ALTER TABLE inventory.items ENABLE ROW LEVEL SECURITY;
 
--- RLS Policies (simplified)
-CREATE POLICY "tenants_access" ON public.tenants FOR SELECT USING (true);
-CREATE POLICY "invoices_access" ON accounting.invoices FOR ALL USING (true);
-CREATE POLICY "contacts_access" ON crm.contacts FOR ALL USING (true);
-CREATE POLICY "deals_access" ON crm.deals FOR ALL USING (true);
-CREATE POLICY "items_access" ON inventory.items FOR ALL USING (true);
+-- RLS has no policies on purpose: anon and authenticated are denied, only service_role passes.
+GRANT USAGE ON SCHEMA accounting, crm, inventory TO service_role;
+GRANT ALL ON ALL TABLES IN SCHEMA accounting, crm, inventory TO service_role;
+
+-- PostgREST only serves schemas listed here.
+ALTER ROLE authenticator SET pgrst.db_schemas = 'public, graphql_public, accounting, crm, inventory';
+NOTIFY pgrst, 'reload config';
 
 -- Create Tenants (one per app)
 INSERT INTO public.tenants (name, app_name) VALUES
