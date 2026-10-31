@@ -14,14 +14,19 @@ const supabaseFor = (authorization) =>
 
 const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 const INVOICE_STATUSES = ['draft', 'sent', 'paid', 'void'];
+const ACCOUNT_TYPES = ['asset', 'liability', 'equity', 'revenue', 'expense'];
+const DATE = /^\d{4}-\d{2}-\d{2}$/;
 
 const invoices = (req) => req.db.schema('accounting').from('invoices');
 const expenses = (req) => req.db.schema('accounting').from('expenses');
+const accounts = (req) => req.db.schema('accounting').from('accounts');
+const entries = (req) => req.db.schema('accounting').from('journal_entries');
+const ledger = (req) => req.db.schema('accounting');
 
 const sendError = (res, error) => {
   console.error('Accounting error:', error);
   if (error.code === '23505') {
-    return res.status(409).json({ error: 'That invoice number is already used' });
+    return res.status(409).json({ error: 'That number is already used' });
   }
   res.status(400).json({ error: error.message });
 };
@@ -180,7 +185,7 @@ app.delete('/invoices/:id', async (req, res) => {
 app.get('/expenses', async (req, res) => {
   try {
     const { data, error } = await expenses(req)
-      .select('*')
+      .select('*, account:accounts(id, code, name)')
       .eq('tenant_id', req.tenantId)
       .order('expense_date', { ascending: false });
 
@@ -194,12 +199,13 @@ app.get('/expenses', async (req, res) => {
 // Create expense
 app.post('/expenses', async (req, res) => {
   try {
-    const { amount, category, description, expense_date } = req.body;
+    const { amount, category, description, expense_date, account_id } = req.body;
     const row = {
       tenant_id: req.tenantId,
       amount: parseAmount(amount),
       category: category || null,
-      description: description || null
+      description: description || null,
+      account_id: account_id || null
     };
     if (expense_date) row.expense_date = expense_date;
 
@@ -215,13 +221,14 @@ app.post('/expenses', async (req, res) => {
 // Update expense
 app.put('/expenses/:id', async (req, res) => {
   try {
-    const { amount, category, description, expense_date } = req.body;
+    const { amount, category, description, expense_date, account_id } = req.body;
     const updates = {};
 
     if (amount !== undefined) updates.amount = parseAmount(amount);
     if (category !== undefined) updates.category = category || null;
     if (description !== undefined) updates.description = description || null;
     if (expense_date) updates.expense_date = expense_date;
+    if (account_id) updates.account_id = account_id;
 
     const { data, error } = await expenses(req)
       .update(updates)
@@ -257,32 +264,151 @@ app.delete('/expenses/:id', async (req, res) => {
 // Analytics endpoint
 app.get('/analytics', async (req, res) => {
   try {
-    const { data: invoiceRows, error: invError } = await invoices(req)
-      .select('amount, status, due_date')
-      .eq('tenant_id', req.tenantId);
+    const { data, error } = await ledger(req).rpc('summary', { p_tenant: req.tenantId });
+    if (error) throw error;
+    res.json(data);
+  } catch (error) {
+    sendError(res, error);
+  }
+});
 
-    const { data: expenseRows, error: expError } = await expenses(req)
-      .select('amount')
-      .eq('tenant_id', req.tenantId);
+// Chart of accounts
+app.get('/accounts', async (req, res) => {
+  try {
+    const { data, error } = await accounts(req)
+      .select('*')
+      .eq('tenant_id', req.tenantId)
+      .order('code');
 
-    if (invError || expError) throw invError || expError;
+    if (error) throw error;
+    res.json(data || []);
+  } catch (error) {
+    sendError(res, error);
+  }
+});
 
-    const total = (rows) => rows.reduce((sum, row) => sum + toCents(row.amount), 0) / 100;
-    const today = new Date().toISOString().slice(0, 10);
-    const sent = invoiceRows.filter((i) => i.status === 'sent');
+app.post('/accounts', async (req, res) => {
+  try {
+    const { code, name, type } = req.body;
+    if (!code || !name) throw new Error('Code and name are required');
+    if (!ACCOUNT_TYPES.includes(type)) throw new Error('Choose an account type');
 
-    const revenue = total(invoiceRows.filter((i) => i.status === 'paid'));
-    const totalExpenses = total(expenseRows);
+    const { data, error } = await accounts(req)
+      .insert([{ tenant_id: req.tenantId, code, name, type }])
+      .select();
 
-    res.json({
-      revenue,
-      outstanding: total(sent),
-      overdue: total(sent.filter((i) => i.due_date && i.due_date < today)),
-      totalExpenses,
-      netProfit: Math.round((revenue - totalExpenses) * 100) / 100,
-      invoiceCount: invoiceRows.length,
-      expenseCount: expenseRows.length
+    if (error) throw error;
+    res.status(201).json(data[0]);
+  } catch (error) {
+    sendError(res, error);
+  }
+});
+
+app.put('/accounts/:id', async (req, res) => {
+  try {
+    const { name, is_active } = req.body;
+    const updates = {};
+
+    if (name !== undefined) {
+      if (!name) throw new Error('Name is required');
+      updates.name = name;
+    }
+    if (is_active !== undefined) updates.is_active = Boolean(is_active);
+
+    const { data, error } = await accounts(req)
+      .update(updates)
+      .eq('id', req.params.id)
+      .eq('tenant_id', req.tenantId)
+      .select();
+
+    if (error) throw error;
+    if (!data.length) return res.status(404).json({ error: 'Account not found' });
+    res.json(data[0]);
+  } catch (error) {
+    sendError(res, error);
+  }
+});
+
+// Journal entries
+app.get('/journal', async (req, res) => {
+  try {
+    const { data, error } = await entries(req)
+      .select('*, lines:journal_lines(id, debit, credit, account:accounts(id, code, name))')
+      .eq('tenant_id', req.tenantId)
+      .order('entry_number', { ascending: false })
+      .limit(200);
+
+    if (error) throw error;
+
+    const { data: reversals, error: reversalError } = await entries(req)
+      .select('reversal_of')
+      .eq('tenant_id', req.tenantId)
+      .in('reversal_of', data.map((entry) => entry.id));
+
+    if (reversalError) throw reversalError;
+
+    const reversed = new Set(reversals.map((entry) => entry.reversal_of));
+    res.json(data.map((entry) => ({ ...entry, reversed: reversed.has(entry.id) })));
+  } catch (error) {
+    sendError(res, error);
+  }
+});
+
+app.post('/journal', async (req, res) => {
+  try {
+    const { entry_date, memo, lines } = req.body;
+    if (!DATE.test(entry_date || '')) throw new Error('Choose a date');
+
+    const { data, error } = await ledger(req).rpc('create_journal_entry', {
+      p_tenant: req.tenantId,
+      p_date: entry_date,
+      p_memo: memo,
+      p_lines: lines
     });
+
+    if (error) throw error;
+    res.status(201).json({ id: data });
+  } catch (error) {
+    sendError(res, error);
+  }
+});
+
+app.post('/journal/:id/reverse', async (req, res) => {
+  try {
+    const { data, error } = await ledger(req).rpc('reverse_journal_entry', {
+      p_tenant: req.tenantId,
+      p_entry: req.params.id
+    });
+
+    if (error) throw error;
+    res.status(201).json({ id: data });
+  } catch (error) {
+    sendError(res, error);
+  }
+});
+
+// Reports
+app.get('/ledger/:accountId', async (req, res) => {
+  try {
+    const { data, error } = await ledger(req).rpc('account_ledger', {
+      p_tenant: req.tenantId,
+      p_account: req.params.accountId
+    });
+
+    if (error) throw error;
+    res.json(data || []);
+  } catch (error) {
+    sendError(res, error);
+  }
+});
+
+app.get('/trial-balance', async (req, res) => {
+  try {
+    const asOf = DATE.test(req.query.as_of || '') ? req.query.as_of : new Date().toISOString().slice(0, 10);
+    const { data, error } = await ledger(req).rpc('trial_balance', { p_tenant: req.tenantId, p_as_of: asOf });
+
+    if (error) throw error;
+    res.json({ as_of: asOf, rows: data || [] });
   } catch (error) {
     sendError(res, error);
   }

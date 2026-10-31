@@ -48,7 +48,7 @@ export default function AppShell({ children }: { children: ReactNode }) {
         <Link href="/" className="brand">Get-ly</Link>
         <nav className="nav">
           {PRODUCTS.map(({ name, path }) => (
-            <Link key={path} href={path} className={router.pathname === path ? 'active' : ''}>
+            <Link key={path} href={path} className={router.pathname.startsWith(path) ? 'active' : ''}>
               {name}
             </Link>
           ))}

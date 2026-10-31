@@ -1,11 +1,12 @@
 import { FormEvent, useEffect, useState } from 'react';
+import AccountingNav from '@/components/AccountingNav';
 import AppShell from '@/components/AppShell';
 import Modal from '@/components/Modal';
 import { api, formatDate, money } from '@/lib/api';
 
 const blankLine = { description: '', quantity: '1', unit_price: '' };
 const blankInvoice = { customer_name: '', customer_email: '', due_date: '', description: '', line_items: [blankLine] };
-const blankExpense = { amount: '', category: '', description: '', expense_date: '' };
+const blankExpense = { amount: '', category: '', description: '', expense_date: '', account_id: '' };
 
 const lineTotal = (lines: any[]) =>
   lines.reduce((sum, line) => sum + Number(line.quantity || 0) * Number(line.unit_price || 0), 0);
@@ -19,6 +20,7 @@ function AccountingApp() {
   const [invoices, setInvoices] = useState<any[]>([]);
   const [expenses, setExpenses] = useState<any[]>([]);
   const [summary, setSummary] = useState<any>(null);
+  const [accounts, setAccounts] = useState<any[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState('');
   const [invoiceForm, setInvoiceForm] = useState<any>(null);
@@ -26,14 +28,16 @@ function AccountingApp() {
 
   const load = async () => {
     try {
-      const [invoiceRows, expenseRows, analytics] = await Promise.all([
+      const [invoiceRows, expenseRows, analytics, accountRows] = await Promise.all([
         api.get('/api/accounting/invoices'),
         api.get('/api/accounting/expenses'),
-        api.get('/api/accounting/analytics')
+        api.get('/api/accounting/analytics'),
+        api.get('/api/accounting/accounts')
       ]);
       setInvoices(invoiceRows);
       setExpenses(expenseRows);
       setSummary(analytics);
+      setAccounts(accountRows.filter((account: any) => account.type === 'expense' && account.is_active));
       setError('');
     } catch (err: any) {
       setError(err.message);
@@ -61,10 +65,17 @@ function AccountingApp() {
     }
   };
 
+  const voidInvoice = (invoice: any) => {
+    if (window.confirm(`Void ${invoice.invoice_number}? Its ledger entries will be reversed.`)) {
+      run(() => api.put(`/api/accounting/invoices/${invoice.id}`, { status: 'void' }));
+    }
+  };
+
   return (
     <div className="stack">
+      <AccountingNav />
       <div className="page-head">
-        <h1>Accounting</h1>
+        <h1>Invoices and expenses</h1>
         {tab === 'invoices'
           ? <button className="primary" onClick={() => setInvoiceForm(blankInvoice)}>New invoice</button>
           : <button className="primary" onClick={() => setExpenseForm(blankExpense)}>New expense</button>}
@@ -111,7 +122,12 @@ function AccountingApp() {
                         <button onClick={() => run(() => api.put(`/api/accounting/invoices/${invoice.id}`, { status: 'paid' }))}>Mark paid</button>
                       )}
                       <button onClick={() => setInvoiceForm({ ...invoice, due_date: invoice.due_date || '', customer_email: invoice.customer_email || '', description: invoice.description || '' })}>Edit</button>
-                      <button className="danger" onClick={() => remove(`/api/accounting/invoices/${invoice.id}`, 'invoice')}>Delete</button>
+                      {invoice.status === 'draft' && (
+                        <button className="danger" onClick={() => remove(`/api/accounting/invoices/${invoice.id}`, 'invoice')}>Delete</button>
+                      )}
+                      {(invoice.status === 'sent' || invoice.status === 'paid') && (
+                        <button className="danger" onClick={() => voidInvoice(invoice)}>Void</button>
+                      )}
                     </div>
                   </td>
                 </tr>
@@ -121,13 +137,14 @@ function AccountingApp() {
         ) : (
           <table>
             <thead>
-              <tr><th>Date</th><th>Category</th><th>Description</th><th className="num">Amount</th><th /></tr>
+              <tr><th>Date</th><th>Account</th><th>Category</th><th>Description</th><th className="num">Amount</th><th /></tr>
             </thead>
             <tbody>
-              {expenses.length === 0 && <tr><td colSpan={5} className="empty">No expenses yet</td></tr>}
+              {expenses.length === 0 && <tr><td colSpan={6} className="empty">No expenses yet</td></tr>}
               {expenses.map((expense) => (
                 <tr key={expense.id}>
                   <td>{formatDate(expense.expense_date)}</td>
+                  <td>{expense.account ? `${expense.account.code} ${expense.account.name}` : '—'}</td>
                   <td>{expense.category || '—'}</td>
                   <td className="wrap">{expense.description || '—'}</td>
                   <td className="num">{money(expense.amount)}</td>
@@ -145,7 +162,7 @@ function AccountingApp() {
       </div>
 
       {invoiceForm && <InvoiceForm initial={invoiceForm} onClose={() => setInvoiceForm(null)} onSaved={load} />}
-      {expenseForm && <ExpenseForm initial={expenseForm} onClose={() => setExpenseForm(null)} onSaved={load} />}
+      {expenseForm && <ExpenseForm initial={expenseForm} accounts={accounts} onClose={() => setExpenseForm(null)} onSaved={load} />}
     </div>
   );
 }
@@ -212,15 +229,15 @@ function InvoiceForm({ initial, onClose, onSaved }: { initial: any; onClose: () 
   );
 }
 
-function ExpenseForm({ initial, onClose, onSaved }: { initial: any; onClose: () => void; onSaved: () => void }) {
+function ExpenseForm({ initial, accounts, onClose, onSaved }: { initial: any; accounts: any[]; onClose: () => void; onSaved: () => void }) {
   const [form, setForm] = useState<any>(initial);
   const [error, setError] = useState('');
   const set = (field: string, value: string) => setForm({ ...form, [field]: value });
 
   const submit = async (event: FormEvent) => {
     event.preventDefault();
-    const { amount, category, description, expense_date } = form;
-    const body = { amount, category, description, expense_date };
+    const { amount, category, description, expense_date, account_id } = form;
+    const body = { amount, category, description, expense_date, account_id };
     try {
       if (form.id) await api.put(`/api/accounting/expenses/${form.id}`, body);
       else await api.post('/api/accounting/expenses', body);
@@ -237,6 +254,12 @@ function ExpenseForm({ initial, onClose, onSaved }: { initial: any; onClose: () 
         <div className="form-grid">
           <label>Amount<input required type="number" min="0" step="0.01" value={form.amount} onChange={(e) => set('amount', e.target.value)} /></label>
           <label>Date<input type="date" value={form.expense_date} onChange={(e) => set('expense_date', e.target.value)} /></label>
+          <label>Account
+            <select value={form.account_id || ''} onChange={(e) => set('account_id', e.target.value)}>
+              <option value="">General Expenses</option>
+              {accounts.map((account) => <option key={account.id} value={account.id}>{account.code} {account.name}</option>)}
+            </select>
+          </label>
           <label>Category<input value={form.category} onChange={(e) => set('category', e.target.value)} /></label>
         </div>
         <label style={{ marginTop: 12 }}>Description<textarea rows={2} value={form.description} onChange={(e) => set('description', e.target.value)} /></label>
