@@ -108,7 +108,7 @@ export default function QuoteForm({ initial, onClose, onSaved }: { initial?: any
                   {items.map((item) => <option key={item.id} value={item.id}>{item.sku} {item.name}</option>)}
                 </select>
                 <input required aria-label="Description" placeholder="Description" value={line.description} onChange={(e) => setLine(index, { description: e.target.value })} />
-                <input required aria-label="Quantity" type="number" min="0.01" step={line.item_id ? '1' : '0.01'} value={line.quantity} onChange={(e) => setLine(index, { quantity: e.target.value })} />
+                <input required aria-label="Quantity" type="number" min={line.item_id ? '1' : '0.01'} step={line.item_id ? '1' : '0.01'} value={line.quantity} onChange={(e) => setLine(index, { quantity: e.target.value })} />
                 <input required aria-label="Unit price" placeholder="Price" type="number" min="0" step="0.01" value={line.unit_price} onChange={(e) => setLine(index, { unit_price: e.target.value })} />
                 <input aria-label="Discount percent" placeholder="%" type="number" min="0" max="100" step="0.01" value={line.discount} onChange={(e) => setLine(index, { discount: e.target.value })} />
                 <select aria-label="Tax" value={line.tax_rate_id || ''} onChange={(e) => setLine(index, { tax_rate_id: e.target.value })}>
