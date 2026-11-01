@@ -1,12 +1,17 @@
+import Link from 'next/link';
 import { FormEvent, useEffect, useState } from 'react';
 import AccountingNav from '@/components/AccountingNav';
 import AppShell from '@/components/AppShell';
 import Modal from '@/components/Modal';
-import { api, formatDate, money } from '@/lib/api';
+import PaymentForm from '@/components/PaymentForm';
+import { api, formatDate, money, today } from '@/lib/api';
 
 const blankLine = { description: '', quantity: '1', unit_price: '' };
-const blankInvoice = { customer_name: '', customer_email: '', due_date: '', description: '', line_items: [blankLine] };
+const blankInvoice = { customer_id: '', invoice_date: '', due_date: '', description: '', line_items: [blankLine] };
 const blankExpense = { amount: '', category: '', description: '', expense_date: '', account_id: '' };
+
+const invoiceBalance = (invoice: any) =>
+  Number(invoice.amount) - Number(invoice.amount_paid) - Number(invoice.amount_credited);
 
 const lineTotal = (lines: any[]) =>
   lines.reduce((sum, line) => sum + Number(line.quantity || 0) * Number(line.unit_price || 0), 0);
@@ -21,22 +26,27 @@ function AccountingApp() {
   const [expenses, setExpenses] = useState<any[]>([]);
   const [summary, setSummary] = useState<any>(null);
   const [accounts, setAccounts] = useState<any[]>([]);
+  const [customers, setCustomers] = useState<any[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState('');
   const [invoiceForm, setInvoiceForm] = useState<any>(null);
   const [expenseForm, setExpenseForm] = useState<any>(null);
+  const [paying, setPaying] = useState<any>(null);
+  const [crediting, setCrediting] = useState<any>(null);
 
   const load = async () => {
     try {
-      const [invoiceRows, expenseRows, analytics, accountRows] = await Promise.all([
+      const [invoiceRows, expenseRows, analytics, accountRows, customerRows] = await Promise.all([
         api.get('/api/accounting/invoices'),
         api.get('/api/accounting/expenses'),
         api.get('/api/accounting/analytics'),
-        api.get('/api/accounting/accounts')
+        api.get('/api/accounting/accounts'),
+        api.get('/api/accounting/customers')
       ]);
       setInvoices(invoiceRows);
       setExpenses(expenseRows);
       setSummary(analytics);
+      setCustomers(customerRows);
       setAccounts(accountRows.filter((account: any) => account.type === 'expense' && account.is_active));
       setError('');
     } catch (err: any) {
@@ -77,7 +87,7 @@ function AccountingApp() {
       <div className="page-head">
         <h1>Invoices and expenses</h1>
         {tab === 'invoices'
-          ? <button className="primary" onClick={() => setInvoiceForm(blankInvoice)}>New invoice</button>
+          ? <button className="primary" onClick={() => setInvoiceForm({ ...blankInvoice, invoice_date: today() })}>New invoice</button>
           : <button className="primary" onClick={() => setExpenseForm(blankExpense)}>New expense</button>}
       </div>
 
@@ -85,9 +95,10 @@ function AccountingApp() {
 
       {summary && (
         <div className="stats">
-          <Stat label="Revenue (paid)" value={money(summary.revenue)} />
-          <Stat label="Outstanding" value={money(summary.outstanding)} />
+          <Stat label="Revenue" value={money(summary.revenue)} />
+          <Stat label="Customers owe you" value={money(summary.outstanding)} />
           <Stat label="Overdue" value={money(summary.overdue)} />
+          <Stat label="You owe vendors" value={money(summary.payables)} />
           <Stat label="Expenses" value={money(summary.totalExpenses)} />
           <Stat label="Net profit" value={money(summary.netProfit)} />
         </div>
@@ -102,30 +113,36 @@ function AccountingApp() {
         {loading ? <p className="empty">Loading…</p> : tab === 'invoices' ? (
           <table>
             <thead>
-              <tr><th>Invoice</th><th>Customer</th><th>Due</th><th>Status</th><th className="num">Amount</th><th /></tr>
+              <tr><th>Invoice</th><th>Customer</th><th>Due</th><th>Status</th><th className="num">Amount</th><th className="num">Balance</th><th /></tr>
             </thead>
             <tbody>
-              {invoices.length === 0 && <tr><td colSpan={6} className="empty">No invoices yet</td></tr>}
+              {invoices.length === 0 && <tr><td colSpan={7} className="empty">No invoices yet</td></tr>}
               {invoices.map((invoice) => (
                 <tr key={invoice.id}>
-                  <td>{invoice.invoice_number}</td>
+                  <td><Link href={`/saas/accounting/invoice/${invoice.id}`}>{invoice.invoice_number}</Link></td>
                   <td className="wrap">{invoice.customer_name}</td>
                   <td>{formatDate(invoice.due_date)}</td>
                   <td><span className={`badge ${invoice.status}`}>{invoice.status}</span></td>
                   <td className="num">{money(invoice.amount)}</td>
+                  <td className="num">{invoice.status === 'void' || invoice.status === 'draft' ? '—' : money(invoiceBalance(invoice))}</td>
                   <td>
                     <div className="row-actions">
                       {invoice.status === 'draft' && (
                         <button onClick={() => run(() => api.put(`/api/accounting/invoices/${invoice.id}`, { status: 'sent' }))}>Mark sent</button>
                       )}
-                      {invoice.status === 'sent' && (
-                        <button onClick={() => run(() => api.put(`/api/accounting/invoices/${invoice.id}`, { status: 'paid' }))}>Mark paid</button>
+                      {(invoice.status === 'sent' || invoice.status === 'partial') && (
+                        <>
+                          <button onClick={() => setPaying(invoice)}>Record payment</button>
+                          <button onClick={() => setCrediting(invoice)}>Credit note</button>
+                        </>
                       )}
-                      <button onClick={() => setInvoiceForm({ ...invoice, due_date: invoice.due_date || '', customer_email: invoice.customer_email || '', description: invoice.description || '' })}>Edit</button>
+                      {invoice.status !== 'void' && (
+                        <button onClick={() => setInvoiceForm({ ...invoice, due_date: invoice.due_date || '', description: invoice.description || '' })}>Edit</button>
+                      )}
                       {invoice.status === 'draft' && (
                         <button className="danger" onClick={() => remove(`/api/accounting/invoices/${invoice.id}`, 'invoice')}>Delete</button>
                       )}
-                      {(invoice.status === 'sent' || invoice.status === 'paid') && (
+                      {invoice.status === 'sent' && (
                         <button className="danger" onClick={() => voidInvoice(invoice)}>Void</button>
                       )}
                     </div>
@@ -161,7 +178,17 @@ function AccountingApp() {
         )}
       </div>
 
-      {invoiceForm && <InvoiceForm initial={invoiceForm} onClose={() => setInvoiceForm(null)} onSaved={load} />}
+      {invoiceForm && <InvoiceForm initial={invoiceForm} customers={customers} onClose={() => setInvoiceForm(null)} onSaved={load} />}
+      {paying && (
+        <PaymentForm
+          target={{ invoice_id: paying.id }}
+          label={paying.invoice_number}
+          balance={invoiceBalance(paying)}
+          onClose={() => setPaying(null)}
+          onSaved={load}
+        />
+      )}
+      {crediting && <CreditForm invoice={crediting} onClose={() => setCrediting(null)} onSaved={load} />}
       {expenseForm && <ExpenseForm initial={expenseForm} accounts={accounts} onClose={() => setExpenseForm(null)} onSaved={load} />}
     </div>
   );
@@ -176,7 +203,43 @@ function Stat({ label, value }: { label: string; value: string }) {
   );
 }
 
-function InvoiceForm({ initial, onClose, onSaved }: { initial: any; onClose: () => void; onSaved: () => void }) {
+function CreditForm({ invoice, onClose, onSaved }: { invoice: any; onClose: () => void; onSaved: () => void }) {
+  const balance = invoiceBalance(invoice);
+  const [form, setForm] = useState({ amount: balance.toFixed(2), credit_date: today(), reason: '' });
+  const [error, setError] = useState('');
+  const set = (field: string, value: string) => setForm({ ...form, [field]: value });
+
+  const submit = async (event: FormEvent) => {
+    event.preventDefault();
+    try {
+      await api.post('/api/accounting/credit-notes', { invoice_id: invoice.id, ...form });
+      await onSaved();
+      onClose();
+    } catch (err: any) {
+      setError(err.message);
+    }
+  };
+
+  return (
+    <Modal title={`Credit note for ${invoice.invoice_number}`}>
+      <form onSubmit={submit}>
+        <p className="muted">Balance {money(balance)}</p>
+        <div className="form-grid">
+          <label>Amount<input required type="number" min="0.01" step="0.01" max={balance} value={form.amount} onChange={(e) => set('amount', e.target.value)} /></label>
+          <label>Date<input required type="date" value={form.credit_date} onChange={(e) => set('credit_date', e.target.value)} /></label>
+        </div>
+        <label style={{ marginTop: 12 }}>Reason<textarea required rows={2} value={form.reason} onChange={(e) => set('reason', e.target.value)} /></label>
+        {error && <p className="error">{error}</p>}
+        <div className="form-actions">
+          <button className="primary">Issue credit note</button>
+          <button type="button" onClick={onClose}>Cancel</button>
+        </div>
+      </form>
+    </Modal>
+  );
+}
+
+function InvoiceForm({ initial, customers, onClose, onSaved }: { initial: any; customers: any[]; onClose: () => void; onSaved: () => void }) {
   const [form, setForm] = useState<any>(initial);
   const [error, setError] = useState('');
   const set = (field: string, value: unknown) => setForm({ ...form, [field]: value });
@@ -186,8 +249,8 @@ function InvoiceForm({ initial, onClose, onSaved }: { initial: any; onClose: () 
 
   const submit = async (event: FormEvent) => {
     event.preventDefault();
-    const { customer_name, customer_email, due_date, description, line_items } = form;
-    const body = { customer_name, customer_email, due_date, description, line_items };
+    const { customer_id, invoice_date, due_date, description, line_items } = form;
+    const body = { customer_id, invoice_date, due_date, description, line_items };
     try {
       if (form.id) await api.put(`/api/accounting/invoices/${form.id}`, body);
       else await api.post('/api/accounting/invoices', body);
@@ -202,10 +265,18 @@ function InvoiceForm({ initial, onClose, onSaved }: { initial: any; onClose: () 
     <Modal title={form.id ? `Edit ${form.invoice_number}` : 'New invoice'}>
       <form onSubmit={submit}>
         <div className="form-grid">
-          <label>Customer<input required value={form.customer_name} onChange={(e) => set('customer_name', e.target.value)} /></label>
-          <label>Customer email<input type="email" value={form.customer_email} onChange={(e) => set('customer_email', e.target.value)} /></label>
+          <label>Customer
+            <select required disabled={form.id && form.status !== 'draft'} value={form.customer_id} onChange={(e) => set('customer_id', e.target.value)}>
+              <option value="">Choose a customer</option>
+              {customers.filter((customer) => customer.is_active || customer.id === form.customer_id).map((customer) => (
+                <option key={customer.id} value={customer.id}>{customer.name}</option>
+              ))}
+            </select>
+          </label>
+          <label>Invoice date<input required type="date" value={form.invoice_date} onChange={(e) => set('invoice_date', e.target.value)} /></label>
           <label>Due date<input type="date" value={form.due_date} onChange={(e) => set('due_date', e.target.value)} /></label>
         </div>
+        {customers.length === 0 && <p className="muted"><Link href="/saas/accounting/customers">Add your first customer</Link> to create an invoice.</p>}
         <div className="lines">
           {form.line_items.map((line: any, index: number) => (
             <div className="line" key={index}>

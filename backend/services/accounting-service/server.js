@@ -13,7 +13,9 @@ const supabaseFor = (authorization) =>
   });
 
 const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
-const INVOICE_STATUSES = ['draft', 'sent', 'paid', 'void'];
+// Partial and paid come from payments, which the database works out
+const INVOICE_STATUSES = ['sent', 'void'];
+const BILL_STATUSES = ['open', 'void'];
 const ACCOUNT_TYPES = ['asset', 'liability', 'equity', 'revenue', 'expense'];
 const DATE = /^\d{4}-\d{2}-\d{2}$/;
 
@@ -21,6 +23,7 @@ const invoices = (req) => req.db.schema('accounting').from('invoices');
 const expenses = (req) => req.db.schema('accounting').from('expenses');
 const accounts = (req) => req.db.schema('accounting').from('accounts');
 const entries = (req) => req.db.schema('accounting').from('journal_entries');
+const bills = (req) => req.db.schema('accounting').from('bills');
 const ledger = (req) => req.db.schema('accounting');
 
 const sendError = (res, error) => {
@@ -58,6 +61,19 @@ const parseAmount = (value) => {
     throw new Error('Enter a valid amount');
   }
   return amount;
+};
+
+const parseBillLines = (lineItems) => {
+  if (!Array.isArray(lineItems) || lineItems.length === 0) {
+    throw new Error('Add at least one line');
+  }
+
+  return lineItems.map(({ description, account_id, amount }) => {
+    if (!UUID.test(account_id || '') || !(Number(amount) > 0)) {
+      throw new Error('Each line needs an account and an amount');
+    }
+    return { description: description || null, account_id, amount: Number(amount) };
+  });
 };
 
 const nextInvoiceNumber = async (req) => {
@@ -104,24 +120,40 @@ app.get('/invoices', async (req, res) => {
   }
 });
 
+// Get one invoice with what has been paid and credited
+app.get('/invoices/:id', async (req, res) => {
+  try {
+    const { data, error } = await invoices(req)
+      .select('*, payments(*, account:accounts(code, name)), credit_notes(*)')
+      .eq('id', req.params.id)
+      .eq('tenant_id', req.tenantId)
+      .maybeSingle();
+
+    if (error) throw error;
+    if (!data) return res.status(404).json({ error: 'Invoice not found' });
+    res.json(data);
+  } catch (error) {
+    sendError(res, error);
+  }
+});
+
 // Create invoice
 app.post('/invoices', async (req, res) => {
   try {
-    const { customer_name, customer_email, due_date, description, invoice_number, line_items } = req.body;
-    if (!customer_name) throw new Error('Customer name is required');
+    const { customer_id, invoice_date, due_date, description, invoice_number, line_items } = req.body;
+    if (!UUID.test(customer_id || '')) throw new Error('Choose a customer');
 
-    const { data, error } = await invoices(req)
-      .insert([{
-        tenant_id: req.tenantId,
-        invoice_number: invoice_number || await nextInvoiceNumber(req),
-        customer_name,
-        customer_email: customer_email || null,
-        due_date: due_date || null,
-        description: description || null,
-        status: 'draft',
-        ...parseLineItems(line_items)
-      }])
-      .select();
+    const row = {
+      tenant_id: req.tenantId,
+      invoice_number: invoice_number || await nextInvoiceNumber(req),
+      customer_id,
+      due_date: due_date || null,
+      description: description || null,
+      ...parseLineItems(line_items)
+    };
+    if (invoice_date) row.invoice_date = invoice_date;
+
+    const { data, error } = await invoices(req).insert([row]).select();
 
     if (error) throw error;
     res.status(201).json(data[0]);
@@ -133,21 +165,20 @@ app.post('/invoices', async (req, res) => {
 // Update invoice
 app.put('/invoices/:id', async (req, res) => {
   try {
-    const { customer_name, customer_email, due_date, description, status, line_items } = req.body;
+    const { customer_id, invoice_date, due_date, description, status, line_items } = req.body;
     const updates = { updated_at: new Date().toISOString() };
 
-    if (customer_name !== undefined) {
-      if (!customer_name) throw new Error('Customer name is required');
-      updates.customer_name = customer_name;
+    if (customer_id !== undefined) {
+      if (!UUID.test(customer_id || '')) throw new Error('Choose a customer');
+      updates.customer_id = customer_id;
     }
-    if (customer_email !== undefined) updates.customer_email = customer_email || null;
+    if (invoice_date) updates.invoice_date = invoice_date;
     if (due_date !== undefined) updates.due_date = due_date || null;
     if (description !== undefined) updates.description = description || null;
     if (line_items !== undefined) Object.assign(updates, parseLineItems(line_items));
     if (status !== undefined) {
       if (!INVOICE_STATUSES.includes(status)) throw new Error('Unknown invoice status');
       updates.status = status;
-      updates.paid_at = status === 'paid' ? new Date().toISOString() : null;
     }
 
     const { data, error } = await invoices(req)
@@ -259,6 +290,231 @@ app.delete('/expenses/:id', async (req, res) => {
   } catch (error) {
     sendError(res, error);
   }
+});
+
+// Bills
+app.get('/bills', async (req, res) => {
+  try {
+    const { data, error } = await bills(req)
+      .select('*, vendor:vendors(id, name), payments(*, account:accounts(code, name))')
+      .eq('tenant_id', req.tenantId)
+      .order('created_at', { ascending: false });
+
+    if (error) throw error;
+    res.json(data || []);
+  } catch (error) {
+    sendError(res, error);
+  }
+});
+
+app.post('/bills', async (req, res) => {
+  try {
+    const { vendor_id, vendor_ref, bill_date, due_date, notes, line_items } = req.body;
+    if (!UUID.test(vendor_id || '')) throw new Error('Choose a vendor');
+
+    const row = {
+      tenant_id: req.tenantId,
+      vendor_id,
+      vendor_ref: vendor_ref || null,
+      due_date: due_date || null,
+      notes: notes || null,
+      line_items: parseBillLines(line_items)
+    };
+    if (bill_date) row.bill_date = bill_date;
+
+    const { data, error } = await bills(req).insert([row]).select();
+
+    if (error) throw error;
+    res.status(201).json(data[0]);
+  } catch (error) {
+    sendError(res, error);
+  }
+});
+
+app.put('/bills/:id', async (req, res) => {
+  try {
+    const { vendor_id, vendor_ref, bill_date, due_date, notes, status, line_items } = req.body;
+    const updates = { updated_at: new Date().toISOString() };
+
+    if (vendor_id !== undefined) {
+      if (!UUID.test(vendor_id || '')) throw new Error('Choose a vendor');
+      updates.vendor_id = vendor_id;
+    }
+    if (vendor_ref !== undefined) updates.vendor_ref = vendor_ref || null;
+    if (bill_date) updates.bill_date = bill_date;
+    if (due_date !== undefined) updates.due_date = due_date || null;
+    if (notes !== undefined) updates.notes = notes || null;
+    if (line_items !== undefined) updates.line_items = parseBillLines(line_items);
+    if (status !== undefined) {
+      if (!BILL_STATUSES.includes(status)) throw new Error('Unknown bill status');
+      updates.status = status;
+    }
+
+    const { data, error } = await bills(req)
+      .update(updates)
+      .eq('id', req.params.id)
+      .eq('tenant_id', req.tenantId)
+      .select();
+
+    if (error) throw error;
+    if (!data.length) return res.status(404).json({ error: 'Bill not found' });
+    res.json(data[0]);
+  } catch (error) {
+    sendError(res, error);
+  }
+});
+
+app.delete('/bills/:id', async (req, res) => {
+  try {
+    const { data, error } = await bills(req)
+      .delete()
+      .eq('id', req.params.id)
+      .eq('tenant_id', req.tenantId)
+      .select('id');
+
+    if (error) throw error;
+    if (!data.length) return res.status(404).json({ error: 'Bill not found' });
+    res.json({ success: true });
+  } catch (error) {
+    sendError(res, error);
+  }
+});
+
+// Payments are for an invoice or a bill
+app.post('/payments', async (req, res) => {
+  try {
+    const { invoice_id, bill_id, account_id, payment_date, amount, reference } = req.body;
+    if (!DATE.test(payment_date || '')) throw new Error('Choose a date');
+
+    const { data, error } = await ledger(req).rpc('record_payment', {
+      p_tenant: req.tenantId,
+      p_invoice: invoice_id || null,
+      p_bill: bill_id || null,
+      p_account: account_id,
+      p_date: payment_date,
+      p_amount: parseAmount(amount),
+      p_reference: reference || null
+    });
+
+    if (error) throw error;
+    res.status(201).json({ id: data });
+  } catch (error) {
+    sendError(res, error);
+  }
+});
+
+app.post('/payments/:id/void', async (req, res) => {
+  try {
+    const { error } = await ledger(req).rpc('void_payment', {
+      p_tenant: req.tenantId,
+      p_payment: req.params.id
+    });
+
+    if (error) throw error;
+    res.json({ success: true });
+  } catch (error) {
+    sendError(res, error);
+  }
+});
+
+// Credit notes
+app.post('/credit-notes', async (req, res) => {
+  try {
+    const { invoice_id, credit_date, amount, reason } = req.body;
+    if (!DATE.test(credit_date || '')) throw new Error('Choose a date');
+
+    const { data, error } = await ledger(req).rpc('create_credit_note', {
+      p_tenant: req.tenantId,
+      p_invoice: invoice_id,
+      p_date: credit_date,
+      p_amount: parseAmount(amount),
+      p_reason: reason
+    });
+
+    if (error) throw error;
+    res.status(201).json({ id: data });
+  } catch (error) {
+    sendError(res, error);
+  }
+});
+
+app.post('/credit-notes/:id/void', async (req, res) => {
+  try {
+    const { error } = await ledger(req).rpc('void_credit_note', {
+      p_tenant: req.tenantId,
+      p_credit: req.params.id
+    });
+
+    if (error) throw error;
+    res.json({ success: true });
+  } catch (error) {
+    sendError(res, error);
+  }
+});
+
+// Customers and vendors share the same shape
+[['customers', 'customer_list', 'Customer'], ['vendors', 'vendor_list', 'Vendor']].forEach(([table, list, label]) => {
+  const rows = (req) => req.db.schema('accounting').from(table);
+
+  app.get(`/${table}`, async (req, res) => {
+    try {
+      const { data, error } = await ledger(req).rpc(list, { p_tenant: req.tenantId });
+      if (error) throw error;
+      res.json(data || []);
+    } catch (error) {
+      sendError(res, error);
+    }
+  });
+
+  app.post(`/${table}`, async (req, res) => {
+    try {
+      const { name, email, phone, address } = req.body;
+      if (!name) throw new Error('Name is required');
+
+      const { data, error } = await rows(req)
+        .insert([{
+          tenant_id: req.tenantId,
+          name,
+          email: email || null,
+          phone: phone || null,
+          address: address || null
+        }])
+        .select();
+
+      if (error) throw error;
+      res.status(201).json(data[0]);
+    } catch (error) {
+      sendError(res, error);
+    }
+  });
+
+  app.put(`/${table}/:id`, async (req, res) => {
+    try {
+      const { name, email, phone, address, is_active } = req.body;
+      const updates = {};
+
+      if (name !== undefined) {
+        if (!name) throw new Error('Name is required');
+        updates.name = name;
+      }
+      if (email !== undefined) updates.email = email || null;
+      if (phone !== undefined) updates.phone = phone || null;
+      if (address !== undefined) updates.address = address || null;
+      if (is_active !== undefined) updates.is_active = Boolean(is_active);
+
+      const { data, error } = await rows(req)
+        .update(updates)
+        .eq('id', req.params.id)
+        .eq('tenant_id', req.tenantId)
+        .select();
+
+      if (error) throw error;
+      if (!data.length) return res.status(404).json({ error: `${label} not found` });
+      res.json(data[0]);
+    } catch (error) {
+      sendError(res, error);
+    }
+  });
 });
 
 // Analytics endpoint

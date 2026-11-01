@@ -115,13 +115,24 @@ input, select, textarea {
 .lines { display: grid; gap: 8px; margin: 12px 0; }
 .line { display: grid; grid-template-columns: 1fr 70px 100px 32px; gap: 8px; align-items: center; }
 .line button { padding: 6px 0; }
+.bill-line { display: grid; grid-template-columns: 1fr 1fr 110px 32px; gap: 8px; align-items: center; }
+.bill-line button { padding: 6px 0; }
+
+.document { display: grid; gap: 24px; }
+.document-head { display: flex; justify-content: space-between; gap: 24px; flex-wrap: wrap; }
+.document-head h1 { font-size: 28px; }
+.document-meta { text-align: right; color: var(--muted); }
+.document-totals { margin-left: auto; width: 100%; max-width: 280px; }
+.document-totals div { display: flex; justify-content: space-between; padding: 4px 0; }
+.document-totals .due { font-weight: 600; border-top: 2px solid var(--border); margin-top: 4px; padding-top: 8px; }
+.muted { color: var(--muted); }
 
 .modal-back { position: fixed; inset: 0; background: rgba(15, 23, 32, 0.5); display: flex; align-items: flex-start; justify-content: center; padding: 40px 16px; overflow-y: auto; z-index: 10; }
 .modal { background: var(--surface); border-radius: 8px; padding: 20px; width: 100%; max-width: 620px; }
 
 .badge { display: inline-block; font-size: 12px; padding: 1px 8px; border-radius: 10px; background: var(--sunken); color: var(--muted); }
 .badge.paid, .badge.won { color: var(--good); }
-.badge.sent, .badge.low { color: var(--warn); }
+.badge.sent, .badge.open, .badge.partial, .badge.low { color: var(--warn); }
 .badge.lost, .badge.void, .badge.out { color: var(--danger); }
 
 .error { color: var(--danger); font-size: 14px; margin: 8px 0 0; }
@@ -145,3 +156,10 @@ input, select, textarea {
 .products .card { color: inherit; display: block; }
 .products h2 { margin-bottom: 4px; }
 .products p { color: var(--muted); margin: 0; }
+
+@media print {
+  :root { --bg: #fff; --surface: #fff; --text: #000; --muted: #444; --border: #bbb; }
+  .topbar, .subnav, .no-print { display: none !important; }
+  .page { max-width: none; padding: 0; }
+  .card { border: 0; padding: 0; }
+}

@@ -40,5 +40,11 @@ export const api = {
 export const money = (value: number | string | null | undefined) =>
   Number(value || 0).toLocaleString(undefined, { style: 'currency', currency: 'USD' });
 
+// A plain date has no time zone, so it must not be read as UTC midnight
 export const formatDate = (value: string | null | undefined) =>
-  value ? new Date(value).toLocaleDateString() : '—';
+  value ? new Date(value.length === 10 ? `${value}T00:00:00` : value).toLocaleDateString() : '—';
+
+export const today = () => {
+  const now = new Date();
+  return new Date(now.getTime() - now.getTimezoneOffset() * 60000).toISOString().slice(0, 10);
+};

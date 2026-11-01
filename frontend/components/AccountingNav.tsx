@@ -3,6 +3,9 @@ import { useRouter } from 'next/router';
 
 const SECTIONS = [
   { name: 'Invoices and expenses', path: '/saas/accounting' },
+  { name: 'Customers', path: '/saas/accounting/customers' },
+  { name: 'Bills', path: '/saas/accounting/bills' },
+  { name: 'Vendors', path: '/saas/accounting/vendors' },
   { name: 'Chart of accounts', path: '/saas/accounting/accounts' },
   { name: 'Journal', path: '/saas/accounting/journal' },
   { name: 'General ledger', path: '/saas/accounting/ledger' },
