@@ -282,6 +282,38 @@ app.put('/activities/:id/done', update(activities, ACTIVITY_FIELDS, (body) => ({
 }), 'Activity'));
 app.delete('/activities/:id', remove(activities, 'Activity'));
 
+// Quotes
+const QUOTE_FIELDS = '*, deal:deals(id, title), contact:contacts(id, name, email), company:companies(id, name)';
+
+app.get('/quotes', list((req) => {
+  const query = crm(req).from('quotes')
+    .select(QUOTE_FIELDS)
+    .eq('tenant_id', req.tenantId)
+    .order('created_at', { ascending: false });
+  return req.query.deal_id ? query.eq('deal_id', req.query.deal_id) : query;
+}));
+app.get('/quotes/:id', one((req) => crm(req).from('quotes').select(QUOTE_FIELDS), 'Quote'));
+app.post('/quotes', callCrm('save_quote', (req) => ({
+  p_quote: req.body.id || null,
+  p_deal: optional(req.body.deal_id),
+  p_contact: optional(req.body.contact_id),
+  p_company: optional(req.body.company_id),
+  p_issue: parseDate(req.body.issue_date),
+  p_valid: parseDate(req.body.valid_until),
+  p_due_days: req.body.due_days === '' || req.body.due_days === undefined ? null : Number(req.body.due_days),
+  p_lines: req.body.line_items,
+  p_notes: req.body.notes || null
+})));
+app.post('/quotes/:id/status', callCrm('set_quote_status', (req) => ({ p_quote: req.params.id, p_status: req.body.status })));
+app.post('/quotes/:id/accept', callCrm('accept_quote', (req) => ({ p_quote: req.params.id })));
+app.post('/quotes/:id/invoice', callCrm('reinvoice_quote', (req) => ({ p_quote: req.params.id })));
+app.delete('/quotes/:id', callCrm('delete_quote', (req) => ({ p_quote: req.params.id })));
+
+app.get('/billing', callCrm('billing', (req) => ({
+  p_company: req.query.company_id || null,
+  p_contact: req.query.contact_id || null
+})));
+
 // Pipelines
 app.get('/pipelines', list((req) => crm(req).from('pipelines')
   .select('*, stages(*)')

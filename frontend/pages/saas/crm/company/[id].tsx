@@ -2,6 +2,7 @@ import Link from 'next/link';
 import { useRouter } from 'next/router';
 import { useEffect, useState } from 'react';
 import AppShell from '@/components/AppShell';
+import Billing from '@/components/Billing';
 import CrmNav from '@/components/CrmNav';
 import { CompanyForm, ContactForm, DealForm } from '@/components/CrmForms';
 import Timeline from '@/components/Timeline';
@@ -106,6 +107,7 @@ function CompanyApp() {
               </tbody>
             </table>
           </div>
+          <Billing query={`company_id=${company.id}`} />
           <Timeline links={{ company_id: company.id }} />
           {form === 'edit' && <CompanyForm initial={company} onClose={() => setForm('')} onSaved={load} />}
           {form === 'contact' && <ContactForm initial={{ company_id: company.id }} onClose={() => setForm('')} onSaved={load} />}

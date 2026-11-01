@@ -172,6 +172,9 @@ tr.section td { font-weight: 600; padding-top: 16px; }
 .stage-bar { display: flex; gap: 4px; flex-wrap: wrap; }
 .stage-line { display: grid; grid-template-columns: 1fr 100px 80px 32px 32px 32px; gap: 6px; align-items: center; }
 .stage-line button { padding: 6px 0; }
+.quote-line { display: grid; grid-template-columns: 1fr 1.2fr 64px 84px 64px 100px 32px; gap: 6px; align-items: center; }
+.quote-line button { padding: 6px 0; }
+.quote-line + .late { margin: 4px 0 0; font-size: 13px; }
 
 .auth { max-width: 380px; margin: 64px auto; padding: 0 16px; }
 .auth form { display: grid; gap: 12px; margin-top: 16px; }

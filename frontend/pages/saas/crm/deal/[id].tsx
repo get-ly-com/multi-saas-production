@@ -4,8 +4,10 @@ import { useEffect, useMemo, useState } from 'react';
 import AppShell from '@/components/AppShell';
 import CrmNav from '@/components/CrmNav';
 import { DealForm, LostForm, useTeam } from '@/components/CrmForms';
+import QuoteForm from '@/components/QuoteForm';
 import Timeline from '@/components/Timeline';
 import { api, formatDate, money } from '@/lib/api';
+import { quoteBadge, quoteLabel } from '../quotes';
 
 export default function Deal() {
   return <AppShell><DealApp /></AppShell>;
@@ -18,20 +20,24 @@ function DealApp() {
   const [deal, setDeal] = useState<any>(null);
   const [history, setHistory] = useState<any[]>([]);
   const [pipelines, setPipelines] = useState<any[]>([]);
+  const [quotes, setQuotes] = useState<any[]>([]);
   const [error, setError] = useState('');
   const [editing, setEditing] = useState(false);
+  const [quoting, setQuoting] = useState(false);
   const [losing, setLosing] = useState('');
 
   const load = async () => {
     try {
-      const [row, historyRows, pipelineRows] = await Promise.all([
+      const [row, historyRows, pipelineRows, quoteRows] = await Promise.all([
         api.get(`/api/crm/deals/${id}`),
         api.get(`/api/crm/deals/${id}/history`),
-        api.get('/api/crm/pipelines')
+        api.get('/api/crm/pipelines'),
+        api.get(`/api/crm/quotes?deal_id=${id}`)
       ]);
       setDeal(row);
       setHistory(historyRows);
       setPipelines(pipelineRows);
+      setQuotes(quoteRows);
       setError('');
     } catch (err: any) {
       setError(err.message);
@@ -93,6 +99,7 @@ function DealApp() {
               </p>
             </div>
             <div className="row-actions">
+              <button onClick={() => setQuoting(true)}>New quote</button>
               <button onClick={() => setEditing(true)}>Edit</button>
               <button className="danger" onClick={remove}>Delete</button>
             </div>
@@ -105,10 +112,28 @@ function DealApp() {
           </div>
           {deal.lost_reason && <p className="muted">Lost because: {deal.lost_reason}</p>}
 
-          <Timeline links={{ deal_id: deal.id }} extra={moves} />
+          {quotes.length > 0 && (
+            <div className="card table-wrap">
+              <h2>Quotes</h2>
+              <table>
+                <tbody>
+                  {quotes.map((quote) => (
+                    <tr key={quote.id}>
+                      <td><Link href={`/saas/crm/quote/${quote.id}`}>{quote.quote_number}</Link></td>
+                      <td><span className={`badge ${quoteBadge(quoteLabel(quote))}`}>{quoteLabel(quote)}</span></td>
+                      <td className="num">{money(quote.total)}</td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+          )}
+
+          <Timeline key={quotes.length} links={{ deal_id: deal.id }} extra={moves} />
 
           {editing && <DealForm initial={{ ...deal, value: deal.value ?? '' }} onClose={() => setEditing(false)} onSaved={load} />}
           {losing && <LostForm deal={deal} stageId={losing} onClose={() => setLosing('')} onSaved={load} />}
+          {quoting && <QuoteForm initial={{ deal_id: deal.id }} onClose={() => setQuoting(false)} onSaved={(quoteId) => { router.push(`/saas/crm/quote/${quoteId}`); }} />}
         </>
       )}
     </div>

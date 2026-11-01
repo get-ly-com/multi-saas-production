@@ -8,6 +8,7 @@ const SECTIONS = [
   { name: 'Pipeline', path: '/saas/crm/pipeline' },
   { name: 'Contacts', path: '/saas/crm/contacts' },
   { name: 'Companies', path: '/saas/crm/companies' },
+  { name: 'Quotes', path: '/saas/crm/quotes' },
   { name: 'Tasks', path: '/saas/crm/tasks' },
   { name: 'Settings', path: '/saas/crm/settings' }
 ];

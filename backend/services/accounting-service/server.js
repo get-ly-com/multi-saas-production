@@ -42,13 +42,13 @@ const parseLineItems = (lineItems) => {
     throw new Error('Add at least one line item');
   }
 
-  return lineItems.map(({ description, quantity, unit_price, tax_rate_id }) => {
+  return lineItems.map(({ description, quantity, unit_price, tax_rate_id, item_id }) => {
     const qty = Number(quantity);
     const price = Number(unit_price);
     if (!description || !(qty > 0) || !(price >= 0)) {
       throw new Error('Each line needs a description, quantity and price');
     }
-    return { description, quantity: qty, unit_price: price, tax_rate_id: tax_rate_id || null };
+    return { description, quantity: qty, unit_price: price, tax_rate_id: tax_rate_id || null, item_id: item_id || null };
   });
 };
 
