@@ -25,7 +25,8 @@ const TABLE_NAMES: Record<string, string> = {
   exchange_rates: 'Exchange rate',
   purchase_orders: 'Purchase order',
   recurring_invoices: 'Recurring invoice',
-  revenue_schedules: 'Revenue schedule'
+  revenue_schedules: 'Revenue schedule',
+  group_companies: 'Group membership'
 };
 
 const ACTIONS: Record<string, string> = { insert: 'Created', update: 'Changed', delete: 'Deleted' };

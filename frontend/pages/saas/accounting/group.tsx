@@ -450,7 +450,7 @@ function GroupBalance({ overview }: { overview: any }) {
                   <Total label="Currency translation difference" value={data.translation} span={span} currency={group.currency} />
                 )}
                 {Number(data.intercompany_difference) !== 0 && (
-                  <Total label="Intercompany balances that don't match" value={data.intercompany_difference} span={span} currency={group.currency} />
+                  <Total label="Intercompany difference from rates or unmatched entries" value={data.intercompany_difference} span={span} currency={group.currency} />
                 )}
                 <Total label="Total equity" value={data.total_equity} span={span} currency={group.currency} />
                 <Total label="Total liabilities and equity" value={Number(data.total_liabilities) + Number(data.total_equity)} span={span} currency={group.currency} />
