@@ -177,6 +177,14 @@ tr.section td { font-weight: 600; padding-top: 16px; }
 .quote-line + .late { margin: 4px 0 0; font-size: 13px; }
 .score-rule { display: grid; grid-template-columns: 1.2fr 1fr 80px 32px; gap: 6px; align-items: center; }
 .score-rule button { padding: 6px 0; }
+.bell { position: relative; }
+.bell-menu { position: absolute; top: 100%; right: 0; margin-top: 6px; width: 320px; max-width: calc(100vw - 32px); max-height: 420px; overflow-y: auto; background: var(--surface); border: 1px solid var(--border); border-radius: 6px; padding: 6px; z-index: 20; color: var(--text); }
+.bell-head { display: flex; justify-content: space-between; align-items: center; padding: 4px 6px; }
+.bell-item { display: block; width: 100%; text-align: left; background: none; border: 0; border-radius: 4px; padding: 6px; color: var(--text); font-weight: 400; }
+.bell-item.unread { font-weight: 600; }
+.bell-item small { display: block; color: var(--muted); font-weight: 400; }
+.rule-action { display: grid; grid-template-columns: repeat(auto-fit, minmax(140px, 1fr)); gap: 8px; align-items: end; padding: 8px 0; border-top: 1px solid var(--border); }
+.starters { display: flex; flex-wrap: wrap; gap: 6px; }
 .score-line { display: flex; justify-content: space-between; gap: 12px; padding: 2px 0; }
 .saved-views { display: flex; gap: 12px; align-items: flex-end; flex-wrap: wrap; }
 .saved-views label:not(.check) { flex: 1 1 200px; }

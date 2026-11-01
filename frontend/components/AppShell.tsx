@@ -1,6 +1,7 @@
 import Link from 'next/link';
 import { useRouter } from 'next/router';
 import { ReactNode, useEffect, useState } from 'react';
+import NotificationBell from '@/components/NotificationBell';
 import { api, openCompany, rememberCompany, setBaseCurrency } from '@/lib/api';
 import { getSupabase } from '@/lib/supabase';
 
@@ -68,6 +69,7 @@ export default function AppShell({ children }: { children: ReactNode }) {
             {me.tenants.map(({ id, name }) => <option key={id} value={id}>{name}</option>)}
             <option value="new">Add a company…</option>
           </select>
+          <NotificationBell />
           <span>{me.user.email}</span>
           <button className="link" onClick={signOut}>Sign out</button>
         </div>

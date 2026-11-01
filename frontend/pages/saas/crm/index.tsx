@@ -74,7 +74,8 @@ function TodayApp() {
                     <td className="wrap">
                       {task.subject}
                       {task.deal_id && <> · <Link href={`/saas/crm/deal/${task.deal_id}`}>{task.deal_title}</Link></>}
-                      {!task.deal_id && task.contact_id && <> · <Link href={`/saas/crm/contact/${task.contact_id}`}>{task.contact_name}</Link></>}
+                      {!task.deal_id && task.lead_id && <> · <Link href={`/saas/crm/lead/${task.lead_id}`}>{task.lead_name}</Link></>}
+                      {!task.deal_id && !task.lead_id && task.contact_id && <> · <Link href={`/saas/crm/contact/${task.contact_id}`}>{task.contact_name}</Link></>}
                     </td>
                     <td>{task.due_on && <span className={`badge ${task.due_on < today() ? 'lost' : ''}`}>{task.due_on < today() ? `overdue ${formatDate(task.due_on)}` : 'today'}</span>}</td>
                     <td><div className="row-actions"><button onClick={() => finish(task)}>Done</button></div></td>

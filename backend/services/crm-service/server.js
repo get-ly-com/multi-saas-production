@@ -24,7 +24,7 @@ const activities = (req) => crm(req).from('activities');
 const leads = (req) => crm(req).from('leads');
 
 const DEAL_FIELDS = '*, contact:contacts(id, name), company:companies(id, name), stage:stages(id, name, kind, probability, pipeline_id)';
-const ACTIVITY_FIELDS = '*, contact:contacts(id, name), company:companies(id, name), deal:deals(id, title)';
+const ACTIVITY_FIELDS = '*, contact:contacts(id, name), company:companies(id, name), deal:deals(id, title), lead:leads(id, name)';
 const LEAD_STATUSES = ['new', 'working', 'disqualified'];
 
 const parseValue = (value) => {
@@ -42,6 +42,8 @@ const parseDate = (value) => {
 
 // Forms send an empty string for "none"
 const optional = (value) => (value === '' || value === undefined ? null : value);
+
+const optionalNumber = (value) => (value === '' || value === null || value === undefined ? null : Number(value));
 
 // Only the fields that were sent, so a stage move can't wipe the rest of a deal
 const pick = (body, fields) => Object.fromEntries(
@@ -410,6 +412,29 @@ app.delete('/quotes/:id', callCrm('delete_quote', (req) => ({ p_quote: req.param
 app.get('/billing', callCrm('billing', (req) => ({
   p_company: req.query.company_id || null,
   p_contact: req.query.contact_id || null
+})));
+
+// Automation
+app.get('/automations', callCrm('automation_summary', () => ({})));
+app.post('/automations', callCrm('save_automation', (req) => ({
+  p_rule: req.body.id || null,
+  p_name: req.body.name,
+  p_event: req.body.event,
+  p_stage: optional(req.body.stage_id),
+  p_days: optionalNumber(req.body.days),
+  p_source: optional(req.body.source),
+  p_min_value: parseValue(req.body.min_value),
+  p_actions: req.body.actions
+})));
+app.post('/automations/run', callCrm('run_automations_now', () => ({})));
+app.post('/automations/task-reminders', callCrm('save_task_reminders', (req) => ({ p_enabled: Boolean(req.body.enabled) })));
+app.post('/automations/:id/enabled', callCrm('set_automation_enabled', (req) => ({ p_rule: req.params.id, p_enabled: Boolean(req.body.enabled) })));
+app.delete('/automations/:id', callCrm('delete_automation', (req) => ({ p_rule: req.params.id })));
+
+// Alerts
+app.get('/notifications', callCrm('my_notifications', () => ({})));
+app.post('/notifications/read', callCrm('mark_notifications_read', (req) => ({
+  p_ids: Array.isArray(req.body.ids) ? req.body.ids : null
 })));
 
 // Pipelines

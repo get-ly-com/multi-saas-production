@@ -97,6 +97,7 @@ function Entry({ item, run }: { item: any; run: (action: () => Promise<unknown>)
         <span className={`badge ${late ? 'lost' : ''}`}>{task ? (item.done_at ? 'done' : late ? 'overdue' : 'task') : item.kind}</span>
         {' '}<strong>{item.subject}</strong>
         {task && item.due_on && <span className="muted"> · due {formatDate(item.due_on)}</span>}
+        {item.automation_id && <span className="muted"> · automated</span>}
         {item.body && <div className="wrap">{item.body}</div>}
         <div className="muted">{formatDate(item.created_at)}</div>
       </div>

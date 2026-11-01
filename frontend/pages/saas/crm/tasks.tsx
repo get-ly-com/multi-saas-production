@@ -83,9 +83,10 @@ function TasksApp() {
               {sorted.length === 0 && <tr><td colSpan={5} className="empty">No open tasks</td></tr>}
               {sorted.map((task) => (
                 <tr key={task.id}>
-                  <td className="wrap">{task.subject}</td>
+                  <td className="wrap">{task.subject}{task.automation_id && <span className="muted"> · automated</span>}</td>
                   <td className="wrap">
                     {task.deal ? <Link href={`/saas/crm/deal/${task.deal.id}`}>{task.deal.title}</Link>
+                      : task.lead ? <Link href={`/saas/crm/lead/${task.lead.id}`}>{task.lead.name}</Link>
                       : task.contact ? <Link href={`/saas/crm/contact/${task.contact.id}`}>{task.contact.name}</Link>
                         : task.company ? <Link href={`/saas/crm/company/${task.company.id}`}>{task.company.name}</Link> : '—'}
                   </td>
