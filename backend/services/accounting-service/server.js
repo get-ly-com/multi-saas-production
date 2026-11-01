@@ -16,6 +16,7 @@ const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 // Partial and paid come from payments, which the database works out
 const INVOICE_STATUSES = ['sent', 'void'];
 const BILL_STATUSES = ['open', 'void'];
+const RECURRING_FREQUENCIES = ['monthly', 'quarterly', 'yearly'];
 const ACCOUNT_TYPES = ['asset', 'liability', 'equity', 'revenue', 'expense'];
 const DATE = /^\d{4}-\d{2}-\d{2}$/;
 
@@ -1259,16 +1260,129 @@ app.post('/assets/:id/dispose', async (req, res) => {
   }
 });
 
+// Runs a database function, which checks the caller's role and company itself
+const callLedger = async (req, res, name, params, status = 200) => {
+  try {
+    const { data, error } = await ledger(req).rpc(name, { p_tenant: req.tenantId, ...params() });
+    if (error) throw error;
+    res.status(status).json(data ?? { success: true });
+  } catch (error) {
+    sendError(res, error);
+  }
+};
+
+// Purchase orders
+app.get('/purchase-orders', async (req, res) => {
+  try {
+    const { data, error } = await ledger(req).from('purchase_orders')
+      .select('*, vendor:vendors(id, name)')
+      .eq('tenant_id', req.tenantId)
+      .order('created_at', { ascending: false });
+
+    if (error) throw error;
+    res.json(data || []);
+  } catch (error) {
+    sendError(res, error);
+  }
+});
+
+app.post('/purchase-orders', (req, res) => callLedger(req, res, 'save_purchase_order', () => ({
+  p_order: req.body.id || null,
+  p_vendor: req.body.vendor_id,
+  p_date: parseDate(req.body.order_date, 'an order date'),
+  p_expected: req.body.expected_date || null,
+  p_currency: req.body.currency || null,
+  p_rate: parseRate(req.body.exchange_rate),
+  p_lines: req.body.line_items,
+  p_notes: req.body.notes || null
+}), 201));
+
+app.post('/purchase-orders/:id/submit', (req, res) =>
+  callLedger(req, res, 'submit_purchase_order', () => ({ p_order: req.params.id })));
+
+app.post('/purchase-orders/:id/decide', (req, res) => callLedger(req, res, 'decide_purchase_order', () => ({
+  p_order: req.params.id,
+  p_approve: req.body.approve === true,
+  p_note: req.body.note || null
+})));
+
+app.post('/purchase-orders/:id/bill', (req, res) =>
+  callLedger(req, res, 'bill_purchase_order', () => ({ p_order: req.params.id }), 201));
+
+app.delete('/purchase-orders/:id', (req, res) =>
+  callLedger(req, res, 'delete_purchase_order', () => ({ p_order: req.params.id })));
+
+// Recurring invoices
+app.get('/recurring', async (req, res) => {
+  try {
+    const { data, error } = await ledger(req).from('recurring_invoices')
+      .select('*, customer:customers(id, name)')
+      .eq('tenant_id', req.tenantId)
+      .order('name');
+
+    if (error) throw error;
+    res.json(data || []);
+  } catch (error) {
+    sendError(res, error);
+  }
+});
+
+app.post('/recurring/run', (req, res) => callLedger(req, res, 'run_recurring_invoices', () => ({
+  p_through: parseDate(req.body.through, 'a date')
+})));
+
+app.post('/recurring', (req, res) => callLedger(req, res, 'save_recurring_invoice', () => {
+  const { id, name, customer_id, frequency, start_date, end_date, due_days, currency, exchange_rate, cost_center_id, line_items, auto_send } = req.body;
+  if (!name) throw new Error('Name is required');
+  if (!RECURRING_FREQUENCIES.includes(frequency)) throw new Error('Choose how often');
+
+  return {
+    p_id: id || null,
+    p_name: name,
+    p_customer: customer_id,
+    p_frequency: frequency,
+    p_start: parseDate(start_date, 'a start date'),
+    p_end: end_date || null,
+    p_due_days: Number(due_days) || 0,
+    p_currency: currency || null,
+    p_rate: parseRate(exchange_rate),
+    p_cost_center: cost_center_id || null,
+    p_lines: parseLineItems(line_items),
+    p_auto_send: Boolean(auto_send)
+  };
+}, 201));
+
+app.put('/recurring/:id/active', (req, res) => callLedger(req, res, 'set_recurring_active', () => ({
+  p_id: req.params.id,
+  p_active: Boolean(req.body.is_active)
+})));
+
+// Revenue recognition
+app.get('/revenue', (req, res) => callLedger(req, res, 'revenue_overview', () => ({})));
+
+app.post('/revenue', (req, res) => callLedger(req, res, 'create_revenue_schedule', () => ({
+  p_invoice: req.body.invoice_id,
+  p_start: parseDate(req.body.start_date, 'a start date'),
+  p_months: Number(req.body.months)
+}), 201));
+
+app.post('/revenue/run', (req, res) => callLedger(req, res, 'run_revenue_recognition', () => ({
+  p_through: parseDate(req.body.through, 'a date')
+})));
+
+app.post('/revenue/:id/cancel', (req, res) =>
+  callLedger(req, res, 'cancel_revenue_schedule', () => ({ p_schedule: req.params.id })));
+
 // Period lock and year-end close
 app.get('/books', async (req, res) => {
   try {
     const { data, error } = await req.db.schema('accounting').from('settings')
-      .select('lock_date')
+      .select('lock_date, bill_approval_limit')
       .eq('tenant_id', req.tenantId)
       .maybeSingle();
 
     if (error) throw error;
-    res.json({ lock_date: data?.lock_date || null });
+    res.json({ lock_date: data?.lock_date || null, bill_approval_limit: data?.bill_approval_limit ?? null });
   } catch (error) {
     sendError(res, error);
   }
@@ -1282,6 +1396,21 @@ app.put('/books/lock', async (req, res) => {
     const { error } = await ledger(req).rpc('set_lock_date', {
       p_tenant: req.tenantId,
       p_date: lock_date || null
+    });
+
+    if (error) throw error;
+    res.json({ success: true });
+  } catch (error) {
+    sendError(res, error);
+  }
+});
+
+app.put('/books/approval-limit', async (req, res) => {
+  try {
+    const { bill_approval_limit: limit } = req.body;
+    const { error } = await ledger(req).rpc('set_approval_limit', {
+      p_tenant: req.tenantId,
+      p_limit: limit === '' || limit === null || limit === undefined ? null : parseAmount(limit)
     });
 
     if (error) throw error;

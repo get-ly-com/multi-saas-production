@@ -119,6 +119,8 @@ input, select, textarea {
 .line button { padding: 6px 0; }
 .bill-line { display: grid; grid-template-columns: 1fr 1fr 90px 100px 100px 32px; gap: 8px; align-items: center; }
 .bill-line button { padding: 6px 0; }
+.order-line { display: grid; grid-template-columns: 1fr 1fr 60px 80px 90px 90px 32px; gap: 6px; align-items: center; }
+.order-line button { padding: 6px 0; }
 
 .document { display: grid; gap: 24px; }
 .document-head { display: flex; justify-content: space-between; gap: 24px; flex-wrap: wrap; }

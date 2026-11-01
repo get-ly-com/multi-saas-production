@@ -1,7 +1,7 @@
 import { useEffect, useState } from 'react';
 import AccountingNav from '@/components/AccountingNav';
 import AppShell from '@/components/AppShell';
-import { api, formatDate, today } from '@/lib/api';
+import { api, formatDate, money, today } from '@/lib/api';
 
 const TABLE_NAMES: Record<string, string> = {
   invoices: 'Invoice',
@@ -43,6 +43,8 @@ function ControlsApp() {
   const [role, setRole] = useState('');
   const [lockDate, setLockDate] = useState<string | null>(null);
   const [newLock, setNewLock] = useState(today());
+  const [limit, setLimit] = useState('');
+  const [savedLimit, setSavedLimit] = useState<string | null>(null);
   const [yearEnd, setYearEnd] = useState(`${Number(today().slice(0, 4)) - 1}-12-31`);
   const [audit, setAudit] = useState<any[]>([]);
   const [error, setError] = useState('');
@@ -53,6 +55,8 @@ function ControlsApp() {
       const [me, books] = await Promise.all([api.get('/api/me'), api.get('/api/accounting/books')]);
       setRole(me.tenant.role);
       setLockDate(books.lock_date);
+      setSavedLimit(books.bill_approval_limit);
+      setLimit(books.bill_approval_limit ?? '');
       if (['owner', 'admin'].includes(me.tenant.role)) setAudit(await api.get('/api/accounting/audit'));
       setError('');
     } catch (err: any) {
@@ -109,6 +113,19 @@ function ControlsApp() {
           </>
         ) : <p className="muted">Only owners and admins can change this.</p>}
       </div>
+
+      {manager && (
+        <div className="card">
+          <h2>Bill approval limit</h2>
+          <p>{savedLimit === null ? 'Anyone who can enter bills can approve them.' : `Accountants can approve bills up to ${money(savedLimit)}. Larger bills need an owner or admin, unless they match an approved purchase order.`}</p>
+          <div className="report-filters">
+            <label>Limit<input type="number" min="0" step="0.01" placeholder="No limit" value={limit} onChange={(e) => setLimit(e.target.value)} /></label>
+          </div>
+          <div className="form-actions">
+            <button className="primary" onClick={() => run(() => api.put('/api/accounting/books/approval-limit', { bill_approval_limit: limit }), 'Approval limit saved.')}>Save limit</button>
+          </div>
+        </div>
+      )}
 
       {manager && (
         <div className="card">
