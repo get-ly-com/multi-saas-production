@@ -75,7 +75,7 @@ h2 { font-size: 17px; margin: 0 0 12px; }
 .subnav a.active { background: var(--sunken); color: var(--text); font-weight: 600; }
 .subnav.groups { border-bottom: 0; padding-bottom: 4px; }
 .subnav.groups a { color: var(--text); font-weight: 500; }
-.subnav.groups a.active { background: var(--accent); color: #fff; font-weight: 600; }
+.subnav.groups a.active { background: var(--accent); color: var(--accent-text); font-weight: 600; }
 .journal-line { display: grid; grid-template-columns: 1fr 110px 100px 100px 32px; gap: 8px; align-items: center; }
 .journal-line button { padding: 6px 0; }
 tr.total td { font-weight: 600; border-top: 2px solid var(--border); }
