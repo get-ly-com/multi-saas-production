@@ -232,6 +232,7 @@ function Reconcile({ accountId }: { accountId: string }) {
     run(async () => {
       await api.post('/api/accounting/bank/reconcile', { account_id: accountId, statement_date: asOf, statement_balance: balance });
       setNotice(`Reconciled to ${formatDate(asOf)}. Cleared items up to that date are now locked.`);
+      setBalance('');
     });
 
   if (!status) return error ? <p className="error">{error}</p> : <p className="empty">Loading…</p>;

@@ -10,7 +10,7 @@ const PRODUCTS = [
   { name: 'Inventory', path: '/saas/inventory' }
 ];
 
-type Me = { user: { email: string }; tenant: { name: string } };
+type Me = { user: { email: string }; tenant: { name: string; role: string } };
 
 export default function AppShell({ children }: { children: ReactNode }) {
   const router = useRouter();
@@ -52,13 +52,14 @@ export default function AppShell({ children }: { children: ReactNode }) {
               {name}
             </Link>
           ))}
+          <Link href="/saas/team" className={router.pathname === '/saas/team' ? 'active' : ''}>Team</Link>
         </nav>
         <div className="account">
           <span>{me.tenant.name} · {me.user.email}</span>
           <button className="link" onClick={signOut}>Sign out</button>
         </div>
       </header>
-      <main className="page">{children}</main>
+      <main className={`page ${me.tenant.role === 'viewer' ? 'read-only' : ''}`}>{children}</main>
     </>
   );
 }

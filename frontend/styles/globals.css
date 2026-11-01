@@ -162,6 +162,9 @@ tr.section td { font-weight: 600; padding-top: 16px; }
 .products h2 { margin-bottom: 4px; }
 .products p { color: var(--muted); margin: 0; }
 
+/* Viewers are blocked by the database. This just hides buttons they can't use. */
+.read-only button.primary:not(.always), .read-only .row-actions button, .read-only td button { display: none; }
+
 @media print {
   :root { --bg: #fff; --surface: #fff; --text: #000; --muted: #444; --border: #bbb; }
   .topbar, .subnav, .no-print { display: none !important; }

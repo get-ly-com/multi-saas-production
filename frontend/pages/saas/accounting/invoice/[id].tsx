@@ -56,7 +56,7 @@ function InvoiceDocument() {
               () => api.put(`/api/accounting/invoices/${invoice.id}`, { status: 'void' })
             )}>Void invoice</button>
           )}
-          <button className="primary" onClick={() => window.print()}>Print or save as PDF</button>
+          <button className="primary always" onClick={() => window.print()}>Print or save as PDF</button>
         </div>
       </div>
 

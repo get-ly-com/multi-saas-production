@@ -1,7 +1,7 @@
 import { ChangeEvent, useMemo, useState } from 'react';
 import Modal from '@/components/Modal';
 import { api, money } from '@/lib/api';
-import { DATE_FORMATS, parseCsv, parseStatementAmount, parseStatementDate } from '@/lib/csv';
+import { DATE_FORMATS, guessDateFormat, parseCsv, parseStatementAmount, parseStatementDate } from '@/lib/csv';
 
 type Props = { accountId: string; onClose: () => void; onSaved: (message: string) => void };
 
@@ -25,10 +25,12 @@ export default function BankImport({ accountId, onClose, onSaved }: Props) {
     if (parsed.length < 2) return setError('That file has no statement lines');
 
     const titles = parsed[0];
+    const dateColumn = guess(titles, ['date']);
     setRows(parsed);
     setError('');
+    setFormat(guessDateFormat(parsed.slice(1).map((row) => row[Number(dateColumn)] || '')));
     setMap({
-      date: guess(titles, ['date']),
+      date: dateColumn,
       description: guess(titles, ['desc', 'narrat', 'particular', 'detail', 'memo']),
       amount: guess(titles, ['amount', 'credit', 'deposit', 'money in']),
       out: titles.findIndex((title) => /debit|withdraw|money out/i.test(title)) >= 0

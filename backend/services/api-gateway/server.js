@@ -100,6 +100,43 @@ app.post('/api/tenants', requireUser, express.json(), async (req, res) => {
   res.status(201).json(data);
 });
 
+// Runs a database function as the signed-in user. The function checks their role.
+const callFunction = async (req, res, name, params, status = 200) => {
+  const { data, error } = await req.db.rpc(name, params);
+  if (error) return res.status(400).json({ error: error.message });
+  res.status(status).json(data ?? { success: true });
+};
+
+// Invites waiting for this person's email address
+app.get('/api/invites', requireUser, (req, res) => callFunction(req, res, 'my_invites', {}));
+
+app.post('/api/invites/:id/accept', requireUser, (req, res) =>
+  callFunction(req, res, 'accept_invite', { p_invite: req.params.id }));
+
+// Team
+app.get('/api/team', requireUser, requireTenant, (req, res) =>
+  callFunction(req, res, 'team_overview', { p_tenant: req.tenantId }));
+
+app.post('/api/team/invites', requireUser, requireTenant, express.json(), (req, res) =>
+  callFunction(req, res, 'invite_member', {
+    p_tenant: req.tenantId,
+    p_email: req.body?.email,
+    p_role: req.body?.role
+  }, 201));
+
+app.delete('/api/team/invites/:id', requireUser, requireTenant, (req, res) =>
+  callFunction(req, res, 'revoke_invite', { p_tenant: req.tenantId, p_invite: req.params.id }));
+
+app.put('/api/team/members/:id', requireUser, requireTenant, express.json(), (req, res) =>
+  callFunction(req, res, 'set_member_role', {
+    p_tenant: req.tenantId,
+    p_user: req.params.id,
+    p_role: req.body?.role
+  }));
+
+app.delete('/api/team/members/:id', requireUser, requireTenant, (req, res) =>
+  callFunction(req, res, 'remove_member', { p_tenant: req.tenantId, p_user: req.params.id }));
+
 // Service routing - internal services
 const serviceRoutes = [
   { path: '/api/accounting', service: 'accounting-service', port: 3001 },

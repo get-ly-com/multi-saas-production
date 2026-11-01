@@ -12,7 +12,8 @@ const SECTIONS = [
   { name: 'Journal', path: '/saas/accounting/journal' },
   { name: 'General ledger', path: '/saas/accounting/ledger' },
   { name: 'Trial balance', path: '/saas/accounting/trial-balance' },
-  { name: 'Reports', path: '/saas/accounting/reports' }
+  { name: 'Reports', path: '/saas/accounting/reports' },
+  { name: 'Controls', path: '/saas/accounting/controls' }
 ];
 
 export default function AccountingNav() {

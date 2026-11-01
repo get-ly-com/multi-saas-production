@@ -941,6 +941,68 @@ app.post('/bank/reconcile', async (req, res) => {
   }
 });
 
+// Period lock and year-end close
+app.get('/books', async (req, res) => {
+  try {
+    const { data, error } = await req.db.schema('accounting').from('settings')
+      .select('lock_date')
+      .eq('tenant_id', req.tenantId)
+      .maybeSingle();
+
+    if (error) throw error;
+    res.json({ lock_date: data?.lock_date || null });
+  } catch (error) {
+    sendError(res, error);
+  }
+});
+
+app.put('/books/lock', async (req, res) => {
+  try {
+    const { lock_date } = req.body;
+    if (lock_date && !DATE.test(lock_date)) throw new Error('Choose a date');
+
+    const { error } = await ledger(req).rpc('set_lock_date', {
+      p_tenant: req.tenantId,
+      p_date: lock_date || null
+    });
+
+    if (error) throw error;
+    res.json({ success: true });
+  } catch (error) {
+    sendError(res, error);
+  }
+});
+
+app.post('/books/close-year', async (req, res) => {
+  try {
+    const { data, error } = await ledger(req).rpc('close_year', {
+      p_tenant: req.tenantId,
+      p_date: parseDate(req.body.date, 'a year-end date')
+    });
+
+    if (error) throw error;
+    res.status(201).json({ id: data });
+  } catch (error) {
+    sendError(res, error);
+  }
+});
+
+// Only owners and admins can read this, which the database enforces
+app.get('/audit', async (req, res) => {
+  try {
+    const { data, error } = await req.db.schema('accounting').from('audit_log')
+      .select('*')
+      .eq('tenant_id', req.tenantId)
+      .order('created_at', { ascending: false })
+      .limit(200);
+
+    if (error) throw error;
+    res.json(data || []);
+  } catch (error) {
+    sendError(res, error);
+  }
+});
+
 // Error handler
 app.use((err, req, res, next) => {
   console.error('Error:', err);

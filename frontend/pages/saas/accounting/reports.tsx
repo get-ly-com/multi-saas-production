@@ -60,7 +60,7 @@ function ReportsApp() {
       <AccountingNav />
       <div className="page-head no-print">
         <h1>Reports</h1>
-        <button className="primary" onClick={() => window.print()}>Print or save as PDF</button>
+        <button className="primary always" onClick={() => window.print()}>Print or save as PDF</button>
       </div>
 
       <div className="tabs no-print">

@@ -52,6 +52,14 @@ export const parseStatementDate = (value: string, format: string) => {
   return date.toISOString().slice(0, 10);
 };
 
+// A day over 12 or a leading year settles the format. Otherwise this assumes day first.
+export const guessDateFormat = (values: string[]) => {
+  const dates = values.map((value) => value.trim().split(/[-/.]/).map(Number)).filter((parts) => parts.length === 3);
+  if (dates.some(([first]) => first > 31)) return 'YYYY-MM-DD';
+  if (dates.some(([, second]) => second > 12)) return 'MM/DD/YYYY';
+  return 'DD/MM/YYYY';
+};
+
 // Banks write amounts as 1,234.50, (45.00), -45.00 or $45.00 CR
 export const parseStatementAmount = (value: string) => {
   const text = value.trim();
