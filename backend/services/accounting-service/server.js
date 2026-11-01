@@ -545,12 +545,13 @@ app.get('/accounts', async (req, res) => {
 
 app.post('/accounts', async (req, res) => {
   try {
-    const { code, name, type } = req.body;
+    const { code, name, type, is_cash } = req.body;
     if (!code || !name) throw new Error('Code and name are required');
     if (!ACCOUNT_TYPES.includes(type)) throw new Error('Choose an account type');
+    if (is_cash && type !== 'asset') throw new Error('Only asset accounts can be cash or bank accounts');
 
     const { data, error } = await accounts(req)
-      .insert([{ tenant_id: req.tenantId, code, name, type }])
+      .insert([{ tenant_id: req.tenantId, code, name, type, is_cash: Boolean(is_cash) }])
       .select();
 
     if (error) throw error;
@@ -665,6 +666,71 @@ app.get('/trial-balance', async (req, res) => {
 
     if (error) throw error;
     res.json({ as_of: asOf, rows: data || [] });
+  } catch (error) {
+    sendError(res, error);
+  }
+});
+
+const parseDate = (value, label) => {
+  if (!DATE.test(value || '')) throw new Error(`Choose ${label}`);
+  return value;
+};
+
+app.get('/reports/profit-and-loss', async (req, res) => {
+  try {
+    const { data, error } = await ledger(req).rpc('profit_and_loss', {
+      p_tenant: req.tenantId,
+      p_from: parseDate(req.query.from, 'a start date'),
+      p_to: parseDate(req.query.to, 'an end date')
+    });
+
+    if (error) throw error;
+    res.json(data);
+  } catch (error) {
+    sendError(res, error);
+  }
+});
+
+app.get('/reports/balance-sheet', async (req, res) => {
+  try {
+    const { data, error } = await ledger(req).rpc('balance_sheet', {
+      p_tenant: req.tenantId,
+      p_as_of: parseDate(req.query.as_of, 'a date')
+    });
+
+    if (error) throw error;
+    res.json(data);
+  } catch (error) {
+    sendError(res, error);
+  }
+});
+
+app.get('/reports/cash-flow', async (req, res) => {
+  try {
+    const { data, error } = await ledger(req).rpc('cash_flow', {
+      p_tenant: req.tenantId,
+      p_from: parseDate(req.query.from, 'a start date'),
+      p_to: parseDate(req.query.to, 'an end date')
+    });
+
+    if (error) throw error;
+    res.json(data);
+  } catch (error) {
+    sendError(res, error);
+  }
+});
+
+app.get('/reports/aged/:kind', async (req, res) => {
+  try {
+    if (!['receivable', 'payable'].includes(req.params.kind)) throw new Error('Unknown report');
+
+    const { data, error } = await ledger(req).rpc('aged_balances', {
+      p_tenant: req.tenantId,
+      p_kind: req.params.kind
+    });
+
+    if (error) throw error;
+    res.json(data);
   } catch (error) {
     sendError(res, error);
   }

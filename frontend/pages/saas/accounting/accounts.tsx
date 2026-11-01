@@ -6,7 +6,7 @@ import Modal from '@/components/Modal';
 import { api } from '@/lib/api';
 
 const TYPES = ['asset', 'liability', 'equity', 'revenue', 'expense'];
-const blankAccount = { code: '', name: '', type: 'expense' };
+const blankAccount = { code: '', name: '', type: 'expense', is_cash: false };
 
 export default function Accounts() {
   return <AppShell><AccountsApp /></AppShell>;
@@ -61,7 +61,7 @@ function AccountsApp() {
                 <tr key={account.id}>
                   <td>{account.code}</td>
                   <td className="wrap"><Link href={`/saas/accounting/ledger?account=${account.id}`}>{account.name}</Link></td>
-                  <td>{account.type}</td>
+                  <td>{account.is_cash ? 'cash or bank' : account.type}</td>
                   <td><span className="badge">{account.is_active ? 'active' : 'inactive'}</span></td>
                   <td>
                     <div className="row-actions">
@@ -86,14 +86,14 @@ function AccountsApp() {
 function AccountForm({ initial, onClose, onSaved }: { initial: any; onClose: () => void; onSaved: () => void }) {
   const [form, setForm] = useState<any>(initial);
   const [error, setError] = useState('');
-  const set = (field: string, value: string) => setForm({ ...form, [field]: value });
+  const set = (field: string, value: unknown) => setForm({ ...form, [field]: value });
 
   const submit = async (event: FormEvent) => {
     event.preventDefault();
-    const { code, name, type } = form;
+    const { code, name, type, is_cash } = form;
     try {
       if (form.id) await api.put(`/api/accounting/accounts/${form.id}`, { name });
-      else await api.post('/api/accounting/accounts', { code, name, type });
+      else await api.post('/api/accounting/accounts', { code, name, type, is_cash: type === 'asset' && is_cash });
       await onSaved();
       onClose();
     } catch (err: any) {
@@ -117,6 +117,12 @@ function AccountForm({ initial, onClose, onSaved }: { initial: any; onClose: () 
             </label>
           )}
         </div>
+        {!form.id && form.type === 'asset' && (
+          <label className="check">
+            <input type="checkbox" checked={form.is_cash} onChange={(e) => set('is_cash', e.target.checked)} />
+            This is a cash or bank account
+          </label>
+        )}
         {error && <p className="error">{error}</p>}
         <div className="form-actions">
           <button className="primary">Save</button>

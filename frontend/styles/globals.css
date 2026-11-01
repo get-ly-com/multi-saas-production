@@ -101,6 +101,8 @@ button.link { background: none; border: 0; color: var(--accent); padding: 0; }
 button:disabled { opacity: 0.6; cursor: default; }
 
 label { display: grid; gap: 4px; font-size: 13px; color: var(--muted); }
+label.check { display: flex; align-items: center; gap: 8px; margin-top: 12px; }
+label.check input { width: auto; }
 input, select, textarea {
   font: inherit;
   color: var(--text);
@@ -126,6 +128,9 @@ input, select, textarea {
 .document-totals div { display: flex; justify-content: space-between; padding: 4px 0; }
 .document-totals .due { font-weight: 600; border-top: 2px solid var(--border); margin-top: 4px; padding-top: 8px; }
 .muted { color: var(--muted); }
+.report-filters { display: flex; gap: 12px; flex-wrap: wrap; }
+.report-filters label { width: 170px; }
+tr.section td { font-weight: 600; padding-top: 16px; }
 
 .modal-back { position: fixed; inset: 0; background: rgba(15, 23, 32, 0.5); display: flex; align-items: flex-start; justify-content: center; padding: 40px 16px; overflow-y: auto; z-index: 10; }
 .modal { background: var(--surface); border-radius: 8px; padding: 20px; width: 100%; max-width: 620px; }

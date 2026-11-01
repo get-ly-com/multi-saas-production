@@ -35,7 +35,7 @@ function BillsApp() {
       setBills(billRows);
       setVendors(vendorRows);
       setAccounts(accountRows.filter((account: any) =>
-        ['expense', 'asset'].includes(account.type) && account.is_active && account.code !== '1200'));
+        ['expense', 'asset'].includes(account.type) && account.is_active && !account.is_cash && account.code !== '1200'));
       setError('');
     } catch (err: any) {
       setError(err.message);

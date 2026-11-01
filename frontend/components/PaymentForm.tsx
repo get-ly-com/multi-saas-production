@@ -19,7 +19,7 @@ export default function PaymentForm({ target, label, balance, onClose, onSaved }
   useEffect(() => {
     api.get('/api/accounting/accounts')
       .then((rows) => {
-        const usable = rows.filter((account: any) => account.type === 'asset' && account.is_active && account.code !== '1200');
+        const usable = rows.filter((account: any) => account.is_cash && account.is_active);
         setAccounts(usable);
         const cash = usable.find((account: any) => account.code === '1000') || usable[0];
         if (cash) set('account_id', cash.id);
