@@ -64,11 +64,17 @@ const parseBillLines = (lineItems) => {
     throw new Error('Add at least one line');
   }
 
-  return lineItems.map(({ description, account_id, amount, tax_rate_id }) => {
+  return lineItems.map(({ description, account_id, amount, tax_rate_id, cost_center_id }) => {
     if (!UUID.test(account_id || '') || !(Number(amount) > 0)) {
       throw new Error('Each line needs an account and an amount');
     }
-    return { description: description || null, account_id, amount: Number(amount), tax_rate_id: tax_rate_id || null };
+    return {
+      description: description || null,
+      account_id,
+      amount: Number(amount),
+      tax_rate_id: tax_rate_id || null,
+      cost_center_id: cost_center_id || null
+    };
   });
 };
 
@@ -137,7 +143,7 @@ app.get('/invoices/:id', async (req, res) => {
 // Create invoice
 app.post('/invoices', async (req, res) => {
   try {
-    const { customer_id, invoice_date, due_date, description, invoice_number, line_items } = req.body;
+    const { customer_id, invoice_date, due_date, description, invoice_number, line_items, cost_center_id } = req.body;
     if (!UUID.test(customer_id || '')) throw new Error('Choose a customer');
 
     const row = {
@@ -147,6 +153,7 @@ app.post('/invoices', async (req, res) => {
       due_date: due_date || null,
       description: description || null,
       amount: 0,
+      cost_center_id: cost_center_id || null,
       line_items: parseLineItems(line_items)
     };
     if (invoice_date) row.invoice_date = invoice_date;
@@ -163,7 +170,7 @@ app.post('/invoices', async (req, res) => {
 // Update invoice
 app.put('/invoices/:id', async (req, res) => {
   try {
-    const { customer_id, invoice_date, due_date, description, status, line_items } = req.body;
+    const { customer_id, invoice_date, due_date, description, status, line_items, cost_center_id } = req.body;
     const updates = { updated_at: new Date().toISOString() };
 
     if (customer_id !== undefined) {
@@ -171,6 +178,7 @@ app.put('/invoices/:id', async (req, res) => {
       updates.customer_id = customer_id;
     }
     if (invoice_date) updates.invoice_date = invoice_date;
+    if (cost_center_id !== undefined) updates.cost_center_id = cost_center_id || null;
     if (due_date !== undefined) updates.due_date = due_date || null;
     if (description !== undefined) updates.description = description || null;
     if (line_items !== undefined) updates.line_items = parseLineItems(line_items);
@@ -228,13 +236,14 @@ app.get('/expenses', async (req, res) => {
 // Create expense
 app.post('/expenses', async (req, res) => {
   try {
-    const { amount, category, description, expense_date, account_id } = req.body;
+    const { amount, category, description, expense_date, account_id, cost_center_id } = req.body;
     const row = {
       tenant_id: req.tenantId,
       amount: parseAmount(amount),
       category: category || null,
       description: description || null,
-      account_id: account_id || null
+      account_id: account_id || null,
+      cost_center_id: cost_center_id || null
     };
     if (expense_date) row.expense_date = expense_date;
 
@@ -250,7 +259,7 @@ app.post('/expenses', async (req, res) => {
 // Update expense
 app.put('/expenses/:id', async (req, res) => {
   try {
-    const { amount, category, description, expense_date, account_id } = req.body;
+    const { amount, category, description, expense_date, account_id, cost_center_id } = req.body;
     const updates = {};
 
     if (amount !== undefined) updates.amount = parseAmount(amount);
@@ -258,6 +267,7 @@ app.put('/expenses/:id', async (req, res) => {
     if (description !== undefined) updates.description = description || null;
     if (expense_date) updates.expense_date = expense_date;
     if (account_id) updates.account_id = account_id;
+    if (cost_center_id !== undefined) updates.cost_center_id = cost_center_id || null;
 
     const { data, error } = await expenses(req)
       .update(updates)
@@ -294,7 +304,7 @@ app.delete('/expenses/:id', async (req, res) => {
 app.get('/bills', async (req, res) => {
   try {
     const { data, error } = await bills(req)
-      .select('*, vendor:vendors(id, name), payments(*, account:accounts(code, name))')
+      .select('*, vendor:vendors(id, name), payments(*, account:accounts(code, name)), vendor_credits(*, account:accounts(code, name))')
       .eq('tenant_id', req.tenantId)
       .order('created_at', { ascending: false });
 
@@ -932,6 +942,255 @@ app.post('/bank/reconcile', async (req, res) => {
       p_account: account_id,
       p_date: parseDate(statement_date, 'a statement date'),
       p_balance: balance
+    });
+
+    if (error) throw error;
+    res.status(201).json({ id: data });
+  } catch (error) {
+    sendError(res, error);
+  }
+});
+
+// Refunds and vendor credits
+app.post('/refunds', async (req, res) => {
+  try {
+    const { invoice_id, credit_date, amount, account_id, reason } = req.body;
+    const { data, error } = await ledger(req).rpc('create_refund', {
+      p_tenant: req.tenantId,
+      p_invoice: invoice_id,
+      p_date: parseDate(credit_date, 'a date'),
+      p_amount: parseAmount(amount),
+      p_account: account_id,
+      p_reason: reason
+    });
+
+    if (error) throw error;
+    res.status(201).json({ id: data });
+  } catch (error) {
+    sendError(res, error);
+  }
+});
+
+app.post('/vendor-credits', async (req, res) => {
+  try {
+    const { bill_id, credit_date, amount, account_id, reason } = req.body;
+    const { data, error } = await ledger(req).rpc('create_vendor_credit', {
+      p_tenant: req.tenantId,
+      p_bill: bill_id,
+      p_date: parseDate(credit_date, 'a date'),
+      p_amount: parseAmount(amount),
+      p_account: account_id,
+      p_reason: reason
+    });
+
+    if (error) throw error;
+    res.status(201).json({ id: data });
+  } catch (error) {
+    sendError(res, error);
+  }
+});
+
+app.post('/vendor-credits/:id/void', async (req, res) => {
+  try {
+    const { error } = await ledger(req).rpc('void_vendor_credit', {
+      p_tenant: req.tenantId,
+      p_credit: req.params.id
+    });
+
+    if (error) throw error;
+    res.json({ success: true });
+  } catch (error) {
+    sendError(res, error);
+  }
+});
+
+// Cost centers
+const costCenters = (req) => req.db.schema('accounting').from('cost_centers');
+
+app.get('/cost-centers', async (req, res) => {
+  try {
+    const { data, error } = await costCenters(req)
+      .select('*')
+      .eq('tenant_id', req.tenantId)
+      .order('code');
+
+    if (error) throw error;
+    res.json(data || []);
+  } catch (error) {
+    sendError(res, error);
+  }
+});
+
+app.post('/cost-centers', async (req, res) => {
+  try {
+    const { code, name } = req.body;
+    if (!code || !name) throw new Error('Code and name are required');
+
+    const { data, error } = await costCenters(req)
+      .insert([{ tenant_id: req.tenantId, code, name }])
+      .select();
+
+    if (error) throw error;
+    res.status(201).json(data[0]);
+  } catch (error) {
+    sendError(res, error);
+  }
+});
+
+app.put('/cost-centers/:id', async (req, res) => {
+  try {
+    const { data, error } = await costCenters(req)
+      .update({ is_active: Boolean(req.body.is_active) })
+      .eq('id', req.params.id)
+      .eq('tenant_id', req.tenantId)
+      .select();
+
+    if (error) throw error;
+    if (!data.length) return res.status(404).json({ error: 'Cost center not found' });
+    res.json(data[0]);
+  } catch (error) {
+    sendError(res, error);
+  }
+});
+
+app.get('/reports/cost-centers', async (req, res) => {
+  try {
+    const { data, error } = await ledger(req).rpc('pl_by_cost_center', {
+      p_tenant: req.tenantId,
+      p_from: parseDate(req.query.from, 'a start date'),
+      p_to: parseDate(req.query.to, 'an end date')
+    });
+
+    if (error) throw error;
+    res.json(data || []);
+  } catch (error) {
+    sendError(res, error);
+  }
+});
+
+// Budgets
+app.get('/budgets', async (req, res) => {
+  try {
+    const { data, error } = await ledger(req).from('budgets')
+      .select('*, lines:budget_lines(account_id, month, amount)')
+      .eq('tenant_id', req.tenantId)
+      .order('fiscal_year', { ascending: false });
+
+    if (error) throw error;
+    res.json(data || []);
+  } catch (error) {
+    sendError(res, error);
+  }
+});
+
+app.post('/budgets', async (req, res) => {
+  try {
+    const { id, name, fiscal_year, lines } = req.body;
+    if (!name) throw new Error('Name is required');
+    if (!Array.isArray(lines)) throw new Error('Add budget amounts');
+
+    const { data, error } = await ledger(req).rpc('save_budget', {
+      p_tenant: req.tenantId,
+      p_budget: id || null,
+      p_name: name,
+      p_year: Number(fiscal_year),
+      p_lines: lines
+    });
+
+    if (error) throw error;
+    res.status(201).json({ id: data });
+  } catch (error) {
+    sendError(res, error);
+  }
+});
+
+app.delete('/budgets/:id', async (req, res) => {
+  try {
+    const { error } = await ledger(req).rpc('delete_budget', {
+      p_tenant: req.tenantId,
+      p_budget: req.params.id
+    });
+
+    if (error) throw error;
+    res.json({ success: true });
+  } catch (error) {
+    sendError(res, error);
+  }
+});
+
+app.get('/budgets/:id/actual', async (req, res) => {
+  try {
+    const { data, error } = await ledger(req).rpc('budget_vs_actual', {
+      p_tenant: req.tenantId,
+      p_budget: req.params.id,
+      p_from_month: Number(req.query.from) || 1,
+      p_to_month: Number(req.query.to) || 12
+    });
+
+    if (error) throw error;
+    res.json(data);
+  } catch (error) {
+    sendError(res, error);
+  }
+});
+
+// Fixed assets
+app.get('/assets', async (req, res) => {
+  try {
+    const { data, error } = await ledger(req).rpc('asset_register', { p_tenant: req.tenantId });
+    if (error) throw error;
+    res.json(data || []);
+  } catch (error) {
+    sendError(res, error);
+  }
+});
+
+app.post('/assets', async (req, res) => {
+  try {
+    const { name, cost, salvage, life_months, start_date, paid_from } = req.body;
+    if (!name) throw new Error('Name is required');
+    if (!(Number(life_months) >= 1)) throw new Error('Enter the useful life in months');
+
+    const { data, error } = await ledger(req).rpc('register_asset', {
+      p_tenant: req.tenantId,
+      p_name: name,
+      p_cost: parseAmount(cost),
+      p_salvage: Number(salvage) || 0,
+      p_life_months: Number(life_months),
+      p_start: parseDate(start_date, 'a start date'),
+      p_paid_from: paid_from || null
+    });
+
+    if (error) throw error;
+    res.status(201).json({ id: data });
+  } catch (error) {
+    sendError(res, error);
+  }
+});
+
+app.post('/assets/depreciate', async (req, res) => {
+  try {
+    const { data, error } = await ledger(req).rpc('run_depreciation', {
+      p_tenant: req.tenantId,
+      p_through: parseDate(req.body.through, 'a date')
+    });
+
+    if (error) throw error;
+    res.json({ months_posted: data });
+  } catch (error) {
+    sendError(res, error);
+  }
+});
+
+app.post('/assets/:id/dispose', async (req, res) => {
+  try {
+    const { disposed_on, proceeds, account_id } = req.body;
+    const { data, error } = await ledger(req).rpc('dispose_asset', {
+      p_tenant: req.tenantId,
+      p_asset: req.params.id,
+      p_date: parseDate(disposed_on, 'a date'),
+      p_proceeds: Number(proceeds) || 0,
+      p_account: account_id || null
     });
 
     if (error) throw error;

@@ -6,7 +6,7 @@ import Modal from '@/components/Modal';
 import PaymentForm from '@/components/PaymentForm';
 import { api, formatDate, money, today } from '@/lib/api';
 
-const blankLine = { description: '', account_id: '', amount: '', tax_rate_id: '' };
+const blankLine = { description: '', account_id: '', amount: '', tax_rate_id: '', cost_center_id: '' };
 const blankBill = { vendor_id: '', vendor_ref: '', bill_date: '', due_date: '', notes: '', line_items: [blankLine] };
 
 const billBalance = (bill: any) => Number(bill.amount) - Number(bill.amount_paid);
@@ -20,6 +20,8 @@ function BillsApp() {
   const [vendors, setVendors] = useState<any[]>([]);
   const [accounts, setAccounts] = useState<any[]>([]);
   const [taxRates, setTaxRates] = useState<any[]>([]);
+  const [costCenters, setCostCenters] = useState<any[]>([]);
+  const [crediting, setCrediting] = useState<any>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState('');
   const [form, setForm] = useState<any>(null);
@@ -28,17 +30,19 @@ function BillsApp() {
 
   const load = async () => {
     try {
-      const [billRows, vendorRows, accountRows, rateRows] = await Promise.all([
+      const [billRows, vendorRows, accountRows, rateRows, centerRows] = await Promise.all([
         api.get('/api/accounting/bills'),
         api.get('/api/accounting/vendors'),
         api.get('/api/accounting/accounts'),
-        api.get('/api/accounting/tax-rates')
+        api.get('/api/accounting/tax-rates'),
+        api.get('/api/accounting/cost-centers')
       ]);
       setBills(billRows);
       setVendors(vendorRows);
       setTaxRates(rateRows);
+      setCostCenters(centerRows);
       setAccounts(accountRows.filter((account: any) =>
-        ['expense', 'asset'].includes(account.type) && account.is_active && !account.is_cash && account.code !== '1200'));
+        ['expense', 'asset'].includes(account.type) && account.is_active && !account.is_cash && !['1200', '1590'].includes(account.code)));
       setError('');
     } catch (err: any) {
       setError(err.message);
@@ -78,6 +82,12 @@ function BillsApp() {
     }
   };
 
+  const voidCredit = (credit: any) => {
+    if (window.confirm(`Void ${credit.credit_number}? Its ledger entry will be reversed.`)) {
+      run(() => api.post(`/api/accounting/vendor-credits/${credit.id}/void`, {}));
+    }
+  };
+
   const history = bills.find((bill) => bill.id === historyId);
 
   return (
@@ -112,9 +122,12 @@ function BillsApp() {
                         <button onClick={() => run(() => api.put(`/api/accounting/bills/${bill.id}`, { status: 'open' }))}>Approve</button>
                       )}
                       {(bill.status === 'open' || bill.status === 'partial') && (
-                        <button onClick={() => setPaying(bill)}>Pay</button>
+                        <>
+                          <button onClick={() => setPaying(bill)}>Pay</button>
+                          <button onClick={() => setCrediting(bill)}>Vendor credit</button>
+                        </>
                       )}
-                      {bill.payments.length > 0 && <button onClick={() => setHistoryId(bill.id)}>Payments</button>}
+                      {bill.payments.length + bill.vendor_credits.length > 0 && <button onClick={() => setHistoryId(bill.id)}>Payments</button>}
                       {bill.status !== 'void' && (
                         <button onClick={() => setForm({ ...bill, vendor_ref: bill.vendor_ref || '', due_date: bill.due_date || '', notes: bill.notes || '' })}>Edit</button>
                       )}
@@ -133,7 +146,7 @@ function BillsApp() {
         <p className="muted">Bills need a vendor. <Link href="/saas/accounting/vendors">Add your first vendor</Link>.</p>
       )}
 
-      {form && <BillForm initial={form} vendors={vendors} accounts={accounts} taxRates={taxRates} onClose={() => setForm(null)} onSaved={load} />}
+      {form && <BillForm initial={form} vendors={vendors} accounts={accounts} taxRates={taxRates} costCenters={costCenters} onClose={() => setForm(null)} onSaved={load} />}
       {paying && (
         <PaymentForm
           target={{ bill_id: paying.id }}
@@ -143,6 +156,7 @@ function BillsApp() {
           onSaved={load}
         />
       )}
+      {crediting && <VendorCreditForm bill={crediting} accounts={accounts} onClose={() => setCrediting(null)} onSaved={load} />}
       {history && (
         <Modal title={`Payments for ${history.bill_number}`}>
           <div className="table-wrap">
@@ -162,6 +176,19 @@ function BillsApp() {
                     </td>
                   </tr>
                 ))}
+                {history.vendor_credits.map((credit: any) => (
+                  <tr key={credit.id}>
+                    <td>{formatDate(credit.credit_date)}</td>
+                    <td>{credit.account?.code} {credit.account?.name}</td>
+                    <td className="wrap">{credit.credit_number}: {credit.reason}</td>
+                    <td className="num">{money(credit.amount)}</td>
+                    <td className="num">
+                      {credit.voided_at
+                        ? <span className="badge void">void</span>
+                        : <button className="danger" onClick={() => voidCredit(credit)}>Void</button>}
+                    </td>
+                  </tr>
+                ))}
               </tbody>
             </table>
           </div>
@@ -172,7 +199,49 @@ function BillsApp() {
   );
 }
 
-function BillForm({ initial, vendors, accounts, taxRates, onClose, onSaved }: { initial: any; vendors: any[]; accounts: any[]; taxRates: any[]; onClose: () => void; onSaved: () => void }) {
+function VendorCreditForm({ bill, accounts, onClose, onSaved }: { bill: any; accounts: any[]; onClose: () => void; onSaved: () => void }) {
+  const balance = billBalance(bill);
+  const [form, setForm] = useState({ amount: balance.toFixed(2), credit_date: today(), account_id: bill.line_items[0]?.account_id || '', reason: '' });
+  const [error, setError] = useState('');
+  const set = (field: string, value: string) => setForm({ ...form, [field]: value });
+
+  const submit = async (event: FormEvent) => {
+    event.preventDefault();
+    try {
+      await api.post('/api/accounting/vendor-credits', { bill_id: bill.id, ...form });
+      await onSaved();
+      onClose();
+    } catch (err: any) {
+      setError(err.message);
+    }
+  };
+
+  return (
+    <Modal title={`Vendor credit for ${bill.bill_number}`}>
+      <form onSubmit={submit}>
+        <p className="muted">Balance {money(balance)}</p>
+        <div className="form-grid">
+          <label>Amount<input required type="number" min="0.01" step="0.01" max={balance} value={form.amount} onChange={(e) => set('amount', e.target.value)} /></label>
+          <label>Date<input required type="date" value={form.credit_date} onChange={(e) => set('credit_date', e.target.value)} /></label>
+          <label>Take off account
+            <select required value={form.account_id} onChange={(e) => set('account_id', e.target.value)}>
+              <option value="">Choose an account</option>
+              {accounts.map((account) => <option key={account.id} value={account.id}>{account.code} {account.name}</option>)}
+            </select>
+          </label>
+        </div>
+        <label style={{ marginTop: 12 }}>Reason<textarea required rows={2} value={form.reason} onChange={(e) => set('reason', e.target.value)} /></label>
+        {error && <p className="error">{error}</p>}
+        <div className="form-actions">
+          <button className="primary">Save credit</button>
+          <button type="button" onClick={onClose}>Cancel</button>
+        </div>
+      </form>
+    </Modal>
+  );
+}
+
+function BillForm({ initial, vendors, accounts, taxRates, costCenters, onClose, onSaved }: { initial: any; vendors: any[]; accounts: any[]; taxRates: any[]; costCenters: any[]; onClose: () => void; onSaved: () => void }) {
   const [form, setForm] = useState<any>(initial);
   const [error, setError] = useState('');
   const set = (field: string, value: unknown) => setForm({ ...form, [field]: value });
@@ -230,6 +299,12 @@ function BillForm({ initial, vendors, accounts, taxRates, onClose, onSaved }: { 
                 <option value="">No tax</option>
                 {taxRates.filter((rate) => rate.is_active || rate.id === line.tax_rate_id).map((rate) => (
                   <option key={rate.id} value={rate.id}>{rate.name}</option>
+                ))}
+              </select>
+              <select aria-label="Cost center" value={line.cost_center_id || ''} onChange={(e) => setLine(index, 'cost_center_id', e.target.value)}>
+                <option value="">No center</option>
+                {costCenters.filter((center) => center.is_active || center.id === line.cost_center_id).map((center) => (
+                  <option key={center.id} value={center.id}>{center.code}</option>
                 ))}
               </select>
               <button type="button" aria-label="Remove line" disabled={form.line_items.length === 1} onClick={() => set('line_items', form.line_items.filter((_: any, i: number) => i !== index))}>×</button>

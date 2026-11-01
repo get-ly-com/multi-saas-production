@@ -10,7 +10,8 @@ const REPORTS = [
   { id: 'cash-flow', name: 'Cash flow', dates: 'range' },
   { id: 'aged/receivable', name: 'Aged receivables', dates: 'none' },
   { id: 'aged/payable', name: 'Aged payables', dates: 'none' },
-  { id: 'tax', name: 'Tax summary', dates: 'range' }
+  { id: 'tax', name: 'Tax summary', dates: 'range' },
+  { id: 'cost-centers', name: 'By cost center', dates: 'range' }
 ];
 
 export default function Reports() {
@@ -94,6 +95,7 @@ function ReportsApp() {
             {reportId === 'cash-flow' && <CashFlow data={data} />}
             {reportId.startsWith('aged') && <Aged data={data} />}
             {reportId === 'tax' && <TaxSummary data={data} />}
+            {reportId === 'cost-centers' && <ByCostCenter rows={data} />}
           </>
         )}
       </div>
@@ -180,6 +182,25 @@ function CashFlow({ data }: { data: any }) {
         <tr><td>Opening cash</td><td className="num">{money(data.opening)}</td></tr>
         <tr><td>Net change</td><td className="num">{money(data.net_change)}</td></tr>
         <Total label="Closing cash" value={data.closing} />
+      </tbody>
+    </table>
+  );
+}
+
+function ByCostCenter({ rows }: { rows: any[] }) {
+  return (
+    <table>
+      <thead><tr><th>Cost center</th><th className="num">Revenue</th><th className="num">Expenses</th><th className="num">Net</th></tr></thead>
+      <tbody>
+        {rows.length === 0 && <tr><td colSpan={4} className="empty">No activity in this period</td></tr>}
+        {rows.map((row) => (
+          <tr key={row.code}>
+            <td className="wrap">{row.code} {row.name}</td>
+            <td className="num">{money(row.revenue)}</td>
+            <td className="num">{money(row.expenses)}</td>
+            <td className="num">{money(row.net)}</td>
+          </tr>
+        ))}
       </tbody>
     </table>
   );

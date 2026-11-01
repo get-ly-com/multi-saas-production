@@ -1,8 +1,9 @@
 import Link from 'next/link';
 import { useRouter } from 'next/router';
-import { useEffect, useState } from 'react';
+import { FormEvent, useEffect, useState } from 'react';
 import AppShell from '@/components/AppShell';
-import { api, formatDate, money } from '@/lib/api';
+import Modal from '@/components/Modal';
+import { api, formatDate, money, today } from '@/lib/api';
 
 export default function Invoice() {
   return <AppShell><InvoiceDocument /></AppShell>;
@@ -14,6 +15,7 @@ function InvoiceDocument() {
   const [invoice, setInvoice] = useState<any>(null);
   const [company, setCompany] = useState('');
   const [error, setError] = useState('');
+  const [refunding, setRefunding] = useState(false);
 
   const load = async () => {
     try {
@@ -50,6 +52,7 @@ function InvoiceDocument() {
       <div className="page-head no-print">
         <Link href="/saas/accounting">← Invoices</Link>
         <div className="row-actions">
+          {Number(invoice.amount_paid) > 0 && <button onClick={() => setRefunding(true)}>Refund</button>}
           {invoice.status === 'sent' && (
             <button className="danger" onClick={() => run(
               `Void ${invoice.invoice_number}? Its ledger entry will be reversed.`,
@@ -150,7 +153,7 @@ function InvoiceDocument() {
             <tbody>
               {invoice.credit_notes.map((credit: any) => (
                 <tr key={credit.id}>
-                  <td>{credit.credit_number}</td>
+                  <td>{credit.credit_number}{credit.refund_account_id && <span className="badge">refund</span>}</td>
                   <td>{formatDate(credit.credit_date)}</td>
                   <td className="wrap">{credit.reason}</td>
                   <td className="num">{money(credit.amount)}</td>
@@ -168,6 +171,60 @@ function InvoiceDocument() {
           </table>
         </div>
       )}
+
+      {refunding && <RefundForm invoice={invoice} onClose={() => setRefunding(false)} onSaved={load} />}
     </div>
+  );
+}
+
+function RefundForm({ invoice, onClose, onSaved }: { invoice: any; onClose: () => void; onSaved: () => void }) {
+  const paid = Number(invoice.amount_paid);
+  const [accounts, setAccounts] = useState<any[]>([]);
+  const [form, setForm] = useState({ amount: paid.toFixed(2), credit_date: today(), account_id: '', reason: '' });
+  const [error, setError] = useState('');
+  const set = (field: string, value: string) => setForm((current) => ({ ...current, [field]: value }));
+
+  useEffect(() => {
+    api.get('/api/accounting/accounts')
+      .then((rows) => {
+        const usable = rows.filter((account: any) => account.is_cash && account.is_active);
+        setAccounts(usable);
+        if (usable[0]) set('account_id', usable[0].id);
+      })
+      .catch((err) => setError(err.message));
+  }, []);
+
+  const submit = async (event: FormEvent) => {
+    event.preventDefault();
+    try {
+      await api.post('/api/accounting/refunds', { invoice_id: invoice.id, ...form });
+      await onSaved();
+      onClose();
+    } catch (err: any) {
+      setError(err.message);
+    }
+  };
+
+  return (
+    <Modal title={`Refund on ${invoice.invoice_number}`}>
+      <form onSubmit={submit}>
+        <p className="muted">Paid so far {money(paid)}</p>
+        <div className="form-grid">
+          <label>Amount<input required type="number" min="0.01" step="0.01" max={paid} value={form.amount} onChange={(e) => set('amount', e.target.value)} /></label>
+          <label>Date<input required type="date" value={form.credit_date} onChange={(e) => set('credit_date', e.target.value)} /></label>
+          <label>Paid from
+            <select required value={form.account_id} onChange={(e) => set('account_id', e.target.value)}>
+              {accounts.map((account) => <option key={account.id} value={account.id}>{account.code} {account.name}</option>)}
+            </select>
+          </label>
+        </div>
+        <label style={{ marginTop: 12 }}>Reason<textarea required rows={2} value={form.reason} onChange={(e) => set('reason', e.target.value)} /></label>
+        {error && <p className="error">{error}</p>}
+        <div className="form-actions">
+          <button className="primary">Record refund</button>
+          <button type="button" onClick={onClose}>Cancel</button>
+        </div>
+      </form>
+    </Modal>
   );
 }

@@ -7,8 +7,8 @@ import PaymentForm from '@/components/PaymentForm';
 import { api, formatDate, money, today } from '@/lib/api';
 
 const blankLine = { description: '', quantity: '1', unit_price: '', tax_rate_id: '' };
-const blankInvoice = { customer_id: '', invoice_date: '', due_date: '', description: '', line_items: [blankLine] };
-const blankExpense = { amount: '', category: '', description: '', expense_date: '', account_id: '' };
+const blankInvoice = { customer_id: '', invoice_date: '', due_date: '', description: '', cost_center_id: '', line_items: [blankLine] };
+const blankExpense = { amount: '', category: '', description: '', expense_date: '', account_id: '', cost_center_id: '' };
 
 const invoiceBalance = (invoice: any) =>
   Number(invoice.amount) - Number(invoice.amount_paid) - Number(invoice.amount_credited);
@@ -27,6 +27,7 @@ function AccountingApp() {
   const [accounts, setAccounts] = useState<any[]>([]);
   const [customers, setCustomers] = useState<any[]>([]);
   const [taxRates, setTaxRates] = useState<any[]>([]);
+  const [costCenters, setCostCenters] = useState<any[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState('');
   const [invoiceForm, setInvoiceForm] = useState<any>(null);
@@ -36,19 +37,21 @@ function AccountingApp() {
 
   const load = async () => {
     try {
-      const [invoiceRows, expenseRows, analytics, accountRows, customerRows, rateRows] = await Promise.all([
+      const [invoiceRows, expenseRows, analytics, accountRows, customerRows, rateRows, centerRows] = await Promise.all([
         api.get('/api/accounting/invoices'),
         api.get('/api/accounting/expenses'),
         api.get('/api/accounting/analytics'),
         api.get('/api/accounting/accounts'),
         api.get('/api/accounting/customers'),
-        api.get('/api/accounting/tax-rates')
+        api.get('/api/accounting/tax-rates'),
+        api.get('/api/accounting/cost-centers')
       ]);
       setInvoices(invoiceRows);
       setExpenses(expenseRows);
       setSummary(analytics);
       setCustomers(customerRows);
       setTaxRates(rateRows);
+      setCostCenters(centerRows);
       setAccounts(accountRows.filter((account: any) => account.type === 'expense' && account.is_active));
       setError('');
     } catch (err: any) {
@@ -180,7 +183,7 @@ function AccountingApp() {
         )}
       </div>
 
-      {invoiceForm && <InvoiceForm initial={invoiceForm} customers={customers} taxRates={taxRates} onClose={() => setInvoiceForm(null)} onSaved={load} />}
+      {invoiceForm && <InvoiceForm initial={invoiceForm} customers={customers} taxRates={taxRates} costCenters={costCenters} onClose={() => setInvoiceForm(null)} onSaved={load} />}
       {paying && (
         <PaymentForm
           target={{ invoice_id: paying.id }}
@@ -191,7 +194,7 @@ function AccountingApp() {
         />
       )}
       {crediting && <CreditForm invoice={crediting} onClose={() => setCrediting(null)} onSaved={load} />}
-      {expenseForm && <ExpenseForm initial={expenseForm} accounts={accounts} onClose={() => setExpenseForm(null)} onSaved={load} />}
+      {expenseForm && <ExpenseForm initial={expenseForm} accounts={accounts} costCenters={costCenters} onClose={() => setExpenseForm(null)} onSaved={load} />}
     </div>
   );
 }
@@ -241,7 +244,20 @@ function CreditForm({ invoice, onClose, onSaved }: { invoice: any; onClose: () =
   );
 }
 
-function InvoiceForm({ initial, customers, taxRates, onClose, onSaved }: { initial: any; customers: any[]; taxRates: any[]; onClose: () => void; onSaved: () => void }) {
+function CostCenterSelect({ value, costCenters, onChange }: { value: string; costCenters: any[]; onChange: (value: string) => void }) {
+  return (
+    <label>Cost center
+      <select value={value || ''} onChange={(e) => onChange(e.target.value)}>
+        <option value="">None</option>
+        {costCenters.filter((center) => center.is_active || center.id === value).map((center) => (
+          <option key={center.id} value={center.id}>{center.code} {center.name}</option>
+        ))}
+      </select>
+    </label>
+  );
+}
+
+function InvoiceForm({ initial, customers, taxRates, costCenters, onClose, onSaved }: { initial: any; customers: any[]; taxRates: any[]; costCenters: any[]; onClose: () => void; onSaved: () => void }) {
   const [form, setForm] = useState<any>(initial);
   const [error, setError] = useState('');
   const set = (field: string, value: unknown) => setForm({ ...form, [field]: value });
@@ -257,8 +273,8 @@ function InvoiceForm({ initial, customers, taxRates, onClose, onSaved }: { initi
 
   const submit = async (event: FormEvent) => {
     event.preventDefault();
-    const { customer_id, invoice_date, due_date, description, line_items } = form;
-    const body = { customer_id, invoice_date, due_date, description, line_items };
+    const { customer_id, invoice_date, due_date, description, line_items, cost_center_id } = form;
+    const body = { customer_id, invoice_date, due_date, description, line_items, cost_center_id };
     try {
       if (form.id) await api.put(`/api/accounting/invoices/${form.id}`, body);
       else await api.post('/api/accounting/invoices', body);
@@ -283,6 +299,7 @@ function InvoiceForm({ initial, customers, taxRates, onClose, onSaved }: { initi
           </label>
           <label>Invoice date<input required type="date" value={form.invoice_date} onChange={(e) => set('invoice_date', e.target.value)} /></label>
           <label>Due date<input type="date" value={form.due_date} onChange={(e) => set('due_date', e.target.value)} /></label>
+          <CostCenterSelect value={form.cost_center_id} costCenters={costCenters} onChange={(value) => set('cost_center_id', value)} />
         </div>
         {customers.length === 0 && <p className="muted"><Link href="/saas/accounting/customers">Add your first customer</Link> to create an invoice.</p>}
         <div className="lines">
@@ -314,15 +331,15 @@ function InvoiceForm({ initial, customers, taxRates, onClose, onSaved }: { initi
   );
 }
 
-function ExpenseForm({ initial, accounts, onClose, onSaved }: { initial: any; accounts: any[]; onClose: () => void; onSaved: () => void }) {
+function ExpenseForm({ initial, accounts, costCenters, onClose, onSaved }: { initial: any; accounts: any[]; costCenters: any[]; onClose: () => void; onSaved: () => void }) {
   const [form, setForm] = useState<any>(initial);
   const [error, setError] = useState('');
   const set = (field: string, value: string) => setForm({ ...form, [field]: value });
 
   const submit = async (event: FormEvent) => {
     event.preventDefault();
-    const { amount, category, description, expense_date, account_id } = form;
-    const body = { amount, category, description, expense_date, account_id };
+    const { amount, category, description, expense_date, account_id, cost_center_id } = form;
+    const body = { amount, category, description, expense_date, account_id, cost_center_id };
     try {
       if (form.id) await api.put(`/api/accounting/expenses/${form.id}`, body);
       else await api.post('/api/accounting/expenses', body);
@@ -346,6 +363,7 @@ function ExpenseForm({ initial, accounts, onClose, onSaved }: { initial: any; ac
             </select>
           </label>
           <label>Category<input value={form.category} onChange={(e) => set('category', e.target.value)} /></label>
+          <CostCenterSelect value={form.cost_center_id} costCenters={costCenters} onChange={(value) => set('cost_center_id', value)} />
         </div>
         <label style={{ marginTop: 12 }}>Description<textarea rows={2} value={form.description} onChange={(e) => set('description', e.target.value)} /></label>
         {error && <p className="error">{error}</p>}

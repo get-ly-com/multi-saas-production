@@ -72,7 +72,7 @@ h2 { font-size: 17px; margin: 0 0 12px; }
 .subnav { display: flex; gap: 4px; flex-wrap: wrap; border-bottom: 1px solid var(--border); padding-bottom: 8px; }
 .subnav a { color: var(--muted); padding: 4px 10px; border-radius: 6px; }
 .subnav a.active { background: var(--sunken); color: var(--text); font-weight: 600; }
-.journal-line { display: grid; grid-template-columns: 1fr 100px 100px 32px; gap: 8px; align-items: center; }
+.journal-line { display: grid; grid-template-columns: 1fr 110px 100px 100px 32px; gap: 8px; align-items: center; }
 .journal-line button { padding: 6px 0; }
 tr.total td { font-weight: 600; border-top: 2px solid var(--border); }
 .table-wrap { overflow-x: auto; }
@@ -117,7 +117,7 @@ input, select, textarea {
 .lines { display: grid; gap: 8px; margin: 12px 0; }
 .line { display: grid; grid-template-columns: 1fr 70px 100px 110px 32px; gap: 8px; align-items: center; }
 .line button { padding: 6px 0; }
-.bill-line { display: grid; grid-template-columns: 1fr 1fr 100px 110px 32px; gap: 8px; align-items: center; }
+.bill-line { display: grid; grid-template-columns: 1fr 1fr 90px 100px 100px 32px; gap: 8px; align-items: center; }
 .bill-line button { padding: 6px 0; }
 
 .document { display: grid; gap: 24px; }
@@ -130,6 +130,8 @@ input, select, textarea {
 .muted { color: var(--muted); }
 .report-filters { display: flex; gap: 12px; flex-wrap: wrap; }
 .report-filters label { width: 170px; }
+.budget-grid input { width: 84px; padding: 4px 6px; }
+.budget-grid td { padding: 4px; }
 tr.section td { font-weight: 600; padding-top: 16px; }
 
 .modal-back { position: fixed; inset: 0; background: rgba(15, 23, 32, 0.5); display: flex; align-items: flex-start; justify-content: center; padding: 40px 16px; overflow-y: auto; z-index: 10; }

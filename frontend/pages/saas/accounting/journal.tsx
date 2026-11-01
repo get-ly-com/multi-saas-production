@@ -4,15 +4,10 @@ import AppShell from '@/components/AppShell';
 import Modal from '@/components/Modal';
 import { api, formatDate, money } from '@/lib/api';
 
-const blankLine = { account_id: '', debit: '', credit: '' };
+const blankLine = { account_id: '', cost_center_id: '', debit: '', credit: '' };
 const today = () => new Date().toISOString().slice(0, 10);
 
-const SOURCES: Record<string, string> = {
-  manual: 'manual',
-  invoice: 'invoice',
-  invoice_payment: 'payment',
-  expense: 'expense'
-};
+const sourceLabel = (source: string) => (source === 'invoice_payment' ? 'payment' : source.replace('_', ' '));
 
 export default function Journal() {
   return <AppShell><JournalApp /></AppShell>;
@@ -21,16 +16,19 @@ export default function Journal() {
 function JournalApp() {
   const [entries, setEntries] = useState<any[]>([]);
   const [accounts, setAccounts] = useState<any[]>([]);
+  const [costCenters, setCostCenters] = useState<any[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState('');
   const [creating, setCreating] = useState(false);
 
   const load = async () => {
     try {
-      const [entryRows, accountRows] = await Promise.all([
+      const [entryRows, accountRows, centerRows] = await Promise.all([
         api.get('/api/accounting/journal'),
-        api.get('/api/accounting/accounts')
+        api.get('/api/accounting/accounts'),
+        api.get('/api/accounting/cost-centers')
       ]);
+      setCostCenters(centerRows.filter((center: any) => center.is_active));
       setEntries(entryRows);
       setAccounts(accountRows.filter((account: any) => account.is_active));
       setError('');
@@ -78,7 +76,7 @@ function JournalApp() {
                   <td>{index === 0 ? entry.entry_number : ''}</td>
                   <td>{index === 0 ? formatDate(entry.entry_date) : ''}</td>
                   <td className="wrap">
-                    {index === 0 && <>{entry.memo} <span className="badge">{SOURCES[entry.source_type]}</span></>}
+                    {index === 0 && <>{entry.memo} <span className="badge">{sourceLabel(entry.source_type)}</span></>}
                     {index === 0 && entry.reversed && <> <span className="badge void">reversed</span></>}
                   </td>
                   <td>{line.account.code} {line.account.name}</td>
@@ -96,12 +94,12 @@ function JournalApp() {
         )}
       </div>
 
-      {creating && <EntryForm accounts={accounts} onClose={() => setCreating(false)} onSaved={load} />}
+      {creating && <EntryForm accounts={accounts} costCenters={costCenters} onClose={() => setCreating(false)} onSaved={load} />}
     </div>
   );
 }
 
-function EntryForm({ accounts, onClose, onSaved }: { accounts: any[]; onClose: () => void; onSaved: () => void }) {
+function EntryForm({ accounts, costCenters, onClose, onSaved }: { accounts: any[]; costCenters: any[]; onClose: () => void; onSaved: () => void }) {
   const [date, setDate] = useState(today());
   const [memo, setMemo] = useState('');
   const [lines, setLines] = useState([blankLine, blankLine]);
@@ -121,8 +119,9 @@ function EntryForm({ accounts, onClose, onSaved }: { accounts: any[]; onClose: (
       await api.post('/api/accounting/journal', {
         entry_date: date,
         memo,
-        lines: lines.map(({ account_id, debit, credit }) => ({
+        lines: lines.map(({ account_id, cost_center_id, debit, credit }) => ({
           account_id,
+          cost_center_id: cost_center_id || null,
           debit: Number(debit || 0),
           credit: Number(credit || 0)
         }))
@@ -147,6 +146,10 @@ function EntryForm({ accounts, onClose, onSaved }: { accounts: any[]; onClose: (
               <select required aria-label="Account" value={line.account_id} onChange={(e) => setLine(index, 'account_id', e.target.value)}>
                 <option value="">Choose account</option>
                 {accounts.map((account) => <option key={account.id} value={account.id}>{account.code} {account.name}</option>)}
+              </select>
+              <select aria-label="Cost center" value={line.cost_center_id} onChange={(e) => setLine(index, 'cost_center_id', e.target.value)}>
+                <option value="">No center</option>
+                {costCenters.map((center) => <option key={center.id} value={center.id}>{center.code}</option>)}
               </select>
               <input aria-label="Debit" placeholder="Debit" type="number" min="0" step="0.01" value={line.debit} onChange={(e) => setLine(index, 'debit', e.target.value)} />
               <input aria-label="Credit" placeholder="Credit" type="number" min="0" step="0.01" value={line.credit} onChange={(e) => setLine(index, 'credit', e.target.value)} />
