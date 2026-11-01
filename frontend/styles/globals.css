@@ -158,6 +158,20 @@ tr.section td { font-weight: 600; padding-top: 16px; }
 .deal-title { font-weight: 600; }
 .deal-meta { color: var(--muted); font-size: 13px; }
 .deal select { margin-top: 6px; font-size: 13px; padding: 3px 6px; }
+.deal[draggable] { cursor: grab; }
+.late { color: var(--danger); }
+
+.crm-nav { display: flex; gap: 12px; align-items: flex-start; flex-wrap: wrap; justify-content: space-between; }
+.crm-nav .subnav { flex: 1 1 auto; }
+.crm-search { position: relative; width: 280px; max-width: 100%; }
+.crm-results { position: absolute; top: 100%; left: 0; right: 0; margin-top: 4px; background: var(--surface); border: 1px solid var(--border); border-radius: 6px; padding: 6px; z-index: 5; display: grid; gap: 2px; }
+.crm-results a { padding: 4px 6px; border-radius: 4px; }
+.crm-results p { margin: 4px 6px; }
+.timeline { display: grid; gap: 8px; margin-top: 16px; }
+.timeline-item { display: flex; justify-content: space-between; gap: 12px; border-top: 1px solid var(--border); padding-top: 8px; }
+.stage-bar { display: flex; gap: 4px; flex-wrap: wrap; }
+.stage-line { display: grid; grid-template-columns: 1fr 100px 80px 32px 32px 32px; gap: 6px; align-items: center; }
+.stage-line button { padding: 6px 0; }
 
 .auth { max-width: 380px; margin: 64px auto; padding: 0 16px; }
 .auth form { display: grid; gap: 12px; margin-top: 16px; }
