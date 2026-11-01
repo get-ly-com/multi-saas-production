@@ -135,7 +135,7 @@ function LeadApp() {
 
           {lead.notes && <div className="card wrap">{lead.notes}</div>}
           <CustomValues entity="lead" values={lead.custom} />
-          <Timeline links={{ lead_id: lead.id }} onChange={load} />
+          {lead.status !== 'converted' && <Timeline links={{ lead_id: lead.id }} onChange={load} />}
 
           {form === 'edit' && <LeadForm initial={lead} onClose={() => setForm('')} onSaved={load} />}
           {form === 'disqualify' && <DisqualifyForm lead={lead} onClose={() => setForm('')} onSaved={load} />}

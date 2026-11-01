@@ -70,7 +70,7 @@ export function DisqualifyForm({ lead, onClose, onSaved }: { lead: any; onClose:
 export function ConvertForm({ lead, matches, onClose }: { lead: any; matches: any[]; onClose: () => void }) {
   const router = useRouter();
   const sameEmail = matches.find((contact) => lead.email && contact.email?.toLowerCase() === lead.email);
-  const [contactId, setContactId] = useState(sameEmail?.id || '');
+  const [contactId, setContactId] = useState('');
   const [wantDeal, setWantDeal] = useState(true);
   const [deal, setDeal] = useState({ title: `${lead.company_name || lead.name} deal`, value: '', stage_id: '', expected_close: '' });
   const [pipelines, setPipelines] = useState<any[]>([]);
@@ -97,7 +97,7 @@ export function ConvertForm({ lead, matches, onClose }: { lead: any; matches: an
           <label>Contact
             <select value={contactId} onChange={(e) => setContactId(e.target.value)}>
               <option value="">{sameEmail ? `Use ${sameEmail.name}, same email` : 'Create a new contact'}</option>
-              {matches.map((contact) => <option key={contact.id} value={contact.id}>Add to {contact.name}{contact.company_name ? `, ${contact.company_name}` : ''}</option>)}
+              {matches.filter((contact) => contact !== sameEmail).map((contact) => <option key={contact.id} value={contact.id}>Add to {contact.name}{contact.company_name ? `, ${contact.company_name}` : ''}</option>)}
             </select>
           </label>
         </div>
