@@ -23,9 +23,10 @@ function QuoteApp() {
   const load = async () => {
     try {
       const [row, me] = await Promise.all([api.get(`/api/crm/quotes/${id}`), api.get('/api/me')]);
+      const linked = row.invoice_id ? await api.get(`/api/accounting/invoices/${row.invoice_id}`) : null;
       setQuote(row);
+      setInvoice(linked);
       setCompany(me.tenant.name);
-      setInvoice(row.invoice_id ? await api.get(`/api/accounting/invoices/${row.invoice_id}`) : null);
       setError('');
     } catch (err: any) {
       setError(err.message);

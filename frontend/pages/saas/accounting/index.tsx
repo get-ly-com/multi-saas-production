@@ -315,7 +315,7 @@ function InvoiceForm({ initial, customers, taxRates, costCenters, onClose, onSav
             <div className="line" key={index}>
               <input required aria-label="Description" placeholder="Description" value={line.description} onChange={(e) => setLine(index, 'description', e.target.value)} />
               <input required aria-label="Quantity" type="number" min="0.01" step="0.01" value={line.quantity} onChange={(e) => setLine(index, 'quantity', e.target.value)} />
-              <input required aria-label="Unit price" placeholder="Price" type="number" min="0" step="0.01" value={line.unit_price} onChange={(e) => setLine(index, 'unit_price', e.target.value)} />
+              <input required aria-label="Unit price" placeholder="Price" type="number" min="0" step="any" value={line.unit_price} onChange={(e) => setLine(index, 'unit_price', e.target.value)} />
               <select aria-label="Tax" value={line.tax_rate_id || ''} onChange={(e) => setLine(index, 'tax_rate_id', e.target.value)}>
                 <option value="">No tax</option>
                 {taxRates.filter((rate) => rate.is_active || rate.id === line.tax_rate_id).map((rate) => (
