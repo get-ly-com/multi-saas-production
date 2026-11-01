@@ -175,6 +175,16 @@ tr.section td { font-weight: 600; padding-top: 16px; }
 .quote-line { display: grid; grid-template-columns: 1fr 1.2fr 64px 84px 64px 100px 32px; gap: 6px; align-items: center; }
 .quote-line button { padding: 6px 0; }
 .quote-line + .late { margin: 4px 0 0; font-size: 13px; }
+.score-rule { display: grid; grid-template-columns: 1.2fr 1fr 80px 32px; gap: 6px; align-items: center; }
+.score-rule button { padding: 6px 0; }
+.score-line { display: flex; justify-content: space-between; gap: 12px; padding: 2px 0; }
+.saved-views { display: flex; gap: 12px; align-items: flex-end; flex-wrap: wrap; }
+.saved-views label:not(.check) { flex: 1 1 200px; }
+.saved-views label.check { margin-top: 0; padding-bottom: 8px; }
+.facts { display: grid; grid-template-columns: repeat(auto-fit, minmax(170px, 1fr)); gap: 12px; }
+.duplicate-group + .duplicate-group { margin-top: 16px; }
+.public-form { max-width: 480px; margin: 0 auto; padding: 24px 16px; }
+.trap { position: absolute; left: -9999px; }
 
 .auth { max-width: 380px; margin: 64px auto; padding: 0 16px; }
 .auth form { display: grid; gap: 12px; margin-top: 16px; }

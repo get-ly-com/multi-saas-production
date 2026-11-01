@@ -3,6 +3,7 @@ import { useEffect, useState } from 'react';
 import AppShell from '@/components/AppShell';
 import CrmNav from '@/components/CrmNav';
 import { DealForm } from '@/components/CrmForms';
+import { scoreBadge, scoreLabel } from '@/components/LeadForms';
 import { api, formatDate, money, today } from '@/lib/api';
 
 const monthName = (month: string) =>
@@ -14,12 +15,15 @@ export default function Crm() {
 
 function TodayApp() {
   const [data, setData] = useState<any>(null);
+  const [leads, setLeads] = useState<any>(null);
   const [error, setError] = useState('');
   const [adding, setAdding] = useState(false);
 
   const load = async () => {
     try {
-      setData(await api.get('/api/crm/overview'));
+      const [overview, summary] = await Promise.all([api.get('/api/crm/overview'), api.get('/api/crm/leads/summary')]);
+      setData(overview);
+      setLeads(summary);
       setError('');
     } catch (err: any) {
       setError(err.message);
@@ -79,6 +83,26 @@ function TodayApp() {
               </tbody>
             </table>
           </div>
+
+          {leads && Number(leads.open) > 0 && (
+            <div className="card table-wrap">
+              <h2>Leads to work</h2>
+              <p className="muted">
+                <Link href="/saas/crm/leads">{leads.open} open</Link>, {leads.new} new{Number(leads.unassigned) > 0 && `, ${leads.unassigned} unassigned`}
+              </p>
+              <table>
+                <tbody>
+                  {leads.top.map((lead: any) => (
+                    <tr key={lead.id}>
+                      <td className="wrap"><Link href={`/saas/crm/lead/${lead.id}`}>{lead.name}</Link></td>
+                      <td className="wrap">{lead.company_name || '—'}</td>
+                      <td className="num">{lead.score} <span className={`badge ${scoreBadge(lead.score)}`}>{scoreLabel(lead.score)}</span></td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+          )}
 
           {(data.stale_deals.length > 0 || Number(data.late_deals) > 0 || Number(data.undated_deals) > 0) && (
             <div className="card table-wrap">

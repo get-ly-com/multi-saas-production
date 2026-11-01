@@ -35,6 +35,36 @@ export const parseCsv = (text: string) => {
   return rows.filter((cells) => cells.some((cell) => cell.trim()));
 };
 
+// Spreadsheet exports name these columns in many ways
+const COLUMN_NAMES: Record<string, string[]> = {
+  name: ['name', 'full name', 'contact', 'contact name', 'lead', 'lead name'],
+  first: ['first name', 'firstname', 'given name'],
+  last: ['last name', 'lastname', 'surname', 'family name'],
+  email: ['email', 'e-mail', 'email address'],
+  phone: ['phone', 'mobile', 'telephone', 'phone number'],
+  company: ['company', 'account', 'organization', 'organisation', 'company name'],
+  job_title: ['title', 'job title', 'position', 'role'],
+  source: ['source', 'lead source']
+};
+
+export const readPeople = (text: string) => {
+  const [head, ...rows] = parseCsv(text);
+  if (!head) return [];
+
+  const headers = head.map((cell) => cell.trim().toLowerCase());
+  const column = (field: string) => headers.findIndex((header) => COLUMN_NAMES[field].includes(header));
+  const cell = (row: string[], field: string) => (column(field) >= 0 ? (row[column(field)] || '').trim() : '');
+
+  return rows.map((row) => ({
+    name: cell(row, 'name') || `${cell(row, 'first')} ${cell(row, 'last')}`.trim(),
+    email: cell(row, 'email'),
+    phone: cell(row, 'phone'),
+    company: cell(row, 'company'),
+    job_title: cell(row, 'job_title'),
+    source: cell(row, 'source')
+  }));
+};
+
 export const DATE_FORMATS = ['YYYY-MM-DD', 'DD/MM/YYYY', 'MM/DD/YYYY'];
 
 export const parseStatementDate = (value: string, format: string) => {

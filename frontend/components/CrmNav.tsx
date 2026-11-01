@@ -6,10 +6,12 @@ import { api } from '@/lib/api';
 const SECTIONS = [
   { name: 'Today', path: '/saas/crm' },
   { name: 'Pipeline', path: '/saas/crm/pipeline' },
+  { name: 'Leads', path: '/saas/crm/leads' },
   { name: 'Contacts', path: '/saas/crm/contacts' },
   { name: 'Companies', path: '/saas/crm/companies' },
   { name: 'Quotes', path: '/saas/crm/quotes' },
   { name: 'Tasks', path: '/saas/crm/tasks' },
+  { name: 'Duplicates', path: '/saas/crm/duplicates' },
   { name: 'Settings', path: '/saas/crm/settings' }
 ];
 
@@ -33,7 +35,7 @@ export default function CrmNav() {
     };
   }, [query]);
 
-  const empty = results && !results.contacts.length && !results.companies.length && !results.deals.length;
+  const empty = results && !results.contacts.length && !results.companies.length && !results.deals.length && !results.leads.length;
 
   return (
     <div className="crm-nav">
@@ -43,10 +45,11 @@ export default function CrmNav() {
         ))}
       </nav>
       <div className="crm-search">
-        <input aria-label="Search the CRM" placeholder="Search contacts, companies and deals" value={query} onChange={(e) => setQuery(e.target.value)} />
+        <input aria-label="Search the CRM" placeholder="Search the CRM" value={query} onChange={(e) => setQuery(e.target.value)} />
         {results && (
           <div className="crm-results">
             {empty && <p className="muted">No matches</p>}
+            {results.leads.map((row: any) => <Link key={row.id} href={`/saas/crm/lead/${row.id}`}>{row.name}<span className="muted"> · lead</span></Link>)}
             {results.contacts.map((row: any) => <Link key={row.id} href={`/saas/crm/contact/${row.id}`}>{row.name}<span className="muted"> · contact</span></Link>)}
             {results.companies.map((row: any) => <Link key={row.id} href={`/saas/crm/company/${row.id}`}>{row.name}<span className="muted"> · company</span></Link>)}
             {results.deals.map((row: any) => <Link key={row.id} href={`/saas/crm/deal/${row.id}`}>{row.title}<span className="muted"> · deal</span></Link>)}

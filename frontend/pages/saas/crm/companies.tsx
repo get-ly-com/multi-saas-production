@@ -2,7 +2,9 @@ import Link from 'next/link';
 import { useEffect, useState } from 'react';
 import AppShell from '@/components/AppShell';
 import CrmNav from '@/components/CrmNav';
-import { CompanyForm } from '@/components/CrmForms';
+import { CompanyForm, useTeam } from '@/components/CrmForms';
+import { useCustomFields } from '@/components/CustomFields';
+import SavedViews, { Filters, ListFilters, matchesFilters } from '@/components/SavedViews';
 import { api } from '@/lib/api';
 
 export default function Companies() {
@@ -10,8 +12,10 @@ export default function Companies() {
 }
 
 function CompaniesApp() {
+  const members = useTeam();
+  const fields = useCustomFields('company');
   const [companies, setCompanies] = useState<any[]>([]);
-  const [search, setSearch] = useState('');
+  const [filters, setFilters] = useState<Filters>({});
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState('');
   const [adding, setAdding] = useState(false);
@@ -31,8 +35,7 @@ function CompaniesApp() {
     load();
   }, []);
 
-  const query = search.trim().toLowerCase();
-  const visible = companies.filter((company) => [company.name, company.industry].some((field) => (field || '').toLowerCase().includes(query)));
+  const visible = companies.filter((company) => matchesFilters(company, filters, fields, [company.name, company.industry]));
 
   return (
     <div className="stack">
@@ -44,7 +47,13 @@ function CompaniesApp() {
 
       {error && <p className="error">{error}</p>}
 
-      <input aria-label="Filter companies" placeholder="Filter by name or industry" value={search} onChange={(e) => setSearch(e.target.value)} />
+      <div className="card stack">
+        <SavedViews entity="company" filters={filters} onApply={setFilters} />
+        <div className="form-grid">
+          <label>Search<input aria-label="Filter companies" placeholder="Name or industry" value={filters.search || ''} onChange={(e) => setFilters({ ...filters, search: e.target.value })} /></label>
+          <ListFilters filters={filters} onChange={setFilters} members={members} fields={fields} />
+        </div>
+      </div>
 
       <div className="card table-wrap">
         {loading ? <p className="empty">Loading…</p> : (

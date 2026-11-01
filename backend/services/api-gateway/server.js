@@ -145,6 +145,39 @@ app.put('/api/team/members/:id', requireUser, requireTenant, express.json(), (re
 app.delete('/api/team/members/:id', requireUser, requireTenant, (req, res) =>
   callFunction(req, res, 'remove_member', { p_tenant: req.tenantId, p_user: req.params.id }));
 
+// Public web forms. There is no signed-in user, so each company is found by its private form key.
+const formLimit = rateLimit({ windowMs: 60 * 1000, limit: 10, standardHeaders: true, legacyHeaders: false });
+
+const publicDb = () =>
+  createClient(process.env.SUPABASE_URL, process.env.SUPABASE_ANON_KEY, {
+    auth: { persistSession: false, autoRefreshToken: false }
+  });
+
+app.get('/api/forms/:key', async (req, res) => {
+  const { data, error } = await publicDb().rpc('form_info', { p_key: req.params.key });
+  if (error) return res.status(400).json({ error: 'This form is not available' });
+  if (!data) return res.status(404).json({ error: 'This form is not available' });
+  res.json(data);
+});
+
+app.post('/api/forms/:key', formLimit, express.json({ limit: '16kb' }), async (req, res) => {
+  // Real visitors never see the website box, so anything in it came from a bot
+  if (req.body?.website) return res.json({ thanks: 'Thank you.' });
+
+  const { data, error } = await publicDb().rpc('capture_lead', {
+    p_key: req.params.key,
+    p_lead: {
+      name: req.body?.name,
+      email: req.body?.email,
+      phone: req.body?.phone,
+      company: req.body?.company,
+      message: req.body?.message
+    }
+  });
+  if (error) return res.status(400).json({ error: error.message });
+  res.status(201).json(data);
+});
+
 // Service routing - internal services
 const serviceRoutes = [
   { path: '/api/accounting', service: 'accounting-service', port: 3001 },

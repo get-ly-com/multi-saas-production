@@ -9,9 +9,9 @@ const KINDS = [
   { id: 'task', name: 'Task' }
 ];
 
-type Links = { contact_id?: string; company_id?: string; deal_id?: string };
+type Links = { contact_id?: string; company_id?: string; deal_id?: string; lead_id?: string };
 
-export default function Timeline({ links, extra = [] }: { links: Links; extra?: { id: string; at: string; content: ReactNode }[] }) {
+export default function Timeline({ links, extra = [], onChange }: { links: Links; extra?: { id: string; at: string; content: ReactNode }[]; onChange?: () => void }) {
   const [items, setItems] = useState<any[]>([]);
   const [form, setForm] = useState({ kind: 'note', subject: '', body: '', due_on: '' });
   const [error, setError] = useState('');
@@ -36,6 +36,7 @@ export default function Timeline({ links, extra = [] }: { links: Links; extra?: 
       await api.post('/api/crm/activities', { ...links, ...form, due_on: form.kind === 'task' ? form.due_on || today() : '' });
       setForm({ ...form, subject: '', body: '', due_on: '' });
       await load();
+      onChange?.();
     } catch (err: any) {
       setError(err.message);
     }
@@ -45,6 +46,7 @@ export default function Timeline({ links, extra = [] }: { links: Links; extra?: 
     try {
       await action();
       await load();
+      onChange?.();
     } catch (err: any) {
       setError(err.message);
     }

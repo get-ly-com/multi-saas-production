@@ -5,6 +5,7 @@ import AppShell from '@/components/AppShell';
 import Billing from '@/components/Billing';
 import CrmNav from '@/components/CrmNav';
 import { ContactForm, DealForm } from '@/components/CrmForms';
+import { CustomValues } from '@/components/CustomFields';
 import Timeline from '@/components/Timeline';
 import { api, money } from '@/lib/api';
 
@@ -56,7 +57,7 @@ function ContactApp() {
             <div>
               <h1>{contact.name}</h1>
               <p className="muted">
-                {[contact.job_title, contact.email, contact.phone].filter(Boolean).join(' · ')}
+                {[contact.job_title, contact.email, contact.phone, contact.source].filter(Boolean).join(' · ')}
                 {contact.company && <> · <Link href={`/saas/crm/company/${contact.company.id}`}>{contact.company.name}</Link></>}
               </p>
             </div>
@@ -67,6 +68,7 @@ function ContactApp() {
             </div>
           </div>
           {contact.notes && <div className="card wrap">{contact.notes}</div>}
+          <CustomValues entity="contact" values={contact.custom} />
           <div className="card table-wrap">
             <h2>Deals</h2>
             <table>

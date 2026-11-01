@@ -1,6 +1,8 @@
 import { FormEvent, useEffect, useState } from 'react';
 import AppShell from '@/components/AppShell';
 import CrmNav from '@/components/CrmNav';
+import CustomFieldSettings from '@/components/CustomFieldSettings';
+import LeadSettings from '@/components/LeadSettings';
 import { api } from '@/lib/api';
 
 const blankPipeline = {
@@ -82,7 +84,7 @@ function SettingsApp() {
         <button className="primary" onClick={() => open(blankPipeline)}>New pipeline</button>
       </div>
 
-      <p className="muted">Each stage's chance of winning drives the weighted forecast. Only owners and admins can change pipelines.</p>
+      <p className="muted">Each stage's chance of winning drives the weighted forecast. Only owners and admins can change these settings.</p>
 
       {error && <p className="error">{error}</p>}
       {notice && <p className="notice">{notice}</p>}
@@ -134,6 +136,9 @@ function SettingsApp() {
           </div>
         </form>
       )}
+
+      <LeadSettings />
+      <CustomFieldSettings />
     </div>
   );
 }

@@ -5,6 +5,7 @@ import AppShell from '@/components/AppShell';
 import Billing from '@/components/Billing';
 import CrmNav from '@/components/CrmNav';
 import { CompanyForm, ContactForm, DealForm } from '@/components/CrmForms';
+import { CustomValues } from '@/components/CustomFields';
 import Timeline from '@/components/Timeline';
 import { api, money } from '@/lib/api';
 
@@ -77,6 +78,7 @@ function CompanyApp() {
             <div className="card"><div className="stat-label">Won so far</div><div className="stat-value">{money(wonValue)}</div></div>
           </div>
           {company.notes && <div className="card wrap">{company.notes}</div>}
+          <CustomValues entity="company" values={company.custom} />
           <div className="card table-wrap">
             <h2>People</h2>
             <table>

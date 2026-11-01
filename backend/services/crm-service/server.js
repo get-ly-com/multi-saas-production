@@ -21,9 +21,11 @@ const contacts = (req) => crm(req).from('contacts');
 const companies = (req) => crm(req).from('companies');
 const deals = (req) => crm(req).from('deals');
 const activities = (req) => crm(req).from('activities');
+const leads = (req) => crm(req).from('leads');
 
 const DEAL_FIELDS = '*, contact:contacts(id, name), company:companies(id, name), stage:stages(id, name, kind, probability, pipeline_id)';
 const ACTIVITY_FIELDS = '*, contact:contacts(id, name), company:companies(id, name), deal:deals(id, title)';
+const LEAD_STATUSES = ['new', 'working', 'disqualified'];
 
 const parseValue = (value) => {
   if (value === '' || value === null || value === undefined) return null;
@@ -136,7 +138,8 @@ const companyFields = (body) => {
       industry: optional,
       phone: optional,
       notes: optional,
-      owner_id: optional
+      owner_id: optional,
+      custom: (value) => value
     }),
     updated_at: new Date().toISOString()
   };
@@ -152,10 +155,29 @@ const contactFields = (body) => {
       job_title: optional,
       company_id: optional,
       notes: optional,
-      owner_id: optional
+      owner_id: optional,
+      custom: (value) => value
     }),
     updated_at: new Date().toISOString()
   };
+};
+
+const leadFields = (body) => {
+  if (body.name !== undefined && !body.name) throw new Error('Name is required');
+  if (body.status !== undefined && !LEAD_STATUSES.includes(body.status)) throw new Error('Choose a status');
+  return pick(body, {
+    name: (value) => value,
+    email: optional,
+    phone: optional,
+    company_name: optional,
+    job_title: optional,
+    source: optional,
+    notes: optional,
+    status: (value) => value,
+    disqualified_reason: optional,
+    owner_id: optional,
+    custom: (value) => value
+  });
 };
 
 const dealFields = (body) => {
@@ -168,7 +190,8 @@ const dealFields = (body) => {
     company_id: optional,
     owner_id: optional,
     expected_close: parseDate,
-    lost_reason: optional
+    lost_reason: optional,
+    custom: (value) => value
   });
 };
 
@@ -183,6 +206,7 @@ const activityFields = (body) => {
     contact_id: optional,
     company_id: optional,
     deal_id: optional,
+    lead_id: optional,
     owner_id: optional
   });
 };
@@ -234,6 +258,80 @@ app.post('/contacts', create(contacts, '*', (body) => {
 }));
 app.put('/contacts/:id', update(contacts, '*', contactFields, 'Contact'));
 app.delete('/contacts/:id', remove(contacts, 'Contact'));
+app.post('/contacts/:id/merge', callCrm('merge_contacts', (req) => ({ p_keep: req.params.id, p_drop: req.body.drop_id })));
+
+// Leads
+app.get('/leads', list((req) => leads(req)
+  .select('*')
+  .eq('tenant_id', req.tenantId)
+  .order('created_at', { ascending: false })));
+app.get('/leads/summary', callCrm('lead_summary', () => ({})));
+app.post('/leads/import', callCrm('import_leads', (req) => ({ p_rows: req.body.rows })));
+app.get('/leads/:id', one((req) => leads(req).select('*'), 'Lead'));
+app.get('/leads/:id/matches', callCrm('lead_matches', (req) => ({ p_lead: req.params.id })));
+app.post('/leads', create(leads, '*', (body) => {
+  if (!body.name) throw new Error('Name is required');
+  return leadFields(body);
+}));
+app.put('/leads/:id', update(leads, '*', leadFields, 'Lead'));
+app.delete('/leads/:id', remove(leads, 'Lead'));
+app.post('/leads/:id/convert', callCrm('convert_lead', (req) => ({
+  p_lead: req.params.id,
+  p_contact: optional(req.body.contact_id),
+  p_company: optional(req.body.company_id),
+  p_deal: req.body.deal || null
+})));
+app.post('/leads/:id/merge', callCrm('merge_leads', (req) => ({ p_keep: req.params.id, p_drop: req.body.drop_id })));
+
+app.get('/duplicates', callCrm('duplicates', () => ({})));
+
+app.get('/lead-settings', async (req, res) => {
+  try {
+    const [settings, rules] = await Promise.all([
+      crm(req).from('lead_settings').select('*').eq('tenant_id', req.tenantId).maybeSingle(),
+      crm(req).from('score_rules').select('*').eq('tenant_id', req.tenantId).order('points', { ascending: false })
+    ]);
+    if (settings.error) throw settings.error;
+    if (rules.error) throw rules.error;
+    res.json({ ...settings.data, rules: rules.data || [] });
+  } catch (error) {
+    sendError(res, error);
+  }
+});
+app.post('/lead-settings', callCrm('save_lead_settings', (req) => ({ p_settings: req.body })));
+app.post('/lead-settings/form-key', callCrm('new_form_key', () => ({})));
+
+// Custom fields
+app.get('/custom-fields', list((req) => {
+  const query = crm(req).from('custom_fields')
+    .select('*')
+    .eq('tenant_id', req.tenantId)
+    .order('position');
+  return req.query.entity ? query.eq('entity', req.query.entity) : query;
+}));
+app.post('/custom-fields', callCrm('save_custom_field', (req) => ({
+  p_field: req.body.id || null,
+  p_entity: req.body.entity,
+  p_label: req.body.label,
+  p_kind: req.body.kind,
+  p_options: req.body.options || [],
+  p_required: Boolean(req.body.required)
+})));
+app.delete('/custom-fields/:id', callCrm('delete_custom_field', (req) => ({ p_field: req.params.id })));
+
+// Saved views
+const views = (req) => crm(req).from('saved_views');
+
+app.get('/views', list((req) => views(req)
+  .select('*')
+  .eq('tenant_id', req.tenantId)
+  .eq('entity', req.query.entity)
+  .order('name')));
+app.post('/views', create(views, '*', (body) => {
+  if (!body.name) throw new Error('Enter a name');
+  return { entity: body.entity, name: body.name, shared: Boolean(body.shared), filters: body.filters || {} };
+}));
+app.delete('/views/:id', remove(views, 'View'));
 
 // Deals
 app.get('/deals', list((req) => {
@@ -265,7 +363,7 @@ app.get('/activities', list((req) => {
     .eq('tenant_id', req.tenantId)
     .order('created_at', { ascending: false })
     .limit(200);
-  for (const link of ['contact_id', 'company_id', 'deal_id']) {
+  for (const link of ['contact_id', 'company_id', 'deal_id', 'lead_id']) {
     if (req.query[link]) query = query.eq(link, req.query[link]);
   }
   if (req.query.tasks === 'open') query = query.eq('kind', 'task').is('done_at', null);

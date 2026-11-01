@@ -4,6 +4,7 @@ import { useEffect, useMemo, useState } from 'react';
 import AppShell from '@/components/AppShell';
 import CrmNav from '@/components/CrmNav';
 import { DealForm, LostForm, useTeam } from '@/components/CrmForms';
+import { CustomValues } from '@/components/CustomFields';
 import QuoteForm from '@/components/QuoteForm';
 import Timeline from '@/components/Timeline';
 import { api, formatDate, money } from '@/lib/api';
@@ -96,6 +97,7 @@ function DealApp() {
                 {deal.company && <> · <Link href={`/saas/crm/company/${deal.company.id}`}>{deal.company.name}</Link></>}
                 {deal.expected_close && ` · closes ${formatDate(deal.expected_close)}`}
                 {owner && ` · ${owner}`}
+                {deal.source && ` · ${deal.source}`}
               </p>
             </div>
             <div className="row-actions">
@@ -111,6 +113,7 @@ function DealApp() {
             ))}
           </div>
           {deal.lost_reason && <p className="muted">Lost because: {deal.lost_reason}</p>}
+          <CustomValues entity="deal" values={deal.custom} />
 
           {quotes.length > 0 && (
             <div className="card table-wrap">

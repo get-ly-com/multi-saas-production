@@ -1,4 +1,5 @@
 import { FormEvent, useEffect, useState } from 'react';
+import { CustomInputs, useCustomFields } from '@/components/CustomFields';
 import Modal from '@/components/Modal';
 import { api } from '@/lib/api';
 
@@ -12,18 +13,18 @@ export const useTeam = () => {
   return members;
 };
 
-function OwnerField({ value, members, onChange }: { value: string; members: any[]; onChange: (value: string) => void }) {
+export function OwnerField({ value, members, onChange, empty = 'Unassigned' }: { value: string; members: any[]; onChange: (value: string) => void; empty?: string }) {
   return (
     <label>Owner
       <select value={value || ''} onChange={(e) => onChange(e.target.value)}>
-        <option value="">Unassigned</option>
+        <option value="">{empty}</option>
         {members.map((member) => <option key={member.user_id} value={member.user_id}>{member.email}</option>)}
       </select>
     </label>
   );
 }
 
-function useForm(initial: any, save: (form: any) => Promise<unknown>, onClose: () => void, onSaved: (result?: any) => void) {
+export function useForm(initial: any, save: (form: any) => Promise<unknown>, onClose: () => void, onSaved: (result?: any) => void) {
   const [form, setForm] = useState<any>(initial);
   const [error, setError] = useState('');
   const set = (field: string, value: unknown) => setForm((current: any) => ({ ...current, [field]: value }));
@@ -42,7 +43,7 @@ function useForm(initial: any, save: (form: any) => Promise<unknown>, onClose: (
   return { form, set, error, submit };
 }
 
-const Actions = ({ error, onClose }: { error: string; onClose: () => void }) => (
+export const Actions = ({ error, onClose }: { error: string; onClose: () => void }) => (
   <>
     {error && <p className="error">{error}</p>}
     <div className="form-actions">
@@ -56,10 +57,11 @@ type FormProps = { initial?: any; onClose: () => void; onSaved: (result?: any) =
 
 export function CompanyForm({ initial, onClose, onSaved }: FormProps) {
   const members = useTeam();
+  const fields = useCustomFields('company');
   const { form, set, error, submit } = useForm(
-    { name: '', website: '', industry: '', phone: '', notes: '', owner_id: '', ...initial },
-    ({ id, name, website, industry, phone, notes, owner_id }) => {
-      const body = { name, website, industry, phone, notes, owner_id };
+    { name: '', website: '', industry: '', phone: '', notes: '', owner_id: '', custom: {}, ...initial },
+    ({ id, name, website, industry, phone, notes, owner_id, custom }) => {
+      const body = { name, website, industry, phone, notes, owner_id, custom };
       return id ? api.put(`/api/crm/companies/${id}`, body) : api.post('/api/crm/companies', body);
     },
     onClose,
@@ -75,6 +77,7 @@ export function CompanyForm({ initial, onClose, onSaved }: FormProps) {
           <label>Industry<input value={form.industry || ''} onChange={(e) => set('industry', e.target.value)} /></label>
           <label>Phone<input value={form.phone || ''} onChange={(e) => set('phone', e.target.value)} /></label>
           <OwnerField value={form.owner_id} members={members} onChange={(value) => set('owner_id', value)} />
+          <CustomInputs fields={fields} values={form.custom} onChange={(custom) => set('custom', custom)} />
         </div>
         <label style={{ marginTop: 12 }}>Notes<textarea rows={3} value={form.notes || ''} onChange={(e) => set('notes', e.target.value)} /></label>
         <Actions error={error} onClose={onClose} />
@@ -85,11 +88,12 @@ export function CompanyForm({ initial, onClose, onSaved }: FormProps) {
 
 export function ContactForm({ initial, onClose, onSaved }: FormProps) {
   const members = useTeam();
+  const fields = useCustomFields('contact');
   const [companies, setCompanies] = useState<any[]>([]);
   const { form, set, error, submit } = useForm(
-    { name: '', email: '', phone: '', job_title: '', company_id: '', notes: '', owner_id: '', ...initial },
-    ({ id, name, email, phone, job_title, company_id, notes, owner_id }) => {
-      const body = { name, email, phone, job_title, company_id, notes, owner_id };
+    { name: '', email: '', phone: '', job_title: '', company_id: '', notes: '', owner_id: '', custom: {}, ...initial },
+    ({ id, name, email, phone, job_title, company_id, notes, owner_id, custom }) => {
+      const body = { name, email, phone, job_title, company_id, notes, owner_id, custom };
       return id ? api.put(`/api/crm/contacts/${id}`, body) : api.post('/api/crm/contacts', body);
     },
     onClose,
@@ -115,6 +119,7 @@ export function ContactForm({ initial, onClose, onSaved }: FormProps) {
           <label>Email<input type="email" value={form.email || ''} onChange={(e) => set('email', e.target.value)} /></label>
           <label>Phone<input value={form.phone || ''} onChange={(e) => set('phone', e.target.value)} /></label>
           <OwnerField value={form.owner_id} members={members} onChange={(value) => set('owner_id', value)} />
+          <CustomInputs fields={fields} values={form.custom} onChange={(custom) => set('custom', custom)} />
         </div>
         <label style={{ marginTop: 12 }}>Notes<textarea rows={3} value={form.notes || ''} onChange={(e) => set('notes', e.target.value)} /></label>
         <Actions error={error} onClose={onClose} />
@@ -125,13 +130,14 @@ export function ContactForm({ initial, onClose, onSaved }: FormProps) {
 
 export function DealForm({ initial, onClose, onSaved }: FormProps) {
   const members = useTeam();
+  const fields = useCustomFields('deal');
   const [pipelines, setPipelines] = useState<any[]>([]);
   const [contacts, setContacts] = useState<any[]>([]);
   const [companies, setCompanies] = useState<any[]>([]);
   const { form, set, error, submit } = useForm(
-    { title: '', value: '', stage_id: '', contact_id: '', company_id: '', owner_id: '', expected_close: '', ...initial },
-    ({ id, title, value, stage_id, contact_id, company_id, owner_id, expected_close }) => {
-      const body = { title, value, stage_id, contact_id, company_id, owner_id, expected_close };
+    { title: '', value: '', stage_id: '', contact_id: '', company_id: '', owner_id: '', expected_close: '', custom: {}, ...initial },
+    ({ id, title, value, stage_id, contact_id, company_id, owner_id, expected_close, custom }) => {
+      const body = { title, value, stage_id, contact_id, company_id, owner_id, expected_close, custom };
       return id ? api.put(`/api/crm/deals/${id}`, body) : api.post('/api/crm/deals', body);
     },
     onClose,
@@ -178,6 +184,7 @@ export function DealForm({ initial, onClose, onSaved }: FormProps) {
             </select>
           </label>
           <OwnerField value={form.owner_id} members={members} onChange={(value) => set('owner_id', value)} />
+          <CustomInputs fields={fields} values={form.custom} onChange={(custom) => set('custom', custom)} />
         </div>
         <Actions error={error} onClose={onClose} />
       </form>

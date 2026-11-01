@@ -2,45 +2,21 @@ import Link from 'next/link';
 import { ChangeEvent, useEffect, useState } from 'react';
 import AppShell from '@/components/AppShell';
 import CrmNav from '@/components/CrmNav';
-import { ContactForm } from '@/components/CrmForms';
+import { ContactForm, useTeam } from '@/components/CrmForms';
+import { useCustomFields } from '@/components/CustomFields';
+import SavedViews, { Filters, ListFilters, matchesFilters } from '@/components/SavedViews';
 import { api } from '@/lib/api';
-import { parseCsv } from '@/lib/csv';
-
-// Spreadsheet exports name these columns in many ways
-const COLUMN_NAMES: Record<string, string[]> = {
-  name: ['name', 'full name', 'contact', 'contact name'],
-  first: ['first name', 'firstname', 'given name'],
-  last: ['last name', 'lastname', 'surname', 'family name'],
-  email: ['email', 'e-mail', 'email address'],
-  phone: ['phone', 'mobile', 'telephone', 'phone number'],
-  company: ['company', 'account', 'organization', 'organisation', 'company name'],
-  job_title: ['title', 'job title', 'position', 'role']
-};
-
-const readRows = (text: string) => {
-  const [head, ...rows] = parseCsv(text);
-  if (!head) return [];
-
-  const headers = head.map((cell) => cell.trim().toLowerCase());
-  const column = (field: string) => headers.findIndex((header) => COLUMN_NAMES[field].includes(header));
-  const cell = (row: string[], field: string) => (column(field) >= 0 ? (row[column(field)] || '').trim() : '');
-
-  return rows.map((row) => ({
-    name: cell(row, 'name') || `${cell(row, 'first')} ${cell(row, 'last')}`.trim(),
-    email: cell(row, 'email'),
-    phone: cell(row, 'phone'),
-    company: cell(row, 'company'),
-    job_title: cell(row, 'job_title')
-  }));
-};
+import { readPeople } from '@/lib/csv';
 
 export default function Contacts() {
   return <AppShell><ContactsApp /></AppShell>;
 }
 
 function ContactsApp() {
+  const members = useTeam();
+  const fields = useCustomFields('contact');
   const [contacts, setContacts] = useState<any[]>([]);
-  const [search, setSearch] = useState('');
+  const [filters, setFilters] = useState<Filters>({});
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState('');
   const [notice, setNotice] = useState('');
@@ -66,7 +42,7 @@ function ContactsApp() {
     event.target.value = '';
     if (!file) return;
     try {
-      const result = await api.post('/api/crm/contacts/import', { rows: readRows(await file.text()) });
+      const result = await api.post('/api/crm/contacts/import', { rows: readPeople(await file.text()) });
       setNotice(`Imported ${result.created} contacts. Skipped ${result.skipped} with no name or an email already here.`);
       await load();
     } catch (err: any) {
@@ -75,9 +51,7 @@ function ContactsApp() {
     }
   };
 
-  const query = search.trim().toLowerCase();
-  const visible = contacts.filter((contact) =>
-    [contact.name, contact.email, contact.company?.name].some((field) => (field || '').toLowerCase().includes(query)));
+  const visible = contacts.filter((contact) => matchesFilters(contact, filters, fields, [contact.name, contact.email, contact.company?.name]));
 
   return (
     <div className="stack">
@@ -93,7 +67,13 @@ function ContactsApp() {
       {error && <p className="error">{error}</p>}
       {notice && <p className="notice">{notice}</p>}
 
-      <input aria-label="Filter contacts" placeholder="Filter by name, email or company" value={search} onChange={(e) => setSearch(e.target.value)} />
+      <div className="card stack">
+        <SavedViews entity="contact" filters={filters} onApply={setFilters} />
+        <div className="form-grid">
+          <label>Search<input aria-label="Filter contacts" placeholder="Name, email or company" value={filters.search || ''} onChange={(e) => setFilters({ ...filters, search: e.target.value })} /></label>
+          <ListFilters filters={filters} onChange={setFilters} members={members} fields={fields} />
+        </div>
+      </div>
 
       <div className="card table-wrap">
         {loading ? <p className="empty">Loading…</p> : (
