@@ -1,7 +1,7 @@
 import Link from 'next/link';
 import { useRouter } from 'next/router';
 import { ReactNode, useEffect, useState } from 'react';
-import { api, setBaseCurrency } from '@/lib/api';
+import { api, openCompany, rememberCompany, setBaseCurrency } from '@/lib/api';
 import { getSupabase } from '@/lib/supabase';
 
 const PRODUCTS = [
@@ -10,7 +10,8 @@ const PRODUCTS = [
   { name: 'Inventory', path: '/saas/inventory' }
 ];
 
-type Me = { user: { email: string }; tenant: { name: string; role: string } };
+type Company = { id: string; name: string; role: string };
+type Me = { user: { email: string }; tenant: Company; tenants: Company[] };
 
 export default function AppShell({ children }: { children: ReactNode }) {
   const router = useRouter();
@@ -25,6 +26,7 @@ export default function AppShell({ children }: { children: ReactNode }) {
       try {
         const account = await api.get('/api/me');
         if (!account.tenant) return router.replace('/onboarding');
+        rememberCompany(account.tenant.id);
         const currencies = await api.get('/api/accounting/currencies').catch(() => null);
         if (currencies) setBaseCurrency(currencies.base);
         setMe(account);
@@ -39,6 +41,11 @@ export default function AppShell({ children }: { children: ReactNode }) {
   const signOut = async () => {
     await getSupabase().auth.signOut();
     router.replace('/login');
+  };
+
+  const chooseCompany = (id: string) => {
+    if (id === 'new') router.push('/onboarding');
+    else openCompany(id);
   };
 
   if (error) return <div className="auth"><p className="error">{error}</p></div>;
@@ -57,7 +64,11 @@ export default function AppShell({ children }: { children: ReactNode }) {
           <Link href="/saas/team" className={router.pathname === '/saas/team' ? 'active' : ''}>Team</Link>
         </nav>
         <div className="account">
-          <span>{me.tenant.name} · {me.user.email}</span>
+          <select aria-label="Company" value={me.tenant.id} onChange={(e) => chooseCompany(e.target.value)}>
+            {me.tenants.map(({ id, name }) => <option key={id} value={id}>{name}</option>)}
+            <option value="new">Add a company…</option>
+          </select>
+          <span>{me.user.email}</span>
           <button className="link" onClick={signOut}>Sign out</button>
         </div>
       </header>

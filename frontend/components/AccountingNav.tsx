@@ -20,6 +20,7 @@ const SECTIONS = [
   { name: 'General ledger', path: '/saas/accounting/ledger' },
   { name: 'Trial balance', path: '/saas/accounting/trial-balance' },
   { name: 'Reports', path: '/saas/accounting/reports' },
+  { name: 'Company group', path: '/saas/accounting/group' },
   { name: 'Controls', path: '/saas/accounting/controls' }
 ];
 

@@ -19,7 +19,7 @@ app.set('trust proxy', 1);
 
 // Middleware
 app.use(helmet());
-app.use(cors({ origin: allowedOrigins, allowedHeaders: ['Authorization', 'Content-Type'] }));
+app.use(cors({ origin: allowedOrigins, allowedHeaders: ['Authorization', 'Content-Type', 'X-Company'] }));
 app.use(morgan('combined'));
 app.use(rateLimit({ windowMs: 60 * 1000, limit: 300, standardHeaders: true, legacyHeaders: false }));
 
@@ -56,23 +56,29 @@ const requireUser = async (req, res, next) => {
   }
 };
 
-const findMembership = async (req) => {
+const findMemberships = async (req) => {
   const { data, error } = await req.db
     .from('tenant_members')
     .select('role, tenant:tenants(id, name)')
     .eq('user_id', req.user.id)
-    .maybeSingle();
+    .order('created_at');
 
   if (error) throw error;
-  return data;
+  return data || [];
 };
 
-// The tenant always comes from the membership, never from the client
+// The client may pick a company, but only one of its own memberships. A pick that no longer
+// matches is refused, so a write can never land in a different company from the one on screen.
 const requireTenant = async (req, res, next) => {
   try {
-    const membership = await findMembership(req);
-    if (!membership) {
+    const memberships = await findMemberships(req);
+    if (memberships.length === 0) {
       return res.status(403).json({ error: 'Create a company first' });
+    }
+    const chosen = req.headers['x-company'];
+    const membership = chosen ? memberships.find(({ tenant }) => tenant.id === chosen) : memberships[0];
+    if (!membership) {
+      return res.status(403).json({ error: 'You no longer have access to that company' });
     }
     req.tenantId = membership.tenant.id;
     next();
@@ -84,10 +90,12 @@ const requireTenant = async (req, res, next) => {
 // Account
 app.get('/api/me', requireUser, async (req, res, next) => {
   try {
-    const membership = await findMembership(req);
+    const memberships = await findMemberships(req);
+    const membership = memberships.find(({ tenant }) => tenant.id === req.headers['x-company']) || memberships[0];
     res.json({
       user: { id: req.user.id, email: req.user.email },
-      tenant: membership ? { ...membership.tenant, role: membership.role } : null
+      tenant: membership ? { ...membership.tenant, role: membership.role } : null,
+      tenants: memberships.map(({ tenant, role }) => ({ ...tenant, role }))
     });
   } catch (error) {
     next(error);

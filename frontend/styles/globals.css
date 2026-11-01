@@ -55,6 +55,7 @@ h2 { font-size: 17px; margin: 0 0 12px; }
 .nav a { color: var(--muted); }
 .nav a.active { color: var(--text); font-weight: 600; }
 .account { color: var(--muted); font-size: 13px; display: flex; align-items: center; gap: 12px; }
+.account select { width: auto; max-width: 200px; padding: 4px 8px; font-size: 13px; }
 
 .page { max-width: 1080px; margin: 0 auto; padding: 24px 16px 48px; }
 .page-head { display: flex; justify-content: space-between; align-items: center; gap: 12px; margin-bottom: 20px; flex-wrap: wrap; }

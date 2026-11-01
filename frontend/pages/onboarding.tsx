@@ -1,6 +1,7 @@
+import Link from 'next/link';
 import { useRouter } from 'next/router';
 import { FormEvent, useEffect, useState } from 'react';
-import { api } from '@/lib/api';
+import { api, openCompany } from '@/lib/api';
 import { getSupabase } from '@/lib/supabase';
 
 export default function Onboarding() {
@@ -9,11 +10,13 @@ export default function Onboarding() {
   const [error, setError] = useState('');
   const [busy, setBusy] = useState(false);
   const [invites, setInvites] = useState<any[]>([]);
+  const [hasCompany, setHasCompany] = useState(false);
 
   useEffect(() => {
     getSupabase().auth.getSession().then(({ data }) => {
       if (!data.session) return router.replace('/login');
       api.get('/api/invites').then(setInvites).catch((err) => setError(err.message));
+      api.get('/api/me').then((me) => setHasCompany(Boolean(me.tenant))).catch((err) => setError(err.message));
     });
   }, []);
 
@@ -21,8 +24,7 @@ export default function Onboarding() {
     setBusy(true);
     setError('');
     try {
-      await api.post(`/api/invites/${invite.id}/accept`, {});
-      router.push('/saas/accounting');
+      openCompany(await api.post(`/api/invites/${invite.id}/accept`, {}));
     } catch (err: any) {
       setError(err.message);
       setBusy(false);
@@ -34,8 +36,8 @@ export default function Onboarding() {
     setBusy(true);
     setError('');
     try {
-      await api.post('/api/tenants', { name });
-      router.push('/saas/accounting');
+      const company = await api.post('/api/tenants', { name });
+      openCompany(company.id);
     } catch (err: any) {
       setError(err.message);
       setBusy(false);
@@ -50,7 +52,7 @@ export default function Onboarding() {
           <button className="primary" disabled={busy} onClick={() => accept(invite)}>Join {invite.company}</button>
         </div>
       ))}
-      <h1>{invites.length ? 'Or start your own company' : 'Name your company'}</h1>
+      <h1>{invites.length ? 'Or start your own company' : hasCompany ? 'Add a company' : 'Name your company'}</h1>
       <form onSubmit={submit}>
         <label>
           Company name
@@ -59,6 +61,7 @@ export default function Onboarding() {
         <button className="primary" disabled={busy}>Continue</button>
       </form>
       {error && <p className="error">{error}</p>}
+      {hasCompany && <p><Link href="/saas/accounting">← Back to your books</Link></p>}
     </div>
   );
 }

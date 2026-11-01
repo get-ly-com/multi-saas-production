@@ -11,6 +11,33 @@ export class ApiError extends Error {
   }
 }
 
+const COMPANY_KEY = 'company';
+
+const savedCompany = () => {
+  try {
+    return window.localStorage.getItem(COMPANY_KEY) || '';
+  } catch {
+    return '';
+  }
+};
+
+// Read once per page load, so a tab keeps its company when another tab switches
+let company = typeof window === 'undefined' ? '' : savedCompany();
+
+export const rememberCompany = (id: string) => {
+  company = id;
+  try {
+    window.localStorage.setItem(COMPANY_KEY, id);
+  } catch {
+    // The choice then lasts only until this page reloads
+  }
+};
+
+export const openCompany = (id: string) => {
+  rememberCompany(id);
+  window.location.assign('/saas/accounting');
+};
+
 const request = async (method: string, path: string, body?: unknown) => {
   const { data } = await getSupabase().auth.getSession();
 
@@ -18,6 +45,7 @@ const request = async (method: string, path: string, body?: unknown) => {
     method,
     headers: {
       Authorization: `Bearer ${data.session?.access_token}`,
+      ...(company ? { 'X-Company': company } : {}),
       ...(body === undefined ? {} : { 'Content-Type': 'application/json' })
     },
     body: body === undefined ? undefined : JSON.stringify(body)

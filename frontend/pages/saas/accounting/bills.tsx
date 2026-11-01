@@ -43,7 +43,7 @@ function BillsApp() {
       setTaxRates(rateRows);
       setCostCenters(centerRows);
       setAccounts(accountRows.filter((account: any) =>
-        ['expense', 'asset'].includes(account.type) && account.is_active && !account.is_cash && !['1200', '1590'].includes(account.code)));
+        ['expense', 'asset'].includes(account.type) && account.is_active && !account.is_cash && !['1200', '1300', '1590'].includes(account.code)));
       setError('');
     } catch (err: any) {
       setError(err.message);

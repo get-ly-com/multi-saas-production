@@ -37,7 +37,7 @@ function OrdersApp() {
       setOrders(orderRows);
       setVendors(vendorRows);
       setAccounts(accountRows.filter((account: any) =>
-        ['expense', 'asset'].includes(account.type) && account.is_active && !account.is_cash && !['1200', '1590'].includes(account.code)));
+        ['expense', 'asset'].includes(account.type) && account.is_active && !account.is_cash && !['1200', '1300', '1590'].includes(account.code)));
       setTaxRates(rateRows);
       setCostCenters(centerRows);
       setRole(me.tenant.role);

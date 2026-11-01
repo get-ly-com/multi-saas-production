@@ -1374,6 +1374,54 @@ app.post('/revenue/run', (req, res) => callLedger(req, res, 'run_revenue_recogni
 app.post('/revenue/:id/cancel', (req, res) =>
   callLedger(req, res, 'cancel_revenue_schedule', () => ({ p_schedule: req.params.id })));
 
+// Company groups
+app.get('/group', (req, res) => callLedger(req, res, 'group_overview', () => ({})));
+
+app.post('/group', (req, res) => callLedger(req, res, 'create_group', () => ({
+  p_name: req.body.name,
+  p_currency: req.body.currency
+}), 201));
+
+app.post('/group/companies', (req, res) => callLedger(req, res, 'add_group_company', () => ({
+  p_company: req.body.company_id
+}), 201));
+
+app.delete('/group/companies/:id', (req, res) => callLedger(req, res, 'remove_group_company', () => ({
+  p_company: req.params.id
+})));
+
+app.post('/group/rates', (req, res) => callLedger(req, res, 'save_group_rate', () => ({
+  p_currency: req.body.currency,
+  p_date: parseDate(req.body.rate_date, 'a date'),
+  p_closing: parseRate(req.body.closing_rate),
+  p_average: parseRate(req.body.average_rate)
+}), 201));
+
+app.post('/group/intercompany', (req, res) => callLedger(req, res, 'create_intercompany', () => ({
+  p_kind: req.body.kind,
+  p_from: req.body.from_company,
+  p_to: req.body.to_company,
+  p_date: parseDate(req.body.entry_date, 'a date'),
+  p_amount: parseAmount(req.body.amount),
+  p_rate: req.body.exchange_rate ? parseRate(req.body.exchange_rate) : null,
+  p_from_account: req.body.from_account,
+  p_to_account: req.body.to_account,
+  p_memo: req.body.memo
+}), 201));
+
+app.post('/group/intercompany/:id/void', (req, res) => callLedger(req, res, 'void_intercompany', () => ({
+  p_entry: req.params.id
+})));
+
+app.get('/group/profit-and-loss', (req, res) => callLedger(req, res, 'consolidated_pl', () => ({
+  p_from: parseDate(req.query.from, 'a start date'),
+  p_to: parseDate(req.query.to, 'an end date')
+})));
+
+app.get('/group/balance-sheet', (req, res) => callLedger(req, res, 'consolidated_bs', () => ({
+  p_as_of: parseDate(req.query.as_of, 'a date')
+})));
+
 // Period lock and year-end close
 app.get('/books', async (req, res) => {
   try {
