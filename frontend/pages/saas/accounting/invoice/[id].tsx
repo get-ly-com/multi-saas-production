@@ -100,6 +100,12 @@ function InvoiceDocument() {
         </div>
 
         <div className="document-totals">
+          {Number(invoice.tax_amount) > 0 && (
+            <>
+              <div><span>Subtotal</span><span>{money(invoice.subtotal)}</span></div>
+              <div><span>Tax</span><span>{money(invoice.tax_amount)}</span></div>
+            </>
+          )}
           <div><span>Total</span><span>{money(invoice.amount)}</span></div>
           {Number(invoice.amount_paid) > 0 && <div><span>Paid</span><span>{money(invoice.amount_paid)}</span></div>}
           {Number(invoice.amount_credited) > 0 && <div><span>Credited</span><span>{money(invoice.amount_credited)}</span></div>}

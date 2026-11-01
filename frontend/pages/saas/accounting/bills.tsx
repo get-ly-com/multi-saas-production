@@ -6,7 +6,7 @@ import Modal from '@/components/Modal';
 import PaymentForm from '@/components/PaymentForm';
 import { api, formatDate, money, today } from '@/lib/api';
 
-const blankLine = { description: '', account_id: '', amount: '' };
+const blankLine = { description: '', account_id: '', amount: '', tax_rate_id: '' };
 const blankBill = { vendor_id: '', vendor_ref: '', bill_date: '', due_date: '', notes: '', line_items: [blankLine] };
 
 const billBalance = (bill: any) => Number(bill.amount) - Number(bill.amount_paid);
@@ -19,6 +19,7 @@ function BillsApp() {
   const [bills, setBills] = useState<any[]>([]);
   const [vendors, setVendors] = useState<any[]>([]);
   const [accounts, setAccounts] = useState<any[]>([]);
+  const [taxRates, setTaxRates] = useState<any[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState('');
   const [form, setForm] = useState<any>(null);
@@ -27,13 +28,15 @@ function BillsApp() {
 
   const load = async () => {
     try {
-      const [billRows, vendorRows, accountRows] = await Promise.all([
+      const [billRows, vendorRows, accountRows, rateRows] = await Promise.all([
         api.get('/api/accounting/bills'),
         api.get('/api/accounting/vendors'),
-        api.get('/api/accounting/accounts')
+        api.get('/api/accounting/accounts'),
+        api.get('/api/accounting/tax-rates')
       ]);
       setBills(billRows);
       setVendors(vendorRows);
+      setTaxRates(rateRows);
       setAccounts(accountRows.filter((account: any) =>
         ['expense', 'asset'].includes(account.type) && account.is_active && !account.is_cash && account.code !== '1200'));
       setError('');
@@ -130,7 +133,7 @@ function BillsApp() {
         <p className="muted">Bills need a vendor. <Link href="/saas/accounting/vendors">Add your first vendor</Link>.</p>
       )}
 
-      {form && <BillForm initial={form} vendors={vendors} accounts={accounts} onClose={() => setForm(null)} onSaved={load} />}
+      {form && <BillForm initial={form} vendors={vendors} accounts={accounts} taxRates={taxRates} onClose={() => setForm(null)} onSaved={load} />}
       {paying && (
         <PaymentForm
           target={{ bill_id: paying.id }}
@@ -169,7 +172,7 @@ function BillsApp() {
   );
 }
 
-function BillForm({ initial, vendors, accounts, onClose, onSaved }: { initial: any; vendors: any[]; accounts: any[]; onClose: () => void; onSaved: () => void }) {
+function BillForm({ initial, vendors, accounts, taxRates, onClose, onSaved }: { initial: any; vendors: any[]; accounts: any[]; taxRates: any[]; onClose: () => void; onSaved: () => void }) {
   const [form, setForm] = useState<any>(initial);
   const [error, setError] = useState('');
   const set = (field: string, value: unknown) => setForm({ ...form, [field]: value });
@@ -178,7 +181,11 @@ function BillForm({ initial, vendors, accounts, onClose, onSaved }: { initial: a
   const setLine = (index: number, field: string, value: string) =>
     set('line_items', form.line_items.map((line: any, i: number) => (i === index ? { ...line, [field]: value } : line)));
 
-  const total = form.line_items.reduce((sum: number, line: any) => sum + Number(line.amount || 0), 0);
+  const subtotal = form.line_items.reduce((sum: number, line: any) => sum + Number(line.amount || 0), 0);
+  const tax = form.line_items.reduce((sum: number, line: any) => {
+    const rate = taxRates.find(({ id }) => id === line.tax_rate_id);
+    return sum + Math.round(Number(line.amount || 0) * Number(rate?.rate || 0)) / 100;
+  }, 0);
 
   const submit = async (event: FormEvent) => {
     event.preventDefault();
@@ -219,12 +226,18 @@ function BillForm({ initial, vendors, accounts, onClose, onSaved }: { initial: a
                 {accounts.map((account) => <option key={account.id} value={account.id}>{account.code} {account.name}</option>)}
               </select>
               <input required aria-label="Amount" placeholder="Amount" type="number" min="0.01" step="0.01" value={line.amount} onChange={(e) => setLine(index, 'amount', e.target.value)} />
+              <select aria-label="Tax" value={line.tax_rate_id || ''} onChange={(e) => setLine(index, 'tax_rate_id', e.target.value)}>
+                <option value="">No tax</option>
+                {taxRates.filter((rate) => rate.is_active || rate.id === line.tax_rate_id).map((rate) => (
+                  <option key={rate.id} value={rate.id}>{rate.name}</option>
+                ))}
+              </select>
               <button type="button" aria-label="Remove line" disabled={form.line_items.length === 1} onClick={() => set('line_items', form.line_items.filter((_: any, i: number) => i !== index))}>×</button>
             </div>
           ))}
         </div>
         <button type="button" onClick={() => set('line_items', [...form.line_items, blankLine])}>Add line</button>
-        <p>Total: <strong>{money(total)}</strong></p>
+        <p>Subtotal {money(subtotal)} · Tax {money(tax)} · Total: <strong>{money(subtotal + tax)}</strong></p>
         <label>Notes<textarea rows={2} value={form.notes} onChange={(e) => set('notes', e.target.value)} /></label>
         {error && <p className="error">{error}</p>}
         <div className="form-actions">

@@ -115,9 +115,9 @@ input, select, textarea {
 .form-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(180px, 1fr)); gap: 12px; }
 .form-actions { display: flex; gap: 8px; margin-top: 16px; }
 .lines { display: grid; gap: 8px; margin: 12px 0; }
-.line { display: grid; grid-template-columns: 1fr 70px 100px 32px; gap: 8px; align-items: center; }
+.line { display: grid; grid-template-columns: 1fr 70px 100px 110px 32px; gap: 8px; align-items: center; }
 .line button { padding: 6px 0; }
-.bill-line { display: grid; grid-template-columns: 1fr 1fr 110px 32px; gap: 8px; align-items: center; }
+.bill-line { display: grid; grid-template-columns: 1fr 1fr 100px 110px 32px; gap: 8px; align-items: center; }
 .bill-line button { padding: 6px 0; }
 
 .document { display: grid; gap: 24px; }
@@ -133,7 +133,7 @@ input, select, textarea {
 tr.section td { font-weight: 600; padding-top: 16px; }
 
 .modal-back { position: fixed; inset: 0; background: rgba(15, 23, 32, 0.5); display: flex; align-items: flex-start; justify-content: center; padding: 40px 16px; overflow-y: auto; z-index: 10; }
-.modal { background: var(--surface); border-radius: 8px; padding: 20px; width: 100%; max-width: 620px; }
+.modal { background: var(--surface); border-radius: 8px; padding: 20px; width: 100%; max-width: 720px; }
 
 .badge { display: inline-block; font-size: 12px; padding: 1px 8px; border-radius: 10px; background: var(--sunken); color: var(--muted); }
 .badge.paid, .badge.won { color: var(--good); }

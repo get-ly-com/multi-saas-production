@@ -6,15 +6,14 @@ import Modal from '@/components/Modal';
 import PaymentForm from '@/components/PaymentForm';
 import { api, formatDate, money, today } from '@/lib/api';
 
-const blankLine = { description: '', quantity: '1', unit_price: '' };
+const blankLine = { description: '', quantity: '1', unit_price: '', tax_rate_id: '' };
 const blankInvoice = { customer_id: '', invoice_date: '', due_date: '', description: '', line_items: [blankLine] };
 const blankExpense = { amount: '', category: '', description: '', expense_date: '', account_id: '' };
 
 const invoiceBalance = (invoice: any) =>
   Number(invoice.amount) - Number(invoice.amount_paid) - Number(invoice.amount_credited);
 
-const lineTotal = (lines: any[]) =>
-  lines.reduce((sum, line) => sum + Number(line.quantity || 0) * Number(line.unit_price || 0), 0);
+const lineNet = (line: any) => Number(line.quantity || 0) * Number(line.unit_price || 0);
 
 export default function Accounting() {
   return <AppShell><AccountingApp /></AppShell>;
@@ -27,6 +26,7 @@ function AccountingApp() {
   const [summary, setSummary] = useState<any>(null);
   const [accounts, setAccounts] = useState<any[]>([]);
   const [customers, setCustomers] = useState<any[]>([]);
+  const [taxRates, setTaxRates] = useState<any[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState('');
   const [invoiceForm, setInvoiceForm] = useState<any>(null);
@@ -36,17 +36,19 @@ function AccountingApp() {
 
   const load = async () => {
     try {
-      const [invoiceRows, expenseRows, analytics, accountRows, customerRows] = await Promise.all([
+      const [invoiceRows, expenseRows, analytics, accountRows, customerRows, rateRows] = await Promise.all([
         api.get('/api/accounting/invoices'),
         api.get('/api/accounting/expenses'),
         api.get('/api/accounting/analytics'),
         api.get('/api/accounting/accounts'),
-        api.get('/api/accounting/customers')
+        api.get('/api/accounting/customers'),
+        api.get('/api/accounting/tax-rates')
       ]);
       setInvoices(invoiceRows);
       setExpenses(expenseRows);
       setSummary(analytics);
       setCustomers(customerRows);
+      setTaxRates(rateRows);
       setAccounts(accountRows.filter((account: any) => account.type === 'expense' && account.is_active));
       setError('');
     } catch (err: any) {
@@ -178,7 +180,7 @@ function AccountingApp() {
         )}
       </div>
 
-      {invoiceForm && <InvoiceForm initial={invoiceForm} customers={customers} onClose={() => setInvoiceForm(null)} onSaved={load} />}
+      {invoiceForm && <InvoiceForm initial={invoiceForm} customers={customers} taxRates={taxRates} onClose={() => setInvoiceForm(null)} onSaved={load} />}
       {paying && (
         <PaymentForm
           target={{ invoice_id: paying.id }}
@@ -239,13 +241,19 @@ function CreditForm({ invoice, onClose, onSaved }: { invoice: any; onClose: () =
   );
 }
 
-function InvoiceForm({ initial, customers, onClose, onSaved }: { initial: any; customers: any[]; onClose: () => void; onSaved: () => void }) {
+function InvoiceForm({ initial, customers, taxRates, onClose, onSaved }: { initial: any; customers: any[]; taxRates: any[]; onClose: () => void; onSaved: () => void }) {
   const [form, setForm] = useState<any>(initial);
   const [error, setError] = useState('');
   const set = (field: string, value: unknown) => setForm({ ...form, [field]: value });
 
   const setLine = (index: number, field: string, value: string) =>
     set('line_items', form.line_items.map((line: any, i: number) => (i === index ? { ...line, [field]: value } : line)));
+
+  const subtotal = form.line_items.reduce((sum: number, line: any) => sum + lineNet(line), 0);
+  const tax = form.line_items.reduce((sum: number, line: any) => {
+    const rate = taxRates.find(({ id }) => id === line.tax_rate_id);
+    return sum + Math.round(lineNet(line) * Number(rate?.rate || 0)) / 100;
+  }, 0);
 
   const submit = async (event: FormEvent) => {
     event.preventDefault();
@@ -283,12 +291,18 @@ function InvoiceForm({ initial, customers, onClose, onSaved }: { initial: any; c
               <input required aria-label="Description" placeholder="Description" value={line.description} onChange={(e) => setLine(index, 'description', e.target.value)} />
               <input required aria-label="Quantity" type="number" min="0.01" step="0.01" value={line.quantity} onChange={(e) => setLine(index, 'quantity', e.target.value)} />
               <input required aria-label="Unit price" placeholder="Price" type="number" min="0" step="0.01" value={line.unit_price} onChange={(e) => setLine(index, 'unit_price', e.target.value)} />
+              <select aria-label="Tax" value={line.tax_rate_id || ''} onChange={(e) => setLine(index, 'tax_rate_id', e.target.value)}>
+                <option value="">No tax</option>
+                {taxRates.filter((rate) => rate.is_active || rate.id === line.tax_rate_id).map((rate) => (
+                  <option key={rate.id} value={rate.id}>{rate.name}</option>
+                ))}
+              </select>
               <button type="button" aria-label="Remove line" disabled={form.line_items.length === 1} onClick={() => set('line_items', form.line_items.filter((_: any, i: number) => i !== index))}>×</button>
             </div>
           ))}
         </div>
         <button type="button" onClick={() => set('line_items', [...form.line_items, blankLine])}>Add line</button>
-        <p>Total: <strong>{money(lineTotal(form.line_items))}</strong></p>
+        <p>Subtotal {money(subtotal)} · Tax {money(tax)} · Total: <strong>{money(subtotal + tax)}</strong></p>
         <label>Notes<textarea rows={2} value={form.description} onChange={(e) => set('description', e.target.value)} /></label>
         {error && <p className="error">{error}</p>}
         <div className="form-actions">

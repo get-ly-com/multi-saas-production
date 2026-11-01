@@ -9,7 +9,8 @@ const REPORTS = [
   { id: 'balance-sheet', name: 'Balance sheet', dates: 'single' },
   { id: 'cash-flow', name: 'Cash flow', dates: 'range' },
   { id: 'aged/receivable', name: 'Aged receivables', dates: 'none' },
-  { id: 'aged/payable', name: 'Aged payables', dates: 'none' }
+  { id: 'aged/payable', name: 'Aged payables', dates: 'none' },
+  { id: 'tax', name: 'Tax summary', dates: 'range' }
 ];
 
 export default function Reports() {
@@ -92,6 +93,7 @@ function ReportsApp() {
             {reportId === 'balance-sheet' && <BalanceSheet data={data} />}
             {reportId === 'cash-flow' && <CashFlow data={data} />}
             {reportId.startsWith('aged') && <Aged data={data} />}
+            {reportId === 'tax' && <TaxSummary data={data} />}
           </>
         )}
       </div>
@@ -178,6 +180,20 @@ function CashFlow({ data }: { data: any }) {
         <tr><td>Opening cash</td><td className="num">{money(data.opening)}</td></tr>
         <tr><td>Net change</td><td className="num">{money(data.net_change)}</td></tr>
         <Total label="Closing cash" value={data.closing} />
+      </tbody>
+    </table>
+  );
+}
+
+function TaxSummary({ data }: { data: any }) {
+  return (
+    <table>
+      <tbody>
+        <tr><td>Tax collected on sales</td><td className="num">{money(data.collected)}</td></tr>
+        <tr><td>Tax paid on purchases</td><td className="num">{money(data.on_purchases)}</td></tr>
+        <Total label="Net tax for the period" value={data.net} />
+        <tr><td>Paid to the tax office in the period</td><td className="num">{money(data.paid)}</td></tr>
+        <Total label="Tax owed at the end of the period" value={data.balance} />
       </tbody>
     </table>
   );

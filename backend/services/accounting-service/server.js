@@ -24,6 +24,7 @@ const expenses = (req) => req.db.schema('accounting').from('expenses');
 const accounts = (req) => req.db.schema('accounting').from('accounts');
 const entries = (req) => req.db.schema('accounting').from('journal_entries');
 const bills = (req) => req.db.schema('accounting').from('bills');
+const taxRates = (req) => req.db.schema('accounting').from('tax_rates');
 const ledger = (req) => req.db.schema('accounting');
 
 const sendError = (res, error) => {
@@ -34,25 +35,20 @@ const sendError = (res, error) => {
   res.status(400).json({ error: error.message });
 };
 
-const toCents = (value) => Math.round(Number(value) * 100);
-
-// The total is always worked out here, so it cannot disagree with the lines
+// The database works out totals and tax from these lines
 const parseLineItems = (lineItems) => {
   if (!Array.isArray(lineItems) || lineItems.length === 0) {
     throw new Error('Add at least one line item');
   }
 
-  const items = lineItems.map(({ description, quantity, unit_price }) => {
+  return lineItems.map(({ description, quantity, unit_price, tax_rate_id }) => {
     const qty = Number(quantity);
     const price = Number(unit_price);
     if (!description || !(qty > 0) || !(price >= 0)) {
       throw new Error('Each line needs a description, quantity and price');
     }
-    return { description, quantity: qty, unit_price: price };
+    return { description, quantity: qty, unit_price: price, tax_rate_id: tax_rate_id || null };
   });
-
-  const cents = items.reduce((sum, item) => sum + toCents(item.quantity * item.unit_price), 0);
-  return { line_items: items, amount: cents / 100 };
 };
 
 const parseAmount = (value) => {
@@ -68,11 +64,11 @@ const parseBillLines = (lineItems) => {
     throw new Error('Add at least one line');
   }
 
-  return lineItems.map(({ description, account_id, amount }) => {
+  return lineItems.map(({ description, account_id, amount, tax_rate_id }) => {
     if (!UUID.test(account_id || '') || !(Number(amount) > 0)) {
       throw new Error('Each line needs an account and an amount');
     }
-    return { description: description || null, account_id, amount: Number(amount) };
+    return { description: description || null, account_id, amount: Number(amount), tax_rate_id: tax_rate_id || null };
   });
 };
 
@@ -88,7 +84,8 @@ const nextInvoiceNumber = async (req) => {
   return `INV-${String(last + 1).padStart(4, '0')}`;
 };
 
-app.use(express.json());
+// Bank statement imports can be a few thousand lines
+app.use(express.json({ limit: '2mb' }));
 
 // Health check
 app.get('/health', (req, res) => {
@@ -149,7 +146,8 @@ app.post('/invoices', async (req, res) => {
       customer_id,
       due_date: due_date || null,
       description: description || null,
-      ...parseLineItems(line_items)
+      amount: 0,
+      line_items: parseLineItems(line_items)
     };
     if (invoice_date) row.invoice_date = invoice_date;
 
@@ -175,7 +173,7 @@ app.put('/invoices/:id', async (req, res) => {
     if (invoice_date) updates.invoice_date = invoice_date;
     if (due_date !== undefined) updates.due_date = due_date || null;
     if (description !== undefined) updates.description = description || null;
-    if (line_items !== undefined) Object.assign(updates, parseLineItems(line_items));
+    if (line_items !== undefined) updates.line_items = parseLineItems(line_items);
     if (status !== undefined) {
       if (!INVOICE_STATUSES.includes(status)) throw new Error('Unknown invoice status');
       updates.status = status;
@@ -731,6 +729,213 @@ app.get('/reports/aged/:kind', async (req, res) => {
 
     if (error) throw error;
     res.json(data);
+  } catch (error) {
+    sendError(res, error);
+  }
+});
+
+app.get('/reports/tax', async (req, res) => {
+  try {
+    const { data, error } = await ledger(req).rpc('tax_summary', {
+      p_tenant: req.tenantId,
+      p_from: parseDate(req.query.from, 'a start date'),
+      p_to: parseDate(req.query.to, 'an end date')
+    });
+
+    if (error) throw error;
+    res.json(data);
+  } catch (error) {
+    sendError(res, error);
+  }
+});
+
+// Tax rates are replaced, never edited, so posted documents stay correct
+app.get('/tax-rates', async (req, res) => {
+  try {
+    const { data, error } = await taxRates(req)
+      .select('*')
+      .eq('tenant_id', req.tenantId)
+      .order('name');
+
+    if (error) throw error;
+    res.json(data || []);
+  } catch (error) {
+    sendError(res, error);
+  }
+});
+
+app.post('/tax-rates', async (req, res) => {
+  try {
+    const { name, rate } = req.body;
+    const percent = parseAmount(rate);
+    if (!name) throw new Error('Name is required');
+    if (percent > 100) throw new Error('Enter a rate up to 100');
+
+    const { data, error } = await taxRates(req)
+      .insert([{ tenant_id: req.tenantId, name, rate: percent }])
+      .select();
+
+    if (error) throw error;
+    res.status(201).json(data[0]);
+  } catch (error) {
+    sendError(res, error);
+  }
+});
+
+app.put('/tax-rates/:id', async (req, res) => {
+  try {
+    const { data, error } = await taxRates(req)
+      .update({ is_active: Boolean(req.body.is_active) })
+      .eq('id', req.params.id)
+      .eq('tenant_id', req.tenantId)
+      .select();
+
+    if (error) throw error;
+    if (!data.length) return res.status(404).json({ error: 'Tax rate not found' });
+    res.json(data[0]);
+  } catch (error) {
+    sendError(res, error);
+  }
+});
+
+// Banking
+app.get('/bank/lines', async (req, res) => {
+  try {
+    const { data, error } = await ledger(req).rpc('bank_feed', {
+      p_tenant: req.tenantId,
+      p_account: req.query.account_id
+    });
+
+    if (error) throw error;
+    res.json(data || []);
+  } catch (error) {
+    sendError(res, error);
+  }
+});
+
+app.post('/bank/import', async (req, res) => {
+  try {
+    const { account_id, lines } = req.body;
+    const { data, error } = await ledger(req).rpc('import_bank_lines', {
+      p_tenant: req.tenantId,
+      p_account: account_id,
+      p_lines: lines
+    });
+
+    if (error) throw error;
+    res.status(201).json(data);
+  } catch (error) {
+    sendError(res, error);
+  }
+});
+
+app.post('/bank/lines/:id/match', async (req, res) => {
+  try {
+    const { error } = await ledger(req).rpc('match_bank_line', {
+      p_tenant: req.tenantId,
+      p_line: req.params.id,
+      p_journal_line: req.body.journal_line_id
+    });
+
+    if (error) throw error;
+    res.json({ success: true });
+  } catch (error) {
+    sendError(res, error);
+  }
+});
+
+app.post('/bank/lines/:id/post', async (req, res) => {
+  try {
+    const { account_id, memo } = req.body;
+    const { data, error } = await ledger(req).rpc('post_bank_line', {
+      p_tenant: req.tenantId,
+      p_line: req.params.id,
+      p_account: account_id,
+      p_memo: memo || null
+    });
+
+    if (error) throw error;
+    res.status(201).json({ id: data });
+  } catch (error) {
+    sendError(res, error);
+  }
+});
+
+app.post('/bank/lines/:id/unmatch', async (req, res) => {
+  try {
+    const { error } = await ledger(req).rpc('unmatch_bank_line', {
+      p_tenant: req.tenantId,
+      p_line: req.params.id
+    });
+
+    if (error) throw error;
+    res.json({ success: true });
+  } catch (error) {
+    sendError(res, error);
+  }
+});
+
+app.post('/bank/lines/:id/ignore', async (req, res) => {
+  try {
+    const { error } = await ledger(req).rpc('set_bank_line_ignored', {
+      p_tenant: req.tenantId,
+      p_line: req.params.id,
+      p_ignored: Boolean(req.body.ignored)
+    });
+
+    if (error) throw error;
+    res.json({ success: true });
+  } catch (error) {
+    sendError(res, error);
+  }
+});
+
+app.post('/bank/clear', async (req, res) => {
+  try {
+    const { error } = await ledger(req).rpc('clear_book_line', {
+      p_tenant: req.tenantId,
+      p_journal_line: req.body.journal_line_id
+    });
+
+    if (error) throw error;
+    res.json({ success: true });
+  } catch (error) {
+    sendError(res, error);
+  }
+});
+
+app.get('/bank/reconcile', async (req, res) => {
+  try {
+    const { data, error } = await ledger(req).rpc('reconcile_status', {
+      p_tenant: req.tenantId,
+      p_account: req.query.account_id,
+      p_as_of: parseDate(req.query.as_of, 'a statement date')
+    });
+
+    if (error) throw error;
+    res.json(data);
+  } catch (error) {
+    sendError(res, error);
+  }
+});
+
+app.post('/bank/reconcile', async (req, res) => {
+  try {
+    const { account_id, statement_date, statement_balance } = req.body;
+    const balance = Number(statement_balance);
+    if (statement_balance === '' || statement_balance === null || !Number.isFinite(balance)) {
+      throw new Error('Enter the statement balance');
+    }
+
+    const { data, error } = await ledger(req).rpc('finish_reconciliation', {
+      p_tenant: req.tenantId,
+      p_account: account_id,
+      p_date: parseDate(statement_date, 'a statement date'),
+      p_balance: balance
+    });
+
+    if (error) throw error;
+    res.status(201).json({ id: data });
   } catch (error) {
     sendError(res, error);
   }
