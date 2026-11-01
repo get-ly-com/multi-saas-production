@@ -75,6 +75,7 @@ function InvoiceDocument() {
             <div><strong>{invoice.invoice_number}</strong></div>
             <div>Date {formatDate(invoice.invoice_date)}</div>
             <div>Due {formatDate(invoice.due_date)}</div>
+            {Number(invoice.exchange_rate) !== 1 && <div>Rate {Number(invoice.exchange_rate)}</div>}
           </div>
         </div>
 
@@ -94,8 +95,8 @@ function InvoiceDocument() {
                 <tr key={index}>
                   <td className="wrap">{line.description}</td>
                   <td className="num">{line.quantity}</td>
-                  <td className="num">{money(line.unit_price)}</td>
-                  <td className="num">{money(line.quantity * line.unit_price)}</td>
+                  <td className="num">{money(line.unit_price, invoice.currency)}</td>
+                  <td className="num">{money(line.quantity * line.unit_price, invoice.currency)}</td>
                 </tr>
               ))}
             </tbody>
@@ -105,14 +106,14 @@ function InvoiceDocument() {
         <div className="document-totals">
           {Number(invoice.tax_amount) > 0 && (
             <>
-              <div><span>Subtotal</span><span>{money(invoice.subtotal)}</span></div>
-              <div><span>Tax</span><span>{money(invoice.tax_amount)}</span></div>
+              <div><span>Subtotal</span><span>{money(invoice.subtotal, invoice.currency)}</span></div>
+              <div><span>Tax</span><span>{money(invoice.tax_amount, invoice.currency)}</span></div>
             </>
           )}
-          <div><span>Total</span><span>{money(invoice.amount)}</span></div>
-          {Number(invoice.amount_paid) > 0 && <div><span>Paid</span><span>{money(invoice.amount_paid)}</span></div>}
-          {Number(invoice.amount_credited) > 0 && <div><span>Credited</span><span>{money(invoice.amount_credited)}</span></div>}
-          <div className="due"><span>Balance due</span><span>{money(invoice.status === 'void' ? 0 : balance)}</span></div>
+          <div><span>Total</span><span>{money(invoice.amount, invoice.currency)}</span></div>
+          {Number(invoice.amount_paid) > 0 && <div><span>Paid</span><span>{money(invoice.amount_paid, invoice.currency)}</span></div>}
+          {Number(invoice.amount_credited) > 0 && <div><span>Credited</span><span>{money(invoice.amount_credited, invoice.currency)}</span></div>}
+          <div className="due"><span>Balance due</span><span>{money(invoice.status === 'void' ? 0 : balance, invoice.currency)}</span></div>
         </div>
 
         {invoice.description && <p className="wrap">{invoice.description}</p>}
@@ -129,7 +130,7 @@ function InvoiceDocument() {
                   <td>{formatDate(payment.payment_date)}</td>
                   <td>{payment.account?.code} {payment.account?.name}</td>
                   <td>{payment.reference || '—'}</td>
-                  <td className="num">{money(payment.amount)}</td>
+                  <td className="num">{money(payment.amount, invoice.currency)}</td>
                   <td className="num">
                     {payment.voided_at
                       ? <span className="badge void">void</span>
@@ -156,7 +157,7 @@ function InvoiceDocument() {
                   <td>{credit.credit_number}{credit.refund_account_id && <span className="badge">refund</span>}</td>
                   <td>{formatDate(credit.credit_date)}</td>
                   <td className="wrap">{credit.reason}</td>
-                  <td className="num">{money(credit.amount)}</td>
+                  <td className="num">{money(credit.amount, invoice.currency)}</td>
                   <td className="num">
                     {credit.voided_at
                       ? <span className="badge void">void</span>
@@ -208,7 +209,7 @@ function RefundForm({ invoice, onClose, onSaved }: { invoice: any; onClose: () =
   return (
     <Modal title={`Refund on ${invoice.invoice_number}`}>
       <form onSubmit={submit}>
-        <p className="muted">Paid so far {money(paid)}</p>
+        <p className="muted">Paid so far {money(paid, invoice.currency)}</p>
         <div className="form-grid">
           <label>Amount<input required type="number" min="0.01" step="0.01" max={paid} value={form.amount} onChange={(e) => set('amount', e.target.value)} /></label>
           <label>Date<input required type="date" value={form.credit_date} onChange={(e) => set('credit_date', e.target.value)} /></label>

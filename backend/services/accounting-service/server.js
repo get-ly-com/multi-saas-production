@@ -59,6 +59,13 @@ const parseAmount = (value) => {
   return amount;
 };
 
+// One document-currency unit in the base currency. The database ignores it for base-currency documents.
+const parseRate = (value) => {
+  const rate = value === undefined || value === null || value === '' ? 1 : Number(value);
+  if (!(rate > 0)) throw new Error('Enter an exchange rate above zero');
+  return rate;
+};
+
 const parseBillLines = (lineItems) => {
   if (!Array.isArray(lineItems) || lineItems.length === 0) {
     throw new Error('Add at least one line');
@@ -143,7 +150,7 @@ app.get('/invoices/:id', async (req, res) => {
 // Create invoice
 app.post('/invoices', async (req, res) => {
   try {
-    const { customer_id, invoice_date, due_date, description, invoice_number, line_items, cost_center_id } = req.body;
+    const { customer_id, invoice_date, due_date, description, invoice_number, line_items, cost_center_id, currency, exchange_rate } = req.body;
     if (!UUID.test(customer_id || '')) throw new Error('Choose a customer');
 
     const row = {
@@ -154,6 +161,8 @@ app.post('/invoices', async (req, res) => {
       description: description || null,
       amount: 0,
       cost_center_id: cost_center_id || null,
+      currency: currency || null,
+      exchange_rate: parseRate(exchange_rate),
       line_items: parseLineItems(line_items)
     };
     if (invoice_date) row.invoice_date = invoice_date;
@@ -170,7 +179,7 @@ app.post('/invoices', async (req, res) => {
 // Update invoice
 app.put('/invoices/:id', async (req, res) => {
   try {
-    const { customer_id, invoice_date, due_date, description, status, line_items, cost_center_id } = req.body;
+    const { customer_id, invoice_date, due_date, description, status, line_items, cost_center_id, currency, exchange_rate } = req.body;
     const updates = { updated_at: new Date().toISOString() };
 
     if (customer_id !== undefined) {
@@ -179,6 +188,8 @@ app.put('/invoices/:id', async (req, res) => {
     }
     if (invoice_date) updates.invoice_date = invoice_date;
     if (cost_center_id !== undefined) updates.cost_center_id = cost_center_id || null;
+    if (currency) updates.currency = currency;
+    if (exchange_rate !== undefined) updates.exchange_rate = parseRate(exchange_rate);
     if (due_date !== undefined) updates.due_date = due_date || null;
     if (description !== undefined) updates.description = description || null;
     if (line_items !== undefined) updates.line_items = parseLineItems(line_items);
@@ -317,7 +328,7 @@ app.get('/bills', async (req, res) => {
 
 app.post('/bills', async (req, res) => {
   try {
-    const { vendor_id, vendor_ref, bill_date, due_date, notes, line_items } = req.body;
+    const { vendor_id, vendor_ref, bill_date, due_date, notes, line_items, currency, exchange_rate } = req.body;
     if (!UUID.test(vendor_id || '')) throw new Error('Choose a vendor');
 
     const row = {
@@ -326,6 +337,8 @@ app.post('/bills', async (req, res) => {
       vendor_ref: vendor_ref || null,
       due_date: due_date || null,
       notes: notes || null,
+      currency: currency || null,
+      exchange_rate: parseRate(exchange_rate),
       line_items: parseBillLines(line_items)
     };
     if (bill_date) row.bill_date = bill_date;
@@ -341,8 +354,11 @@ app.post('/bills', async (req, res) => {
 
 app.put('/bills/:id', async (req, res) => {
   try {
-    const { vendor_id, vendor_ref, bill_date, due_date, notes, status, line_items } = req.body;
+    const { vendor_id, vendor_ref, bill_date, due_date, notes, status, line_items, currency, exchange_rate } = req.body;
     const updates = { updated_at: new Date().toISOString() };
+
+    if (currency) updates.currency = currency;
+    if (exchange_rate !== undefined) updates.exchange_rate = parseRate(exchange_rate);
 
     if (vendor_id !== undefined) {
       if (!UUID.test(vendor_id || '')) throw new Error('Choose a vendor');
@@ -391,7 +407,7 @@ app.delete('/bills/:id', async (req, res) => {
 // Payments are for an invoice or a bill
 app.post('/payments', async (req, res) => {
   try {
-    const { invoice_id, bill_id, account_id, payment_date, amount, reference } = req.body;
+    const { invoice_id, bill_id, account_id, payment_date, amount, reference, exchange_rate } = req.body;
     if (!DATE.test(payment_date || '')) throw new Error('Choose a date');
 
     const { data, error } = await ledger(req).rpc('record_payment', {
@@ -401,7 +417,8 @@ app.post('/payments', async (req, res) => {
       p_account: account_id,
       p_date: payment_date,
       p_amount: parseAmount(amount),
-      p_reference: reference || null
+      p_reference: reference || null,
+      p_rate: exchange_rate ? Number(exchange_rate) : null
     });
 
     if (error) throw error;
@@ -946,6 +963,48 @@ app.post('/bank/reconcile', async (req, res) => {
 
     if (error) throw error;
     res.status(201).json({ id: data });
+  } catch (error) {
+    sendError(res, error);
+  }
+});
+
+// Currencies
+app.get('/currencies', async (req, res) => {
+  try {
+    const { data, error } = await ledger(req).rpc('currency_overview', { p_tenant: req.tenantId });
+    if (error) throw error;
+    res.json(data);
+  } catch (error) {
+    sendError(res, error);
+  }
+});
+
+app.post('/currencies/rates', async (req, res) => {
+  try {
+    const { currency, rate_date, rate } = req.body;
+    const { error } = await ledger(req).rpc('save_exchange_rate', {
+      p_tenant: req.tenantId,
+      p_currency: currency,
+      p_date: parseDate(rate_date, 'a date'),
+      p_rate: Number(rate)
+    });
+
+    if (error) throw error;
+    res.status(201).json({ success: true });
+  } catch (error) {
+    sendError(res, error);
+  }
+});
+
+app.put('/currencies/base', async (req, res) => {
+  try {
+    const { error } = await ledger(req).rpc('set_base_currency', {
+      p_tenant: req.tenantId,
+      p_currency: req.body.currency
+    });
+
+    if (error) throw error;
+    res.json({ success: true });
   } catch (error) {
     sendError(res, error);
   }

@@ -37,8 +37,14 @@ export const api = {
   delete: (path: string) => request('DELETE', path)
 };
 
-export const money = (value: number | string | null | undefined) =>
-  Number(value || 0).toLocaleString(undefined, { style: 'currency', currency: 'USD' });
+let baseCurrency = 'USD';
+
+export const setBaseCurrency = (currency: string) => {
+  baseCurrency = currency;
+};
+
+export const money = (value: number | string | null | undefined, currency = baseCurrency) =>
+  Number(value || 0).toLocaleString(undefined, { style: 'currency', currency });
 
 // A plain date has no time zone, so it must not be read as UTC midnight
 export const formatDate = (value: string | null | undefined) =>

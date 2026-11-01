@@ -1,7 +1,7 @@
 import Link from 'next/link';
 import { useRouter } from 'next/router';
 import { ReactNode, useEffect, useState } from 'react';
-import { api } from '@/lib/api';
+import { api, setBaseCurrency } from '@/lib/api';
 import { getSupabase } from '@/lib/supabase';
 
 const PRODUCTS = [
@@ -25,6 +25,8 @@ export default function AppShell({ children }: { children: ReactNode }) {
       try {
         const account = await api.get('/api/me');
         if (!account.tenant) return router.replace('/onboarding');
+        const currencies = await api.get('/api/accounting/currencies').catch(() => null);
+        if (currencies) setBaseCurrency(currencies.base);
         setMe(account);
       } catch (err: any) {
         if (err.status === 401) return router.replace('/login');

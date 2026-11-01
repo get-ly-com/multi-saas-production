@@ -2,12 +2,13 @@ import Link from 'next/link';
 import { FormEvent, useEffect, useState } from 'react';
 import AccountingNav from '@/components/AccountingNav';
 import AppShell from '@/components/AppShell';
+import CurrencyFields from '@/components/CurrencyFields';
 import Modal from '@/components/Modal';
 import PaymentForm from '@/components/PaymentForm';
 import { api, formatDate, money, today } from '@/lib/api';
 
 const blankLine = { description: '', account_id: '', amount: '', tax_rate_id: '', cost_center_id: '' };
-const blankBill = { vendor_id: '', vendor_ref: '', bill_date: '', due_date: '', notes: '', line_items: [blankLine] };
+const blankBill = { vendor_id: '', vendor_ref: '', bill_date: '', due_date: '', notes: '', currency: '', exchange_rate: '1', line_items: [blankLine] };
 
 const billBalance = (bill: any) => Number(bill.amount) - Number(bill.amount_paid);
 
@@ -114,8 +115,8 @@ function BillsApp() {
                   <td className="wrap">{bill.vendor?.name}</td>
                   <td>{formatDate(bill.due_date)}</td>
                   <td><span className={`badge ${bill.status}`}>{bill.status}</span></td>
-                  <td className="num">{money(bill.amount)}</td>
-                  <td className="num">{bill.status === 'void' || bill.status === 'draft' ? '—' : money(billBalance(bill))}</td>
+                  <td className="num">{money(bill.amount, bill.currency)}</td>
+                  <td className="num">{bill.status === 'void' || bill.status === 'draft' ? '—' : money(billBalance(bill), bill.currency)}</td>
                   <td>
                     <div className="row-actions">
                       {bill.status === 'draft' && (
@@ -152,6 +153,7 @@ function BillsApp() {
           target={{ bill_id: paying.id }}
           label={paying.bill_number}
           balance={billBalance(paying)}
+          currency={paying.currency}
           onClose={() => setPaying(null)}
           onSaved={load}
         />
@@ -168,7 +170,7 @@ function BillsApp() {
                     <td>{formatDate(payment.payment_date)}</td>
                     <td>{payment.account?.code} {payment.account?.name}</td>
                     <td>{payment.reference || '—'}</td>
-                    <td className="num">{money(payment.amount)}</td>
+                    <td className="num">{money(payment.amount, history.currency)}</td>
                     <td className="num">
                       {payment.voided_at
                         ? <span className="badge void">void</span>
@@ -181,7 +183,7 @@ function BillsApp() {
                     <td>{formatDate(credit.credit_date)}</td>
                     <td>{credit.account?.code} {credit.account?.name}</td>
                     <td className="wrap">{credit.credit_number}: {credit.reason}</td>
-                    <td className="num">{money(credit.amount)}</td>
+                    <td className="num">{money(credit.amount, history.currency)}</td>
                     <td className="num">
                       {credit.voided_at
                         ? <span className="badge void">void</span>
@@ -219,7 +221,7 @@ function VendorCreditForm({ bill, accounts, onClose, onSaved }: { bill: any; acc
   return (
     <Modal title={`Vendor credit for ${bill.bill_number}`}>
       <form onSubmit={submit}>
-        <p className="muted">Balance {money(balance)}</p>
+        <p className="muted">Balance {money(balance, bill.currency)}</p>
         <div className="form-grid">
           <label>Amount<input required type="number" min="0.01" step="0.01" max={balance} value={form.amount} onChange={(e) => set('amount', e.target.value)} /></label>
           <label>Date<input required type="date" value={form.credit_date} onChange={(e) => set('credit_date', e.target.value)} /></label>
@@ -258,8 +260,8 @@ function BillForm({ initial, vendors, accounts, taxRates, costCenters, onClose, 
 
   const submit = async (event: FormEvent) => {
     event.preventDefault();
-    const { vendor_id, vendor_ref, bill_date, due_date, notes, line_items } = form;
-    const body = { vendor_id, vendor_ref, bill_date, due_date, notes, line_items };
+    const { vendor_id, vendor_ref, bill_date, due_date, notes, line_items, currency, exchange_rate } = form;
+    const body = { vendor_id, vendor_ref, bill_date, due_date, notes, line_items, currency, exchange_rate };
     try {
       if (form.id) await api.put(`/api/accounting/bills/${form.id}`, body);
       else await api.post('/api/accounting/bills', body);
@@ -285,6 +287,12 @@ function BillForm({ initial, vendors, accounts, taxRates, costCenters, onClose, 
           <label>Vendor's bill number<input value={form.vendor_ref} onChange={(e) => set('vendor_ref', e.target.value)} /></label>
           <label>Bill date<input required type="date" value={form.bill_date} onChange={(e) => set('bill_date', e.target.value)} /></label>
           <label>Due date<input type="date" value={form.due_date} onChange={(e) => set('due_date', e.target.value)} /></label>
+          <CurrencyFields
+            currency={form.currency}
+            rate={form.exchange_rate}
+            locked={Boolean(form.id) && Number(form.amount_paid) > 0}
+            onChange={(currency, exchange_rate) => setForm((current: any) => ({ ...current, currency, exchange_rate }))}
+          />
         </div>
         <div className="lines">
           {form.line_items.map((line: any, index: number) => (
@@ -312,7 +320,7 @@ function BillForm({ initial, vendors, accounts, taxRates, costCenters, onClose, 
           ))}
         </div>
         <button type="button" onClick={() => set('line_items', [...form.line_items, blankLine])}>Add line</button>
-        <p>Subtotal {money(subtotal)} · Tax {money(tax)} · Total: <strong>{money(subtotal + tax)}</strong></p>
+        <p>Subtotal {money(subtotal, form.currency || undefined)} · Tax {money(tax, form.currency || undefined)} · Total: <strong>{money(subtotal + tax, form.currency || undefined)}</strong></p>
         <label>Notes<textarea rows={2} value={form.notes} onChange={(e) => set('notes', e.target.value)} /></label>
         {error && <p className="error">{error}</p>}
         <div className="form-actions">

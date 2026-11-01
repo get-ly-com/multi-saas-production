@@ -8,6 +8,7 @@ const SECTIONS = [
   { name: 'Vendors', path: '/saas/accounting/vendors' },
   { name: 'Banking', path: '/saas/accounting/banking' },
   { name: 'Tax', path: '/saas/accounting/taxes' },
+  { name: 'Currencies', path: '/saas/accounting/currencies' },
   { name: 'Fixed assets', path: '/saas/accounting/assets' },
   { name: 'Budgets', path: '/saas/accounting/budgets' },
   { name: 'Cost centers', path: '/saas/accounting/cost-centers' },

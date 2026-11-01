@@ -6,13 +6,15 @@ type Props = {
   target: { invoice_id?: string; bill_id?: string };
   label: string;
   balance: number;
+  currency: string;
   onClose: () => void;
   onSaved: () => void;
 };
 
-export default function PaymentForm({ target, label, balance, onClose, onSaved }: Props) {
+export default function PaymentForm({ target, label, balance, currency, onClose, onSaved }: Props) {
   const [accounts, setAccounts] = useState<any[]>([]);
-  const [form, setForm] = useState({ amount: balance.toFixed(2), payment_date: today(), account_id: '', reference: '' });
+  const [form, setForm] = useState({ amount: balance.toFixed(2), payment_date: today(), account_id: '', reference: '', exchange_rate: '' });
+  const [base, setBase] = useState(currency);
   const [error, setError] = useState('');
   const set = (field: string, value: string) => setForm((current) => ({ ...current, [field]: value }));
 
@@ -23,6 +25,14 @@ export default function PaymentForm({ target, label, balance, onClose, onSaved }
         setAccounts(usable);
         const cash = usable.find((account: any) => account.code === '1000') || usable[0];
         if (cash) set('account_id', cash.id);
+      })
+      .catch((err) => setError(err.message));
+
+    api.get('/api/accounting/currencies')
+      .then((data) => {
+        setBase(data.base);
+        const latest = data.rates.find((row: any) => row.currency === currency);
+        if (latest) set('exchange_rate', String(Number(latest.rate)));
       })
       .catch((err) => setError(err.message));
   }, []);
@@ -41,7 +51,7 @@ export default function PaymentForm({ target, label, balance, onClose, onSaved }
   return (
     <Modal title={`Record payment for ${label}`}>
       <form onSubmit={submit}>
-        <p className="muted">Balance {money(balance)}</p>
+        <p className="muted">Balance {money(balance, currency)}</p>
         <div className="form-grid">
           <label>Amount<input required type="number" min="0.01" step="0.01" max={balance} value={form.amount} onChange={(e) => set('amount', e.target.value)} /></label>
           <label>Date<input required type="date" value={form.payment_date} onChange={(e) => set('payment_date', e.target.value)} /></label>
@@ -51,6 +61,11 @@ export default function PaymentForm({ target, label, balance, onClose, onSaved }
             </select>
           </label>
           <label>Reference<input value={form.reference} onChange={(e) => set('reference', e.target.value)} /></label>
+          {currency !== base && (
+            <label>Rate today (1 {currency} in {base})
+              <input required type="number" min="0.00000001" step="any" value={form.exchange_rate} onChange={(e) => set('exchange_rate', e.target.value)} />
+            </label>
+          )}
         </div>
         {error && <p className="error">{error}</p>}
         <div className="form-actions">

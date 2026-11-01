@@ -2,12 +2,13 @@ import Link from 'next/link';
 import { FormEvent, useEffect, useState } from 'react';
 import AccountingNav from '@/components/AccountingNav';
 import AppShell from '@/components/AppShell';
+import CurrencyFields from '@/components/CurrencyFields';
 import Modal from '@/components/Modal';
 import PaymentForm from '@/components/PaymentForm';
 import { api, formatDate, money, today } from '@/lib/api';
 
 const blankLine = { description: '', quantity: '1', unit_price: '', tax_rate_id: '' };
-const blankInvoice = { customer_id: '', invoice_date: '', due_date: '', description: '', cost_center_id: '', line_items: [blankLine] };
+const blankInvoice = { customer_id: '', invoice_date: '', due_date: '', description: '', cost_center_id: '', currency: '', exchange_rate: '1', line_items: [blankLine] };
 const blankExpense = { amount: '', category: '', description: '', expense_date: '', account_id: '', cost_center_id: '' };
 
 const invoiceBalance = (invoice: any) =>
@@ -128,8 +129,8 @@ function AccountingApp() {
                   <td className="wrap">{invoice.customer_name}</td>
                   <td>{formatDate(invoice.due_date)}</td>
                   <td><span className={`badge ${invoice.status}`}>{invoice.status}</span></td>
-                  <td className="num">{money(invoice.amount)}</td>
-                  <td className="num">{invoice.status === 'void' || invoice.status === 'draft' ? '—' : money(invoiceBalance(invoice))}</td>
+                  <td className="num">{money(invoice.amount, invoice.currency)}</td>
+                  <td className="num">{invoice.status === 'void' || invoice.status === 'draft' ? '—' : money(invoiceBalance(invoice), invoice.currency)}</td>
                   <td>
                     <div className="row-actions">
                       {invoice.status === 'draft' && (
@@ -189,6 +190,7 @@ function AccountingApp() {
           target={{ invoice_id: paying.id }}
           label={paying.invoice_number}
           balance={invoiceBalance(paying)}
+          currency={paying.currency}
           onClose={() => setPaying(null)}
           onSaved={load}
         />
@@ -228,7 +230,7 @@ function CreditForm({ invoice, onClose, onSaved }: { invoice: any; onClose: () =
   return (
     <Modal title={`Credit note for ${invoice.invoice_number}`}>
       <form onSubmit={submit}>
-        <p className="muted">Balance {money(balance)}</p>
+        <p className="muted">Balance {money(balance, invoice.currency)}</p>
         <div className="form-grid">
           <label>Amount<input required type="number" min="0.01" step="0.01" max={balance} value={form.amount} onChange={(e) => set('amount', e.target.value)} /></label>
           <label>Date<input required type="date" value={form.credit_date} onChange={(e) => set('credit_date', e.target.value)} /></label>
@@ -273,8 +275,8 @@ function InvoiceForm({ initial, customers, taxRates, costCenters, onClose, onSav
 
   const submit = async (event: FormEvent) => {
     event.preventDefault();
-    const { customer_id, invoice_date, due_date, description, line_items, cost_center_id } = form;
-    const body = { customer_id, invoice_date, due_date, description, line_items, cost_center_id };
+    const { customer_id, invoice_date, due_date, description, line_items, cost_center_id, currency, exchange_rate } = form;
+    const body = { customer_id, invoice_date, due_date, description, line_items, cost_center_id, currency, exchange_rate };
     try {
       if (form.id) await api.put(`/api/accounting/invoices/${form.id}`, body);
       else await api.post('/api/accounting/invoices', body);
@@ -300,6 +302,12 @@ function InvoiceForm({ initial, customers, taxRates, costCenters, onClose, onSav
           <label>Invoice date<input required type="date" value={form.invoice_date} onChange={(e) => set('invoice_date', e.target.value)} /></label>
           <label>Due date<input type="date" value={form.due_date} onChange={(e) => set('due_date', e.target.value)} /></label>
           <CostCenterSelect value={form.cost_center_id} costCenters={costCenters} onChange={(value) => set('cost_center_id', value)} />
+          <CurrencyFields
+            currency={form.currency}
+            rate={form.exchange_rate}
+            locked={Boolean(form.id) && Number(form.amount_paid) + Number(form.amount_credited) > 0}
+            onChange={(currency, exchange_rate) => setForm((current: any) => ({ ...current, currency, exchange_rate }))}
+          />
         </div>
         {customers.length === 0 && <p className="muted"><Link href="/saas/accounting/customers">Add your first customer</Link> to create an invoice.</p>}
         <div className="lines">
@@ -319,7 +327,7 @@ function InvoiceForm({ initial, customers, taxRates, costCenters, onClose, onSav
           ))}
         </div>
         <button type="button" onClick={() => set('line_items', [...form.line_items, blankLine])}>Add line</button>
-        <p>Subtotal {money(subtotal)} · Tax {money(tax)} · Total: <strong>{money(subtotal + tax)}</strong></p>
+        <p>Subtotal {money(subtotal, form.currency || undefined)} · Tax {money(tax, form.currency || undefined)} · Total: <strong>{money(subtotal + tax, form.currency || undefined)}</strong></p>
         <label>Notes<textarea rows={2} value={form.description} onChange={(e) => set('description', e.target.value)} /></label>
         {error && <p className="error">{error}</p>}
         <div className="form-actions">
