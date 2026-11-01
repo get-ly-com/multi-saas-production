@@ -16,13 +16,22 @@ const TABLE_NAMES: Record<string, string> = {
   journal_entries: 'Journal entry',
   bank_lines: 'Bank line',
   reconciliations: 'Reconciliation',
-  settings: 'Period lock',
-  tenant_members: 'Team member'
+  settings: 'Book setting',
+  tenant_members: 'Team member',
+  cost_centers: 'Cost center',
+  budgets: 'Budget',
+  fixed_assets: 'Fixed asset',
+  vendor_credits: 'Vendor credit',
+  exchange_rates: 'Exchange rate',
+  purchase_orders: 'Purchase order',
+  recurring_invoices: 'Recurring invoice',
+  revenue_schedules: 'Revenue schedule'
 };
 
 const ACTIONS: Record<string, string> = { insert: 'Created', update: 'Changed', delete: 'Deleted' };
 
 const describe = (row: any) => {
+  if (row.action === 'insert' && row.changes.lock_date) return `lock date: ${short(row.changes.lock_date)}`;
   if (row.action !== 'update') return '';
   return Object.entries(row.changes)
     .map(([field, change]: [string, any]) => `${field.replace(/_/g, ' ')}: ${short(change.from)} → ${short(change.to)}`)

@@ -101,7 +101,7 @@ function AssetsApp() {
       </div>
 
       {adding && <AssetForm banks={banks} onClose={() => setAdding(false)} onSaved={load} />}
-      {disposing && <DisposeForm asset={disposing} banks={banks} onClose={() => setDisposing(null)} onSaved={load} />}
+      {disposing && <DisposeForm asset={disposing} banks={banks} onClose={() => setDisposing(null)} onSaved={async () => { setNotice(`${disposing.name} disposed.`); await load(); }} />}
     </div>
   );
 }

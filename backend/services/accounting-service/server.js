@@ -1014,14 +1014,15 @@ app.put('/currencies/base', async (req, res) => {
 // Refunds and vendor credits
 app.post('/refunds', async (req, res) => {
   try {
-    const { invoice_id, credit_date, amount, account_id, reason } = req.body;
+    const { invoice_id, credit_date, amount, account_id, reason, exchange_rate } = req.body;
     const { data, error } = await ledger(req).rpc('create_refund', {
       p_tenant: req.tenantId,
       p_invoice: invoice_id,
       p_date: parseDate(credit_date, 'a date'),
       p_amount: parseAmount(amount),
       p_account: account_id,
-      p_reason: reason
+      p_reason: reason,
+      p_rate: exchange_rate ? parseRate(exchange_rate) : null
     });
 
     if (error) throw error;

@@ -181,7 +181,8 @@ function InvoiceDocument() {
 function RefundForm({ invoice, onClose, onSaved }: { invoice: any; onClose: () => void; onSaved: () => void }) {
   const paid = Number(invoice.amount_paid);
   const [accounts, setAccounts] = useState<any[]>([]);
-  const [form, setForm] = useState({ amount: paid.toFixed(2), credit_date: today(), account_id: '', reason: '' });
+  const [form, setForm] = useState({ amount: paid.toFixed(2), credit_date: today(), account_id: '', reason: '', exchange_rate: '' });
+  const [base, setBase] = useState(invoice.currency);
   const [error, setError] = useState('');
   const set = (field: string, value: string) => setForm((current) => ({ ...current, [field]: value }));
 
@@ -191,6 +192,14 @@ function RefundForm({ invoice, onClose, onSaved }: { invoice: any; onClose: () =
         const usable = rows.filter((account: any) => account.is_cash && account.is_active);
         setAccounts(usable);
         if (usable[0]) set('account_id', usable[0].id);
+      })
+      .catch((err) => setError(err.message));
+
+    api.get('/api/accounting/currencies')
+      .then((data) => {
+        setBase(data.base);
+        const latest = data.rates.find((row: any) => row.currency === invoice.currency);
+        if (latest) set('exchange_rate', String(Number(latest.rate)));
       })
       .catch((err) => setError(err.message));
   }, []);
@@ -218,6 +227,11 @@ function RefundForm({ invoice, onClose, onSaved }: { invoice: any; onClose: () =
               {accounts.map((account) => <option key={account.id} value={account.id}>{account.code} {account.name}</option>)}
             </select>
           </label>
+          {invoice.currency !== base && (
+            <label>Rate today (1 {invoice.currency} in {base})
+              <input required type="number" min="0.00000001" step="any" value={form.exchange_rate} onChange={(e) => set('exchange_rate', e.target.value)} />
+            </label>
+          )}
         </div>
         <label style={{ marginTop: 12 }}>Reason<textarea required rows={2} value={form.reason} onChange={(e) => set('reason', e.target.value)} /></label>
         {error && <p className="error">{error}</p>}
