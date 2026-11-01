@@ -22,11 +22,14 @@ function ReportsApp() {
   const [to, setTo] = useState(today());
   const [asOf, setAsOf] = useState(today());
   const [company, setCompany] = useState('');
-  const [data, setData] = useState<any>(null);
+  const [loaded, setLoaded] = useState<{ path: string; data: any } | null>(null);
   const [error, setError] = useState('');
 
   const report = REPORTS.find(({ id }) => id === reportId)!;
   const query = report.dates === 'range' ? `?from=${from}&to=${to}` : report.dates === 'single' ? `?as_of=${asOf}` : '';
+  const path = `/api/accounting/reports/${reportId}${query}`;
+  // Each report has its own shape, so only draw data fetched for the one on screen
+  const data = loaded?.path === path ? loaded.data : null;
 
   useEffect(() => {
     api.get('/api/me').then((me) => setCompany(me.tenant.name)).catch((err) => setError(err.message));
@@ -34,11 +37,10 @@ function ReportsApp() {
 
   useEffect(() => {
     let current = true;
-    setData(null);
-    api.get(`/api/accounting/reports/${reportId}${query}`)
+    api.get(path)
       .then((result) => {
         if (current) {
-          setData(result);
+          setLoaded({ path, data: result });
           setError('');
         }
       })
@@ -46,7 +48,7 @@ function ReportsApp() {
     return () => {
       current = false;
     };
-  }, [reportId, query]);
+  }, [path]);
 
   const period = report.dates === 'range'
     ? `${formatDate(from)} to ${formatDate(to)}`
