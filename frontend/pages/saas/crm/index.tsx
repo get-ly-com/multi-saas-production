@@ -54,7 +54,7 @@ function TodayApp() {
       {!data ? !error && <p className="empty">Loading…</p> : (
         <>
           <div className="stats">
-            <div className="card"><div className="stat-label">Open pipeline</div><div className="stat-value">{money(data.open_value)}</div><div className="muted">{data.open_count} deals</div></div>
+            <div className="card"><div className="stat-label">Open pipeline</div><div className="stat-value">{money(data.open_value)}</div><div className="muted">{data.open_count} {Number(data.open_count) === 1 ? 'deal' : 'deals'}</div></div>
             <div className="card"><div className="stat-label">Weighted forecast</div><div className="stat-value">{money(data.weighted_value)}</div><div className="muted">Value × stage chance</div></div>
             <div className="card"><div className="stat-label">Won this month</div><div className="stat-value">{money(data.won_this_month)}</div></div>
             <div className="card"><div className="stat-label">Win rate, 90 days</div><div className="stat-value">{decided ? `${Math.round((Number(data.won_90) / decided) * 100)}%` : '—'}</div><div className="muted">{data.won_90} won, {data.lost_90} lost</div></div>
@@ -83,8 +83,8 @@ function TodayApp() {
           {(data.stale_deals.length > 0 || Number(data.late_deals) > 0 || Number(data.undated_deals) > 0) && (
             <div className="card table-wrap">
               <h2>Needs attention</h2>
-              {Number(data.late_deals) > 0 && <p>{data.late_deals} open deals are past their expected close.</p>}
-              {Number(data.undated_deals) > 0 && <p>{data.undated_deals} open deals have no expected close, so they aren't in the forecast below.</p>}
+              {Number(data.late_deals) > 0 && <p>Open deals past their expected close: {data.late_deals}.</p>}
+              {Number(data.undated_deals) > 0 && <p>Open deals with no expected close: {data.undated_deals}. They aren't in the forecast below.</p>}
               {data.stale_deals.length > 0 && (
                 <table>
                   <thead><tr><th>Quiet for 14 days or more</th><th>Stage</th><th>Last touched</th><th className="num">Value</th></tr></thead>
