@@ -83,7 +83,7 @@ function ReportsApp() {
   const results = (row: any) => [
     Number(row.deals_created || 0), Number(row.won || 0), Number(row.won_value || 0), Number(row.lost || 0),
     percent(Number(row.won || 0), Number(row.won || 0) + Number(row.lost || 0)),
-    row.won ? Number(row.won_value) / Number(row.won) : null, row.days_to_win ?? null, Number(row.open_value || 0)
+    row.won ? Math.round((Number(row.won_value) / Number(row.won)) * 100) / 100 : null, row.days_to_win ?? null, Number(row.open_value || 0)
   ];
   const activity = (row: any) => [
     Number(row.calls || 0), Number(row.meetings || 0), Number(row.emails || 0), Number(row.notes || 0),
