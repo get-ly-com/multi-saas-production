@@ -1,5 +1,5 @@
 import { FormEvent, ReactNode, useEffect, useState } from 'react';
-import { api, formatDate, today } from '@/lib/api';
+import { CRM_SAVED, api, formatDate, today } from '@/lib/api';
 
 const KINDS = [
   { id: 'note', name: 'Note' },
@@ -28,6 +28,9 @@ export default function Timeline({ links, extra = [], onChange }: { links: Links
 
   useEffect(() => {
     load();
+    // Any CRM save reloads the list, which also shows tasks automation just made
+    window.addEventListener(CRM_SAVED, load);
+    return () => window.removeEventListener(CRM_SAVED, load);
   }, [query]);
 
   const add = async (event: FormEvent) => {
@@ -35,7 +38,6 @@ export default function Timeline({ links, extra = [], onChange }: { links: Links
     try {
       await api.post('/api/crm/activities', { ...links, ...form, due_on: form.kind === 'task' ? form.due_on || today() : '' });
       setForm({ ...form, subject: '', body: '', due_on: '' });
-      await load();
       onChange?.();
     } catch (err: any) {
       setError(err.message);
@@ -45,7 +47,6 @@ export default function Timeline({ links, extra = [], onChange }: { links: Links
   const run = async (action: () => Promise<unknown>) => {
     try {
       await action();
-      await load();
       onChange?.();
     } catch (err: any) {
       setError(err.message);

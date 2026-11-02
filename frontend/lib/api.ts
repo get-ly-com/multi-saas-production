@@ -55,8 +55,12 @@ const request = async (method: string, path: string, body?: unknown) => {
   if (!response.ok) {
     throw new ApiError(payload?.error || 'Something went wrong. Please try again.', response.status);
   }
+  // A CRM save can set off automation, so timelines and alerts check again
+  if (method !== 'GET' && path.startsWith('/api/crm/')) window.dispatchEvent(new Event(CRM_SAVED));
   return payload;
 };
+
+export const CRM_SAVED = 'crm-saved';
 
 export const api = {
   get: (path: string) => request('GET', path),

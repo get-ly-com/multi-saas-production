@@ -1,6 +1,6 @@
 import { useRouter } from 'next/router';
 import { useEffect, useRef, useState } from 'react';
-import { api, formatDate } from '@/lib/api';
+import { CRM_SAVED, api, formatDate } from '@/lib/api';
 
 const CHECK_EVERY = 60 * 1000;
 
@@ -18,7 +18,12 @@ export default function NotificationBell() {
     const timer = setInterval(() => {
       if (!document.hidden) load();
     }, CHECK_EVERY);
-    return () => clearInterval(timer);
+    // A CRM save can set off a rule, so check straight away too
+    window.addEventListener(CRM_SAVED, load);
+    return () => {
+      clearInterval(timer);
+      window.removeEventListener(CRM_SAVED, load);
+    };
   }, []);
 
   useEffect(() => {
@@ -30,10 +35,8 @@ export default function NotificationBell() {
     return () => document.removeEventListener('click', close);
   }, [open]);
 
-  const markRead = async (ids: string[] | null) => {
-    await api.post('/api/crm/notifications/read', { ids }).catch(() => undefined);
-    await load();
-  };
+  // Saving sends CRM_SAVED, which reloads the list
+  const markRead = (ids: string[] | null) => api.post('/api/crm/notifications/read', { ids }).catch(() => undefined);
 
   const choose = async (item: any) => {
     setOpen(false);
