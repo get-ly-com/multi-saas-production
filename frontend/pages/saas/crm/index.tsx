@@ -129,7 +129,7 @@ function TodayApp() {
           )}
 
           <div className="card table-wrap">
-            <h2>Forecast, next three months</h2>
+            <h2>Forecast, next three months <Link href="/saas/crm/forecast" className="muted">Full forecast</Link></h2>
             <table>
               <thead><tr><th>Month</th><th className="num">Deals</th><th className="num">Value</th><th className="num">Weighted</th></tr></thead>
               <tbody>

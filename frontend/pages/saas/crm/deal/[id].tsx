@@ -8,6 +8,7 @@ import { CustomValues } from '@/components/CustomFields';
 import QuoteForm from '@/components/QuoteForm';
 import Timeline from '@/components/Timeline';
 import { api, formatDate, money } from '@/lib/api';
+import { automaticCategory, categoryName } from '@/lib/forecast';
 import { quoteBadge, quoteLabel } from '../quotes';
 
 export default function Deal() {
@@ -81,6 +82,15 @@ function DealApp() {
     at: row.changed_at,
     content: <div className="timeline-item"><div><span className="badge">stage</span> {row.from_stage?.name} → {row.to_stage?.name}<div className="muted">{formatDate(row.changed_at)}</div></div></div>
   }));
+  // A row with no stage is a new expected close date
+  const dateMoves = history.filter((row) => !row.to_stage_id && row.from_close !== row.to_close).map((row) => ({
+    id: row.id,
+    at: row.changed_at,
+    content: <div className="timeline-item"><div><span className="badge">close date</span> {formatDate(row.from_close)} → {formatDate(row.to_close)}<div className="muted">{formatDate(row.changed_at)}</div></div></div>
+  }));
+  const forecast = deal?.stage?.kind === 'open'
+    ? `${categoryName(deal.forecast_category || automaticCategory(deal.stage.probability))}${deal.forecast_category ? '' : ' (from the stage)'}`
+    : '';
 
   return (
     <div className="stack">
@@ -98,6 +108,7 @@ function DealApp() {
                 {deal.expected_close && ` · closes ${formatDate(deal.expected_close)}`}
                 {owner && ` · ${owner}`}
                 {deal.source && ` · ${deal.source}`}
+                {forecast && ` · forecast: ${forecast}`}
               </p>
             </div>
             <div className="row-actions">
@@ -132,7 +143,7 @@ function DealApp() {
             </div>
           )}
 
-          <Timeline key={quotes.length} links={{ deal_id: deal.id }} extra={moves} />
+          <Timeline key={quotes.length} links={{ deal_id: deal.id }} extra={[...moves, ...dateMoves]} />
 
           {editing && <DealForm initial={{ ...deal, value: deal.value ?? '' }} onClose={() => setEditing(false)} onSaved={load} />}
           {losing && <LostForm deal={deal} stageId={losing} onClose={() => setLosing('')} onSaved={load} />}

@@ -6,11 +6,13 @@ import { api } from '@/lib/api';
 const SECTIONS = [
   { name: 'Today', path: '/saas/crm' },
   { name: 'Pipeline', path: '/saas/crm/pipeline' },
+  { name: 'Forecast', path: '/saas/crm/forecast' },
   { name: 'Leads', path: '/saas/crm/leads' },
   { name: 'Contacts', path: '/saas/crm/contacts' },
   { name: 'Companies', path: '/saas/crm/companies' },
   { name: 'Quotes', path: '/saas/crm/quotes' },
   { name: 'Tasks', path: '/saas/crm/tasks' },
+  { name: 'Reports', path: '/saas/crm/reports' },
   { name: 'Duplicates', path: '/saas/crm/duplicates' },
   { name: 'Automation', path: '/saas/crm/automation' },
   { name: 'Settings', path: '/saas/crm/settings' }

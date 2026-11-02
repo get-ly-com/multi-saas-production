@@ -1,3 +1,23 @@
+type Cell = string | number | null | undefined;
+
+// A leading = + - or @ in text would run as a formula in a spreadsheet, so it gets a quote mark first
+const csvCell = (value: Cell) => {
+  if (value === null || value === undefined) return '';
+  let text = String(value);
+  if (typeof value === 'string' && /^[=+\-@\t\r]/.test(text)) text = `'${text}`;
+  return /[",\n\r]/.test(text) ? `"${text.replace(/"/g, '""')}"` : text;
+};
+
+export const downloadCsv = (name: string, rows: Cell[][]) => {
+  const text = rows.map((row) => row.map(csvCell).join(',')).join('\r\n');
+  const url = URL.createObjectURL(new Blob([`﻿${text}`], { type: 'text/csv;charset=utf-8' }));
+  const link = document.createElement('a');
+  link.href = url;
+  link.download = name;
+  link.click();
+  URL.revokeObjectURL(url);
+};
+
 // Handles quoted fields, including commas and line breaks inside them
 export const parseCsv = (text: string) => {
   const rows: string[][] = [];

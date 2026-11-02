@@ -40,6 +40,26 @@ const parseDate = (value) => {
   return value;
 };
 
+const requiredDate = (value) => {
+  if (typeof value !== 'string' || !DATE.test(value)) throw new Error('Choose a start and end date');
+  return value;
+};
+
+// A month comes as 2026-11 and is stored as its first day
+const parseMonth = (value) => {
+  if (typeof value !== 'string' || !/^\d{4}-(0[1-9]|1[0-2])$/.test(value)) throw new Error('Choose a month');
+  return `${value}-01`;
+};
+
+const FORECAST_CATEGORIES = ['commit', 'best_case', 'pipeline', 'omit'];
+
+// Blank means the stage's chance decides
+const parseCategory = (value) => {
+  if (value === '' || value === null) return null;
+  if (!FORECAST_CATEGORIES.includes(value)) throw new Error('Choose a forecast category');
+  return value;
+};
+
 // Forms send an empty string for "none"
 const optional = (value) => (value === '' || value === undefined ? null : value);
 
@@ -192,6 +212,7 @@ const dealFields = (body) => {
     company_id: optional,
     owner_id: optional,
     expected_close: parseDate,
+    forecast_category: parseCategory,
     lost_reason: optional,
     custom: (value) => value
   });
@@ -435,6 +456,28 @@ app.delete('/automations/:id', callCrm('delete_automation', (req) => ({ p_rule: 
 app.get('/notifications', callCrm('my_notifications', () => ({})));
 app.post('/notifications/read', callCrm('mark_notifications_read', (req) => ({
   p_ids: Array.isArray(req.body.ids) ? req.body.ids : null
+})));
+
+// Forecast and reports
+app.get('/forecast', callCrm('forecast', (req) => ({
+  p_from: parseMonth(req.query.from),
+  p_to: parseMonth(req.query.to),
+  p_pipeline: optional(req.query.pipeline)
+})));
+app.get('/reports/team', callCrm('team_report', (req) => ({
+  p_from: requiredDate(req.query.from),
+  p_to: requiredDate(req.query.to),
+  p_pipeline: optional(req.query.pipeline)
+})));
+app.get('/targets', list((req) => crm(req).from('targets')
+  .select('user_id, month, amount')
+  .eq('tenant_id', req.tenantId)
+  .eq('month', parseMonth(req.query.month))));
+app.post('/targets', callCrm('save_targets', (req) => ({
+  p_month: parseMonth(req.body.month),
+  p_targets: Array.isArray(req.body.targets)
+    ? req.body.targets.map(({ user_id, amount }) => ({ user_id: user_id || null, amount: amount ?? '' }))
+    : []
 })));
 
 // Pipelines

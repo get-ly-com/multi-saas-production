@@ -2,6 +2,7 @@ import { FormEvent, useEffect, useState } from 'react';
 import { CustomInputs, useCustomFields } from '@/components/CustomFields';
 import Modal from '@/components/Modal';
 import { api } from '@/lib/api';
+import { CATEGORIES } from '@/lib/forecast';
 
 export const useTeam = () => {
   const [members, setMembers] = useState<any[]>([]);
@@ -135,9 +136,9 @@ export function DealForm({ initial, onClose, onSaved }: FormProps) {
   const [contacts, setContacts] = useState<any[]>([]);
   const [companies, setCompanies] = useState<any[]>([]);
   const { form, set, error, submit } = useForm(
-    { title: '', value: '', stage_id: '', contact_id: '', company_id: '', owner_id: '', expected_close: '', custom: {}, ...initial },
-    ({ id, title, value, stage_id, contact_id, company_id, owner_id, expected_close, custom }) => {
-      const body = { title, value, stage_id, contact_id, company_id, owner_id, expected_close, custom };
+    { title: '', value: '', stage_id: '', contact_id: '', company_id: '', owner_id: '', expected_close: '', forecast_category: '', custom: {}, ...initial },
+    ({ id, title, value, stage_id, contact_id, company_id, owner_id, expected_close, forecast_category, custom }) => {
+      const body = { title, value, stage_id, contact_id, company_id, owner_id, expected_close, forecast_category: forecast_category || '', custom };
       return id ? api.put(`/api/crm/deals/${id}`, body) : api.post('/api/crm/deals', body);
     },
     onClose,
@@ -171,6 +172,12 @@ export function DealForm({ initial, onClose, onSaved }: FormProps) {
             </select>
           </label>
           <label>Expected close<input type="date" value={form.expected_close || ''} onChange={(e) => set('expected_close', e.target.value)} /></label>
+          <label>Forecast
+            <select value={form.forecast_category || ''} onChange={(e) => set('forecast_category', e.target.value)}>
+              <option value="">From the stage</option>
+              {CATEGORIES.map(({ id, name }) => <option key={id} value={id}>{name}</option>)}
+            </select>
+          </label>
           <label>Contact
             <select value={form.contact_id || ''} onChange={(e) => set('contact_id', e.target.value)}>
               <option value="">None</option>
