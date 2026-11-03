@@ -24,6 +24,8 @@ const savedCompany = () => {
 // Read once per page load, so a tab keeps its company when another tab switches
 let company = typeof window === 'undefined' ? '' : savedCompany();
 
+export const savedCompanyId = () => company;
+
 export const rememberCompany = (id: string) => {
   company = id;
   try {

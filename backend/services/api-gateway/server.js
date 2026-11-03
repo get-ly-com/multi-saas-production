@@ -6,6 +6,8 @@ const morgan = require('morgan');
 const helmet = require('helmet');
 const rateLimit = require('express-rate-limit');
 const { createClient } = require('@supabase/supabase-js');
+const crypto = require('crypto');
+const http = require('http');
 
 const app = express();
 const PORT = process.env.PORT || 3000;
@@ -36,6 +38,57 @@ const supabaseFor = (token) =>
     auth: { persistSession: false, autoRefreshToken: false }
   });
 
+// Sign-in tokens are checked here against the project's public signing keys, so most requests
+// skip a round trip to the auth server. Tokens signed some other way still go to the auth server.
+const AUTH_URL = `${(process.env.SUPABASE_URL || '').replace(/\/+$/, '')}/auth/v1`;
+const JWKS_URL = `${AUTH_URL}/.well-known/jwks.json`;
+const ISSUER = AUTH_URL;
+let signingKeys = { at: 0, keys: new Map() };
+
+const loadSigningKeys = async (force = false) => {
+  if (!force && Date.now() - signingKeys.at < 10 * 60 * 1000) return signingKeys.keys;
+  const response = await fetch(JWKS_URL, { signal: AbortSignal.timeout(3000) });
+  if (!response.ok) throw new Error('Signing keys unavailable');
+  const { keys = [] } = await response.json();
+  const found = new Map();
+  for (const jwk of keys) {
+    if (jwk.kid && jwk.alg === 'ES256') found.set(jwk.kid, crypto.createPublicKey({ key: jwk, format: 'jwk' }));
+  }
+  signingKeys = { at: Date.now(), keys: found };
+  return found;
+};
+
+const decodePart = (part) => JSON.parse(Buffer.from(part, 'base64url').toString('utf8'));
+
+// Returns the user for a valid token, null for a bad one, or undefined when it can't be checked here
+const verifyLocally = async (token) => {
+  const parts = token.split('.');
+  if (parts.length !== 3) return undefined;
+  let header;
+  let claims;
+  try {
+    header = decodePart(parts[0]);
+    claims = decodePart(parts[1]);
+  } catch {
+    return undefined;
+  }
+  if (header.alg !== 'ES256' || !header.kid) return undefined;
+
+  let keys = await loadSigningKeys().catch(() => null);
+  if (keys && !keys.has(header.kid)) keys = await loadSigningKeys(true).catch(() => null);
+  const key = keys?.get(header.kid);
+  if (!key) return undefined;
+
+  const signed = crypto.verify('sha256', Buffer.from(`${parts[0]}.${parts[1]}`), { key, dsaEncoding: 'ieee-p1363' },
+    Buffer.from(parts[2], 'base64url'));
+  if (!signed || !(claims.exp > Math.floor(Date.now() / 1000))) return null;
+  // Anything unexpected in a correctly signed token is left to the auth server to decide
+  if (claims.iss !== ISSUER || claims.aud !== 'authenticated' || claims.role !== 'authenticated' || !claims.sub) {
+    return undefined;
+  }
+  return { id: claims.sub, email: claims.email };
+};
+
 const requireUser = async (req, res, next) => {
   const [scheme, token] = (req.headers.authorization || '').split(' ');
   if (scheme !== 'Bearer' || !token) {
@@ -44,11 +97,15 @@ const requireUser = async (req, res, next) => {
 
   try {
     const db = supabaseFor(token);
-    const { data, error } = await db.auth.getUser(token);
-    if (error || !data.user) {
+    let user = await verifyLocally(token);
+    if (user === undefined) {
+      const { data, error } = await db.auth.getUser(token);
+      user = error || !data.user ? null : data.user;
+    }
+    if (!user) {
       return res.status(401).json({ error: 'Sign in required' });
     }
-    req.user = data.user;
+    req.user = user;
     req.db = db;
     next();
   } catch (error) {
@@ -56,7 +113,17 @@ const requireUser = async (req, res, next) => {
   }
 };
 
+// Companies a person belongs to change rarely, so they're kept for a short while. Every page
+// makes several requests, and this saves a database round trip on each. Data access is still
+// checked by the database on every query.
+const MEMBERSHIP_TTL = 30 * 1000;
+const membershipCache = new Map();
+const forgetMemberships = () => membershipCache.clear();
+
 const findMemberships = async (req) => {
+  const cached = membershipCache.get(req.user.id);
+  if (cached && Date.now() - cached.at < MEMBERSHIP_TTL) return cached.rows;
+
   const { data, error } = await req.db
     .from('tenant_members')
     .select('role, tenant:tenants(id, name)')
@@ -64,7 +131,10 @@ const findMemberships = async (req) => {
     .order('created_at');
 
   if (error) throw error;
-  return data || [];
+  const rows = data || [];
+  if (membershipCache.size > 5000) membershipCache.clear();
+  membershipCache.set(req.user.id, { at: Date.now(), rows });
+  return rows;
 };
 
 // The client may pick a company, but only one of its own memberships. A pick that no longer
@@ -104,13 +174,18 @@ app.get('/api/me', requireUser, async (req, res, next) => {
 
 app.post('/api/tenants', requireUser, express.json(), async (req, res) => {
   const { data, error } = await req.db.rpc('create_tenant', { company_name: req.body?.name });
+  forgetMemberships();
   if (error) return res.status(400).json({ error: error.message });
   res.status(201).json(data);
 });
 
+// Functions that change who belongs to which company
+const MEMBERSHIP_CHANGES = new Set(['accept_invite', 'set_member_role', 'remove_member']);
+
 // Runs a database function as the signed-in user. The function checks their role.
 const callFunction = async (req, res, name, params, status = 200) => {
   const { data, error } = await req.db.rpc(name, params);
+  if (MEMBERSHIP_CHANGES.has(name)) forgetMemberships();
   if (error) return res.status(400).json({ error: error.message });
   res.status(status).json(data ?? { success: true });
 };
@@ -414,6 +489,9 @@ const serviceRoutes = [
 const serviceHost = (service) =>
   process.env.NODE_ENV === 'production' ? `${service}.railway.internal` : 'localhost';
 
+// Connections to the services are reused instead of opened for every request
+const serviceAgent = new http.Agent({ keepAlive: true, maxSockets: 50 });
+
 // Setup proxies
 serviceRoutes.forEach(({ path, service, port }) => {
   const serviceUrl = `http://${serviceHost(service)}:${port}`;
@@ -422,6 +500,7 @@ serviceRoutes.forEach(({ path, service, port }) => {
     proxyReqPathResolver: (req) => req.url,
     proxyReqOptDecorator: (proxyReqOpts, req) => {
       proxyReqOpts.headers['x-tenant-id'] = req.tenantId;
+      proxyReqOpts.agent = serviceAgent;
       return proxyReqOpts;
     },
     proxyErrorHandler: (err, res, next) => {

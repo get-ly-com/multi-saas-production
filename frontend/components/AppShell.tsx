@@ -2,7 +2,7 @@ import Link from 'next/link';
 import { useRouter } from 'next/router';
 import { ReactNode, useEffect, useState } from 'react';
 import NotificationBell from '@/components/NotificationBell';
-import { api, openCompany, rememberCompany, setBaseCurrency } from '@/lib/api';
+import { api, openCompany, rememberCompany, savedCompanyId, setBaseCurrency } from '@/lib/api';
 import { getSupabase } from '@/lib/supabase';
 
 const PRODUCTS = [
@@ -32,10 +32,17 @@ export default function AppShell({ children }: { children: ReactNode }) {
       if (!data.session) return router.replace('/login');
 
       try {
-        const account = await api.get('/api/me');
+        // Both start at once; the currency is only kept if it was for the company shown
+        const asked = savedCompanyId();
+        const [account, early] = await Promise.all([
+          api.get('/api/me'),
+          asked ? api.get('/api/accounting/currencies').catch(() => null) : Promise.resolve(null)
+        ]);
         if (!account.tenant) return router.replace('/onboarding');
         rememberCompany(account.tenant.id);
-        const currencies = await api.get('/api/accounting/currencies').catch(() => null);
+        const currencies = early && asked === account.tenant.id
+          ? early
+          : await api.get('/api/accounting/currencies').catch(() => null);
         if (currencies) setBaseCurrency(currencies.base);
         setMe(account);
       } catch (err: any) {
