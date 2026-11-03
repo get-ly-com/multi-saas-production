@@ -115,6 +115,11 @@ export default function PublicChat() {
       .catch(() => setClosed(true));
   }, [key]);
 
+  // When the bot asks for details, start from the name the visitor already gave
+  useEffect(() => {
+    if (state?.needs_contact) setContact((current) => (current.name ? current : { ...current, name: state.name || name }));
+  }, [state?.needs_contact]);
+
   // Check for replies every few seconds, slower once the visitor goes quiet, never while hidden
   useEffect(() => {
     if (!token) return;
