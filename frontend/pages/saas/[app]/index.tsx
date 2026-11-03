@@ -4,7 +4,7 @@ export default function ComingSoon() {
   return (
     <div className="auth">
       <h1>Coming soon</h1>
-      <p>This product isn&apos;t available yet. Accounting, CRM and Inventory are ready to use.</p>
+      <p>This product isn&apos;t available yet. Accounting, CRM, Inventory and HR are ready to use.</p>
       <Link href="/saas/accounting">Open Accounting</Link>
     </div>
   );

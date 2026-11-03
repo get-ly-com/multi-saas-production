@@ -8,7 +8,8 @@ import { getSupabase } from '@/lib/supabase';
 const PRODUCTS = [
   { name: 'Accounting', path: '/saas/accounting' },
   { name: 'CRM', path: '/saas/crm' },
-  { name: 'Inventory', path: '/saas/inventory' }
+  { name: 'Inventory', path: '/saas/inventory' },
+  { name: 'HR', path: '/saas/hr' }
 ];
 
 type Company = { id: string; name: string; role: string };

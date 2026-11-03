@@ -7,7 +7,9 @@ import { api, formatDate, money } from '@/lib/api';
 const blankLine = { account_id: '', cost_center_id: '', debit: '', credit: '' };
 const today = () => new Date().toISOString().slice(0, 10);
 
-const SOURCE_LABELS: Record<string, string> = { invoice_payment: 'payment', invoice_cost: 'cost of sales' };
+const SOURCE_LABELS: Record<string, string> = {
+  invoice_payment: 'payment', invoice_cost: 'cost of sales', payroll_payment: 'wages paid'
+};
 const sourceLabel = (source: string) => SOURCE_LABELS[source] || source.replace('_', ' ');
 
 export default function Journal() {
