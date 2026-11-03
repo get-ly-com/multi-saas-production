@@ -144,7 +144,7 @@ app.get('/employees/:id', handle(async (req) => {
   const employeeId = id(req.params.id, 'Employee');
   const [people, pay, leave, payslips] = await Promise.all([
     rows(hr(req).from('employees').select(EMPLOYEE_FIELDS).eq('tenant_id', req.tenantId)),
-    rows(hr(req).from('compensation').select('*').eq('employee_id', employeeId)),
+    rows(hr(req).from('compensation').select('employee_id, pay_type, amount, hours_per_week, updated_at').eq('employee_id', employeeId)),
     rows(hr(req).from('leave_requests').select(LEAVE_FIELDS).eq('employee_id', employeeId)
       .order('start_date', { ascending: false }).limit(100)),
     rows(hr(req).from('pay_lines').select('id, gross, net, run:pay_runs(id, run_number, period_start, pay_date, status)')
@@ -159,9 +159,11 @@ app.get('/employees/:id', handle(async (req) => {
   // Balances are only for the person, their manager, owners and admins
   const balances = await call(req, 'leave_balances', { p_employee: employeeId, p_year: new Date().getUTCFullYear() })
     .catch(() => null);
+  // Private notes come only to owners and admins, even when accountants can see pay
+  const notes = pay[0] ? await call(req, 'employee_notes', { p_employee: employeeId }).catch(() => null) : null;
   return {
     ...withManagers([found], people)[0],
-    pay: pay[0] || null,
+    pay: pay[0] ? { ...pay[0], notes: typeof notes === 'string' ? notes : null } : null,
     leave,
     balances,
     payslips: payslips.sort((a, b) => String(b.run?.period_start).localeCompare(String(a.run?.period_start)))
@@ -220,6 +222,15 @@ const leaveTypeFields = (body) => {
     if (!(days >= 0 && days <= 366) || Math.round(days * 2) !== days * 2) throw new Error('Days a year must be whole or half days, up to 366');
     values.days_per_year = days;
   }
+  // Unused days that move to next year (0 = none). The database also checks it against the days a year.
+  if (body.max_carry_over !== undefined) {
+    const carry = Number(body.max_carry_over);
+    if (!(carry >= 0 && carry <= 366) || Math.round(carry * 2) !== carry * 2) throw new Error('Carry over must be whole or half days');
+    if (values.days_per_year !== undefined && carry > values.days_per_year) {
+      throw new Error(values.days_per_year ? `Carry over can't be more than the days a year (${values.days_per_year})` : 'Leave with no limit has nothing to carry over');
+    }
+    values.max_carry_over = carry;
+  }
   if (body.paid !== undefined) values.paid = Boolean(body.paid);
   if (body.is_active !== undefined) values.is_active = Boolean(body.is_active);
   return values;
@@ -261,6 +272,11 @@ app.put('/settings', callHr('save_settings', (req) => ({
   p_income_tax: amount(req.body.income_tax_rate, 'income tax rate', 100.01) ?? 0,
   p_employee: amount(req.body.employee_rate, 'employee rate', 100.01) ?? 0,
   p_employer: amount(req.body.employer_rate, 'employer rate', 100.01) ?? 0
+})));
+
+// Whether accountants can see pay and run payroll. Only owners and admins can change it.
+app.put('/settings/payroll-access', callHr('set_accountant_payroll', (req) => ({
+  p_on: Boolean(req.body.accountants_run_payroll)
 })));
 
 // Leave. Each person sees their own requests, managers their team's, owners and admins everyone's.
@@ -341,5 +357,44 @@ app.put('/pay-lines/:id', callHr('update_pay_line', (req) => {
 app.delete('/pay-lines/:id', callHr('remove_pay_line', (req) => ({ p_line: id(req.params.id, 'Pay line') })));
 
 app.get('/payslips/:id', callHr('payslip', (req) => ({ p_line: id(req.params.id, 'Payslip') })));
+
+// Tax and contributions that approved pay runs owe, and paying them from a bank or cash account
+app.get('/liabilities', callHr('payroll_liabilities', () => ({})));
+app.post('/liabilities/pay', callHr('pay_liabilities', (req) => {
+  const paid = amount(req.body.amount, 'amount');
+  if (!paid) throw new Error('Enter an amount more than zero');
+  return {
+    p_account: id(req.body.account_id, 'Bank or cash account'),
+    p_date: date(req.body.date, 'Choose the date it was paid'),
+    p_amount: paid,
+    p_memo: text(req.body.memo, 200).trim() || null
+  };
+}, 201));
+
+// Documents on staff records. The browser uploads the file to the private 'hr-documents' bucket,
+// then records it here; owners and admins add and delete, the employee themself can read.
+const DOCUMENT_KINDS = ['contract', 'id', 'certificate', 'other'];
+
+app.get('/employees/:id/documents', handle((req) =>
+  rows(hr(req).from('documents').select('id, employee_id, name, kind, storage_path, size_bytes, mime_type, created_at')
+    .eq('tenant_id', req.tenantId).eq('employee_id', id(req.params.id, 'Employee'))
+    .order('created_at', { ascending: false }).limit(200))));
+
+app.post('/employees/:id/documents', callHr('add_document', (req) => {
+  const name = text(req.body.name, 200).trim();
+  if (!name) throw new Error('Enter a name');
+  if (!DOCUMENT_KINDS.includes(req.body.kind)) throw new Error('Choose a type of document');
+  if (typeof req.body.storage_path !== 'string' || !req.body.storage_path) throw new Error('Upload a file first');
+  return {
+    p_employee: id(req.params.id, 'Employee'),
+    p_name: name,
+    p_kind: req.body.kind,
+    p_path: text(req.body.storage_path, 500),
+    p_size: amount(req.body.size_bytes, 'file size', 5242881),
+    p_mime: text(req.body.mime_type, 200) || null
+  };
+}, 201));
+
+app.delete('/documents/:id', callHr('delete_document', (req) => ({ p_document: id(req.params.id, 'Document') })));
 
 app.listen(PORT, () => console.log(`👔 HR Service on ${PORT}`));

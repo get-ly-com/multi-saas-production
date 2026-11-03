@@ -178,6 +178,225 @@ app.post('/api/forms/:key', formLimit, express.json({ limit: '16kb' }), async (r
   res.status(201).json(data);
 });
 
+// ---- Public API (Integrations) ----
+// Read-only. Authenticates with a company API key (Authorization: Bearer gk_...), not a
+// signed-in user. The database checks the key's hash, picks the company and counts requests;
+// these limits stop floods before they reach it. Documented at /saas/integrations/api.
+{
+  const crypto = require('crypto');
+  const API_RESOURCES = ['contacts', 'invoices', 'items', 'deals'];
+  const API_KEY = /^gk_[0-9a-f]{48}$/;
+  const API_ID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+
+  const apiKeyOf = (req) => {
+    const [scheme, key] = (req.headers.authorization || '').split(' ');
+    return scheme === 'Bearer' && API_KEY.test(key || '') ? key : null;
+  };
+
+  const perAddress = rateLimit({ windowMs: 60 * 1000, limit: 120, standardHeaders: true, legacyHeaders: false,
+    message: { error: 'Too many requests. Wait a minute and try again.' } });
+  const perKey = rateLimit({ windowMs: 60 * 1000, limit: 60, standardHeaders: true, legacyHeaders: false,
+    keyGenerator: (req) => crypto.createHash('sha256').update(req.apiKey).digest('hex'),
+    message: { error: 'Too many requests for this API key. Wait a minute and try again.' } });
+
+  const requireApiKey = (req, res, next) => {
+    req.apiKey = apiKeyOf(req);
+    if (!req.apiKey) return res.status(401).json({ error: 'Send your API key as: Authorization: Bearer gk_...' });
+    if (!API_RESOURCES.includes(req.params.resource)) {
+      return res.status(404).json({ error: `Unknown resource. Use ${API_RESOURCES.join(', ')}.` });
+    }
+    next();
+  };
+
+  const sendApi = (res, { data, error, status }) => {
+    if (!error) return res.json(data);
+    if ([401, 404, 429].includes(status)) return res.status(status).json({ error: error.message });
+    console.error('[public api]', error.message);
+    res.status(400).json({ error: 'The request could not be completed' });
+  };
+
+  const whole = (value, fallback) => (/^\d{1,7}$/.test(value || '') ? Number(value) : fallback);
+
+  app.get('/api/v1/:resource', perAddress, requireApiKey, perKey, async (req, res) => {
+    sendApi(res, await publicDb().schema('integrations').rpc('api_list', {
+      p_key: req.apiKey,
+      p_resource: req.params.resource,
+      p_limit: Math.min(whole(req.query.limit, 25), 100),
+      p_offset: whole(req.query.offset, 0)
+    }));
+  });
+
+  app.get('/api/v1/:resource/:id', perAddress, requireApiKey, perKey, async (req, res) => {
+    if (!API_ID.test(req.params.id)) return res.status(404).json({ error: 'Not found' });
+    sendApi(res, await publicDb().schema('integrations').rpc('api_get', {
+      p_key: req.apiKey,
+      p_resource: req.params.resource,
+      p_id: req.params.id
+    }));
+  });
+
+  app.all('/api/v1/*', perAddress, (req, res) => res.status(405).json({ error: 'The API is read-only. Use GET.' }));
+}
+// ---- End of public API ----
+
+// ---- Public booking pages (Scheduler) ----
+// No signed-in user. Each company is found by its private booking key; a visitor's own booking
+// by the secret in their cancel link. Only the database's own messages go back to the visitor.
+const bookingLimit = rateLimit({ windowMs: 60 * 1000, limit: 10, standardHeaders: true, legacyHeaders: false });
+const bookingReadLimit = rateLimit({ windowMs: 60 * 1000, limit: 60, standardHeaders: true, legacyHeaders: false });
+const BOOKING_ID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+const BOOKING_KEY = /^[0-9a-f]{32}$/;
+const BOOKING_TOKEN = /^[0-9a-f]{64}$/;
+
+const bookingReply = (res, error, fallback) =>
+  res.status(400).json({ error: error.code === 'P0001' ? error.message : fallback });
+
+app.get('/api/book/cancel/:token', bookingReadLimit, async (req, res) => {
+  if (!BOOKING_TOKEN.test(req.params.token)) return res.status(404).json({ error: 'Booking not found' });
+  const { data, error } = await publicDb().rpc('booking_by_token', { p_token: req.params.token });
+  if (error) return bookingReply(res, error, 'Booking not found');
+  if (!data) return res.status(404).json({ error: 'Booking not found' });
+  res.json(data);
+});
+
+app.post('/api/book/cancel/:token', bookingLimit, express.json({ limit: '4kb' }), async (req, res) => {
+  if (!BOOKING_TOKEN.test(req.params.token)) return res.status(404).json({ error: 'Booking not found' });
+  const { data, error } = await publicDb().rpc('cancel_booking_by_token', {
+    p_token: req.params.token,
+    p_reason: typeof req.body?.reason === 'string' ? req.body.reason.slice(0, 500) : null
+  });
+  if (error) return bookingReply(res, error, 'Could not cancel. Please try again.');
+  res.json(data);
+});
+
+app.get('/api/book/:key', bookingReadLimit, async (req, res) => {
+  if (!BOOKING_KEY.test(req.params.key)) return res.status(404).json({ error: 'This booking page is not available' });
+  const { data, error } = await publicDb().rpc('booking_page', { p_key: req.params.key });
+  if (error || !data) return res.status(404).json({ error: 'This booking page is not available' });
+  res.json(data);
+});
+
+app.get('/api/book/:key/slots', bookingReadLimit, async (req, res) => {
+  const { service, staff, from } = req.query;
+  const days = Number(req.query.days || 7);
+  if (!BOOKING_KEY.test(req.params.key) || !BOOKING_ID.test(service || '') || (staff && !BOOKING_ID.test(staff))
+      || !/^\d{4}-\d{2}-\d{2}$/.test(from || '') || !Number.isInteger(days) || days < 1 || days > 14) {
+    return res.status(400).json({ error: 'Choose a service and a date' });
+  }
+  const { data, error } = await publicDb().rpc('booking_slots', {
+    p_key: req.params.key, p_service: service, p_staff: staff || null, p_from: from, p_days: days
+  });
+  if (error) return bookingReply(res, error, 'Could not load times. Please try again.');
+  res.json(data);
+});
+
+app.post('/api/book/:key', bookingLimit, express.json({ limit: '16kb' }), async (req, res) => {
+  // Real visitors never see the website box, so anything in it came from a bot
+  if (req.body?.website) return res.status(201).json({ thanks: 'Thank you.' });
+
+  const { service_id: service, staff_id: staff, start } = req.body || {};
+  if (!BOOKING_KEY.test(req.params.key) || !BOOKING_ID.test(service || '') || (staff && !BOOKING_ID.test(staff))
+      || typeof start !== 'string' || Number.isNaN(Date.parse(start))) {
+    return res.status(400).json({ error: 'Choose a service and a time' });
+  }
+  const field = (name, max) => (typeof req.body[name] === 'string' ? req.body[name].slice(0, max) : '');
+  const { data, error } = await publicDb().rpc('book_slot', {
+    p_key: req.params.key,
+    p_service: service,
+    p_staff: staff || null,
+    p_start: new Date(start).toISOString(),
+    p_visitor: { name: field('name', 200), email: field('email', 254), phone: field('phone', 40), notes: field('notes', 2000) }
+  });
+  if (error) return bookingReply(res, error, 'Could not book. Please try again.');
+  res.status(201).json(data);
+});
+// ---- End of public booking pages ----
+
+// ---- Public customer chat (Chat) ----
+// No signed-in user. Each company is found by its private chat key; a visitor's conversation by
+// its secret token, which is sent in the body (never the URL) so it stays out of logs. The
+// database caps message length and messages per chat and per company each day; these limits stop
+// floods before they reach it. Only the database's own messages go back to the visitor.
+{
+  const crypto = require('crypto');
+  const CHAT_KEY = /^[0-9a-f]{32}$/;
+  const CHAT_TOKEN = /^[0-9a-f]{64}$/;
+  const limitOf = (limit) => rateLimit({ windowMs: 60 * 1000, limit, standardHeaders: true, legacyHeaders: false,
+    message: { error: 'Too many messages. Please wait a minute and try again.' } });
+  const chatStartLimit = limitOf(5);
+  const chatSendLimit = limitOf(20);
+  // The chat page checks for replies every few seconds
+  const chatReadLimit = limitOf(60);
+
+  const chatReply = (res, error, fallback) =>
+    res.status(400).json({ error: error.code === 'P0001' ? error.message : fallback });
+
+  const chatKey = (req, res, next) => {
+    if (!CHAT_KEY.test(req.params.key)) return res.status(404).json({ error: 'This chat is not available' });
+    next();
+  };
+
+  const chatToken = (req, res, next) => {
+    if (!CHAT_TOKEN.test(req.body?.token || '')) return res.status(404).json({ error: 'This chat is not available' });
+    next();
+  };
+
+  const after = (req) => (Number.isSafeInteger(req.body?.after) && req.body.after > 0 ? req.body.after : 0);
+  const field = (req, name, max) => (typeof req.body?.[name] === 'string' ? req.body[name].slice(0, max) : '');
+
+  app.get('/api/chat/:key', chatReadLimit, chatKey, async (req, res) => {
+    const { data, error } = await publicDb().rpc('chat_info', { p_key: req.params.key });
+    if (error || !data) return res.status(404).json({ error: 'This chat is not available' });
+    res.json(data);
+  });
+
+  app.post('/api/chat/:key/start', chatStartLimit, chatKey, express.json({ limit: '4kb' }), async (req, res) => {
+    // Real visitors never see the website box, so anything in it came from a bot. It gets a
+    // made-up chat that leads nowhere.
+    if (req.body?.website) {
+      return res.status(201).json({ token: crypto.randomBytes(32).toString('hex'), status: 'open', needs_contact: false, messages: [] });
+    }
+    const { data, error } = await publicDb().rpc('chat_start', {
+      p_key: req.params.key,
+      p_visitor: { name: field(req, 'name', 100), email: field(req, 'email', 254), page: field(req, 'page', 500) }
+    });
+    if (error) return chatReply(res, error, 'Could not start the chat. Please try again.');
+    res.status(201).json(data);
+  });
+
+  app.post('/api/chat/:key/poll', chatReadLimit, chatKey, express.json({ limit: '2kb' }), chatToken, async (req, res) => {
+    const { data, error } = await publicDb().rpc('chat_poll', { p_key: req.params.key, p_token: req.body.token, p_after: after(req) });
+    if (error) return chatReply(res, error, 'This chat is not available');
+    res.json(data);
+  });
+
+  app.post('/api/chat/:key/messages', chatSendLimit, chatKey, express.json({ limit: '8kb' }), chatToken, async (req, res) => {
+    const body = field(req, 'body', 1001).trim();
+    if (!body) return res.status(400).json({ error: 'Type a message' });
+    const { data, error } = await publicDb().rpc('chat_send', {
+      p_key: req.params.key, p_token: req.body.token, p_body: body, p_after: after(req)
+    });
+    if (error) return chatReply(res, error, 'Could not send. Please try again.');
+    res.status(201).json(data);
+  });
+
+  app.post('/api/chat/:key/person', chatSendLimit, chatKey, express.json({ limit: '2kb' }), chatToken, async (req, res) => {
+    const { data, error } = await publicDb().rpc('chat_person', { p_key: req.params.key, p_token: req.body.token, p_after: after(req) });
+    if (error) return chatReply(res, error, 'Could not send. Please try again.');
+    res.json(data);
+  });
+
+  app.post('/api/chat/:key/contact', chatSendLimit, chatKey, express.json({ limit: '4kb' }), chatToken, async (req, res) => {
+    const { data, error } = await publicDb().rpc('chat_contact', {
+      p_key: req.params.key, p_token: req.body.token,
+      p_name: field(req, 'name', 100), p_email: field(req, 'email', 254), p_after: after(req)
+    });
+    if (error) return chatReply(res, error, 'Could not save. Please try again.');
+    res.json(data);
+  });
+}
+// ---- End of public customer chat ----
+
 // Service routing - internal services
 const serviceRoutes = [
   { path: '/api/accounting', service: 'accounting-service', port: 3001 },

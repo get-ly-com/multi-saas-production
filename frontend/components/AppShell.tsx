@@ -9,7 +9,13 @@ const PRODUCTS = [
   { name: 'Accounting', path: '/saas/accounting' },
   { name: 'CRM', path: '/saas/crm' },
   { name: 'Inventory', path: '/saas/inventory' },
-  { name: 'HR', path: '/saas/hr' }
+  { name: 'HR', path: '/saas/hr' },
+  { name: 'Scheduler', path: '/saas/scheduler' },
+  { name: 'Meetings', path: '/saas/video' },
+  { name: 'Chat', path: '/saas/chat' },
+  { name: 'Social', path: '/saas/social' },
+  { name: 'Analytics', path: '/saas/analytics' },
+  { name: 'Integrations', path: '/saas/integrations' }
 ];
 
 type Company = { id: string; name: string; role: string };

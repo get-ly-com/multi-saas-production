@@ -1,0 +1,213 @@
+import Link from 'next/link';
+import { FormEvent, useEffect, useState } from 'react';
+import AppShell from '@/components/AppShell';
+import ChatNav, { timeText } from '@/components/ChatNav';
+import Modal from '@/components/Modal';
+import { api, formatDate } from '@/lib/api';
+
+export default function ChatAnswers() {
+  return <AppShell><Answers /></AppShell>;
+}
+
+type Answer = { id?: string; question: string; answer: string; keywords: string; is_active: boolean; times_used?: number; last_used_at?: string | null; unanswered_id?: string };
+
+const blank: Answer = { question: '', answer: '', keywords: '', is_active: true };
+
+function Answers() {
+  const [answers, setAnswers] = useState<Answer[]>([]);
+  const [missed, setMissed] = useState<any[]>([]);
+  const [overview, setOverview] = useState<any>(null);
+  const [search, setSearch] = useState('');
+  const [editing, setEditing] = useState<Answer | null>(null);
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState('');
+
+  const load = async () => {
+    try {
+      const [summary, rows, questions] = await Promise.all([
+        api.get('/api/chatbot/overview'), api.get('/api/chatbot/answers'), api.get('/api/chatbot/unanswered')
+      ]);
+      setOverview(summary);
+      setAnswers(rows);
+      setMissed(questions);
+      setError('');
+    } catch (err: any) {
+      setError(err.message);
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  useEffect(() => {
+    load();
+  }, []);
+
+  const canEdit = Boolean(overview?.can_reply);
+  const query = search.trim().toLowerCase();
+  const visible = answers.filter((row) => `${row.question} ${row.keywords} ${row.answer}`.toLowerCase().includes(query));
+
+  const remove = async (row: Answer) => {
+    if (!window.confirm(`Delete the answer to "${row.question}"?`)) return;
+    try {
+      await api.delete(`/api/chatbot/answers/${row.id}`);
+      load();
+    } catch (err: any) {
+      setError(err.message);
+    }
+  };
+
+  const dismiss = async (id: string) => {
+    try {
+      await api.delete(`/api/chatbot/unanswered/${id}`);
+      setMissed((rows) => rows.filter((row) => row.id !== id));
+    } catch (err: any) {
+      setError(err.message);
+    }
+  };
+
+  return (
+    <div className="stack">
+      <ChatNav />
+      <div className="page-head">
+        <h1>Answers</h1>
+        {canEdit && <button className="primary" onClick={() => setEditing(blank)}>New answer</button>}
+      </div>
+      <p className="muted">The bot replies with the answer that best matches what a visitor types. Keywords are the strongest
+        signal: if every word of a keyword is in the message, that answer is picked. When nothing matches, the bot asks for the
+        visitor's name and email and alerts your team.</p>
+      {error && <p className="error">{error}</p>}
+
+      <TryBot />
+
+      {missed.length > 0 && (
+        <div className="card">
+          <h2>Questions the bot couldn't answer</h2>
+          <div className="table-wrap">
+            <table>
+              <thead><tr><th>Question</th><th className="num">Times asked</th><th>Last asked</th><th /></tr></thead>
+              <tbody>
+                {missed.map((row) => (
+                  <tr key={row.id}>
+                    <td className="wrap">{row.question}</td>
+                    <td className="num">{row.times}</td>
+                    <td>{timeText(row.last_asked_at)}</td>
+                    <td>
+                      <div className="row-actions">
+                        {row.conversation_id && <Link className="button" href={`/saas/chat?c=${row.conversation_id}`}>View chat</Link>}
+                        {canEdit && <button onClick={() => setEditing({ ...blank, question: row.question.slice(0, 300), unanswered_id: row.id })}>Add answer</button>}
+                        {canEdit && <button onClick={() => dismiss(row.id)}>Dismiss</button>}
+                      </div>
+                    </td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        </div>
+      )}
+
+      <input aria-label="Search answers" placeholder="Search questions, keywords and answers" value={search} onChange={(e) => setSearch(e.target.value)} />
+      <div className="card table-wrap">
+        {loading ? <p className="empty">Loading…</p> : (
+          <table>
+            <thead><tr><th>Question</th><th>Keywords</th><th className="num">Used</th><th>Last used</th><th>Status</th><th /></tr></thead>
+            <tbody>
+              {visible.length === 0 && (
+                <tr><td colSpan={6} className="empty">{answers.length ? 'No matches' : 'No answers yet. Add the questions your customers ask most, like opening hours, delivery and refunds.'}</td></tr>
+              )}
+              {visible.map((row) => (
+                <tr key={row.id}>
+                  <td className="wrap"><strong>{row.question}</strong><div className="muted chat-answer-preview">{row.answer}</div></td>
+                  <td className="wrap">{row.keywords || '—'}</td>
+                  <td className="num">{row.times_used}</td>
+                  <td>{row.last_used_at ? formatDate(row.last_used_at) : '—'}</td>
+                  <td><span className={`badge ${row.is_active ? 'paid' : ''}`}>{row.is_active ? 'on' : 'off'}</span></td>
+                  <td>
+                    {canEdit && (
+                      <div className="row-actions">
+                        <button onClick={() => setEditing(row)}>Edit</button>
+                        <button className="danger" onClick={() => remove(row)}>Delete</button>
+                      </div>
+                    )}
+                  </td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        )}
+      </div>
+
+      {editing && <AnswerForm initial={editing} onClose={() => setEditing(null)} onSaved={() => { setEditing(null); load(); }} />}
+    </div>
+  );
+}
+
+function TryBot() {
+  const [message, setMessage] = useState('');
+  const [result, setResult] = useState<any>(null);
+  const [error, setError] = useState('');
+
+  const tryIt = async (event: FormEvent) => {
+    event.preventDefault();
+    try {
+      setResult(await api.post('/api/chatbot/answers/test', { text: message }));
+      setError('');
+    } catch (err: any) {
+      setError(err.message);
+    }
+  };
+
+  return (
+    <form className="card" onSubmit={tryIt}>
+      <h2>Try the bot</h2>
+      <div className="chat-try">
+        <input aria-label="Question to try" maxLength={1000} placeholder="Type a question a customer might ask" value={message} onChange={(e) => setMessage(e.target.value)} />
+        <button className="always" disabled={!message.trim()}>Try</button>
+      </div>
+      {error && <p className="error">{error}</p>}
+      {result && (result.matched
+        ? <p>The bot would answer with <strong>{result.question}</strong>: {result.answer}</p>
+        : <p className="muted">{result.vague
+          ? 'The bot would ask the visitor to say a little more.'
+          : 'No answer matches, so the bot would hand over to a person and add this to the questions it couldn\'t answer.'}</p>)}
+    </form>
+  );
+}
+
+function AnswerForm({ initial, onClose, onSaved }: { initial: Answer; onClose: () => void; onSaved: () => void }) {
+  const [form, setForm] = useState<Answer>(initial);
+  const [saving, setSaving] = useState(false);
+  const [error, setError] = useState('');
+  const set = (field: keyof Answer, value: any) => setForm({ ...form, [field]: value });
+
+  const save = async (event: FormEvent) => {
+    event.preventDefault();
+    setSaving(true);
+    try {
+      if (form.id) await api.put(`/api/chatbot/answers/${form.id}`, form);
+      else await api.post('/api/chatbot/answers', form);
+      onSaved();
+    } catch (err: any) {
+      setError(err.message);
+      setSaving(false);
+    }
+  };
+
+  return (
+    <Modal title={form.id ? 'Edit answer' : 'New answer'}>
+      <form onSubmit={save} className="stack">
+        <label>Question<input required maxLength={300} value={form.question} onChange={(e) => set('question', e.target.value)}
+          placeholder="What are your opening hours?" /></label>
+        <label>Answer<textarea required rows={5} maxLength={4000} value={form.answer} onChange={(e) => set('answer', e.target.value)} /></label>
+        <label>Keywords, separated by commas<input maxLength={500} value={form.keywords} onChange={(e) => set('keywords', e.target.value)}
+          placeholder="hours, open, closing time" /></label>
+        <label className="check"><input type="checkbox" checked={form.is_active} onChange={(e) => set('is_active', e.target.checked)} /> The bot can use this answer</label>
+        {error && <p className="error">{error}</p>}
+        <div className="form-actions">
+          <button className="primary" disabled={saving}>{saving ? 'Saving…' : 'Save'}</button>
+          <button type="button" onClick={onClose}>Cancel</button>
+        </div>
+      </form>
+    </Modal>
+  );
+}

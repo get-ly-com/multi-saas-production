@@ -63,7 +63,10 @@ function SettingsApp() {
 
   const saveRates = (event: FormEvent) => {
     event.preventDefault();
-    run(() => api.put('/api/hr/settings', rates), 'Payroll rates saved. New and recalculated pay runs use them.');
+    run(async () => {
+      await api.put('/api/hr/settings', rates);
+      await api.put('/api/hr/settings/payroll-access', { accountants_run_payroll: Boolean(rates.accountants_run_payroll) });
+    }, 'Payroll rates saved. New and recalculated pay runs use them.');
   };
 
   return (
@@ -84,25 +87,36 @@ function SettingsApp() {
           <label>Employee contributions (%)<input type="number" min="0" max="100" step="0.01" value={rates.employee_rate} onChange={(e) => setRates({ ...rates, employee_rate: e.target.value })} /></label>
           <label>Employer contributions (%)<input type="number" min="0" max="100" step="0.01" value={rates.employer_rate} onChange={(e) => setRates({ ...rates, employer_rate: e.target.value })} /></label>
         </div>
+        <label className="check">
+          <input type="checkbox" checked={Boolean(rates.accountants_run_payroll)} onChange={(e) => setRates({ ...rates, accountants_run_payroll: e.target.checked })} />
+          Let accountants run payroll and see pay
+        </label>
+        <p className="muted">Accountants can then see everyone's pay, run, approve and pay payroll, and pay payroll tax. Only owners and admins can change people, rates and this setting.</p>
         <div className="form-actions"><button className="primary">Save rates</button></div>
       </form>
 
       <div className="card table-wrap">
         <h2>Leave types</h2>
         <table>
-          <thead><tr><th>Name</th><th className="num">Days a year</th><th>Paid</th><th>In use</th><th /></tr></thead>
+          <thead><tr><th>Name</th><th className="num">Days a year</th><th className="num">Carry over</th><th>Paid</th><th>In use</th><th /></tr></thead>
           <tbody>
             {types.map((row) => (
               <tr key={row.id}>
                 <td>{row.name}</td>
                 <td className="num">{Number(row.days_per_year) ? Number(row.days_per_year) : 'No limit'}</td>
+                <td className="num">{Number(row.max_carry_over) ? `Up to ${Number(row.max_carry_over)}` : 'None'}</td>
                 <td>{row.paid ? 'Paid' : 'Unpaid'}</td>
                 <td>{row.is_active ? 'Yes' : 'Turned off'}</td>
                 <td>
                   <div className="row-actions">
                     <button onClick={() => {
                       const days = window.prompt(`Days a year for ${row.name} (0 for no limit)`, String(Number(row.days_per_year)));
-                      if (days !== null) run(() => api.put(`/api/hr/leave-types/${row.id}`, { days_per_year: days }));
+                      if (days === null) return;
+                      // Leave with no limit has nothing to carry over
+                      const carry = Number(days)
+                        ? window.prompt(`Unused days of ${row.name} that move to next year (0 for none)`, String(Number(row.max_carry_over || 0)))
+                        : '0';
+                      if (carry !== null) run(() => api.put(`/api/hr/leave-types/${row.id}`, { days_per_year: days, max_carry_over: carry }));
                     }}>Change days</button>
                     <button onClick={() => run(() => api.put(`/api/hr/leave-types/${row.id}`, { is_active: !row.is_active }))}>{row.is_active ? 'Turn off' : 'Turn on'}</button>
                   </div>
@@ -112,7 +126,7 @@ function SettingsApp() {
           </tbody>
         </table>
         <NewLeaveType onAdd={(body) => run(() => api.post('/api/hr/leave-types', body))} />
-        <p className="muted">Someone who starts or leaves during the year gets that share of the days. Unpaid leave is taken off salary on the pay run.</p>
+        <p className="muted">Someone who starts or leaves during the year gets that share of the days. Unpaid leave is taken off salary on the pay run. Carry over is how many unused days from last year can be used this year.</p>
       </div>
 
       <div className="card table-wrap">
@@ -182,7 +196,7 @@ function NewNamed({ fields, onAdd }: { fields: { name: string; label: string; ty
 }
 
 function NewLeaveType({ onAdd }: { onAdd: (body: any) => Promise<boolean> }) {
-  const blank = { name: '', days_per_year: '0', paid: true };
+  const blank = { name: '', days_per_year: '0', max_carry_over: '0', paid: true };
   const [form, setForm] = useState<any>(blank);
 
   const submit = async (event: FormEvent) => {
@@ -193,7 +207,8 @@ function NewLeaveType({ onAdd }: { onAdd: (body: any) => Promise<boolean> }) {
   return (
     <form className="row-actions" style={{ justifyContent: 'flex-start', marginTop: 12 }} onSubmit={submit}>
       <input aria-label="Name" placeholder="Name, like Parental leave" required maxLength={60} value={form.name} onChange={(e) => setForm({ ...form, name: e.target.value })} />
-      <input aria-label="Days a year" type="number" min="0" max="366" step="0.5" value={form.days_per_year} onChange={(e) => setForm({ ...form, days_per_year: e.target.value })} />
+      <label className="check" style={{ marginTop: 0 }}>Days a year <input aria-label="Days a year" type="number" min="0" max="366" step="0.5" value={form.days_per_year} onChange={(e) => setForm({ ...form, days_per_year: e.target.value })} /></label>
+      <label className="check" style={{ marginTop: 0 }}>Carry over <input aria-label="Days that carry over to next year" title="Unused days that move to next year (0 for none)" type="number" min="0" max="366" step="0.5" value={form.max_carry_over} onChange={(e) => setForm({ ...form, max_carry_over: e.target.value })} /></label>
       <label className="check" style={{ marginTop: 0 }}><input type="checkbox" checked={form.paid} onChange={(e) => setForm({ ...form, paid: e.target.checked })} /> Paid</label>
       <button>Add</button>
     </form>

@@ -13,25 +13,25 @@ export default function Payroll() {
 
 function PayrollApp() {
   const [runs, setRuns] = useState<any[] | null>(null);
-  const [manager, setManager] = useState<boolean | null>(null);
+  const [payroll, setPayroll] = useState<boolean | null>(null);
   const [creating, setCreating] = useState(false);
   const [error, setError] = useState('');
 
   useEffect(() => {
     Promise.all([api.get('/api/hr/overview'), api.get('/api/hr/pay-runs')])
       .then(([summary, rows]) => {
-        setManager(summary.is_manager);
+        setPayroll(summary.is_payroll);
         setRuns(rows);
       })
       .catch((err) => setError(err.message));
   }, []);
 
-  if (manager === false) {
+  if (payroll === false) {
     return (
       <div className="stack">
         <HrNav />
         <h1>Payroll</h1>
-        <p className="muted">Only owners and admins can run payroll. Your own payslips are on the People page.</p>
+        <p className="muted">Only owners and admins can run payroll, and accountants if HR settings allow it. Your own payslips are on the People page.</p>
       </div>
     );
   }
@@ -72,7 +72,99 @@ function PayrollApp() {
         )}
       </div>
 
+      {payroll && <Liabilities />}
+
       {creating && <NewRun onClose={() => setCreating(false)} />}
+    </div>
+  );
+}
+
+// What approved pay runs owe the tax office, and recording a payment of it
+function Liabilities() {
+  const [data, setData] = useState<any>(null);
+  const [accounts, setAccounts] = useState<any[]>([]);
+  const [form, setForm] = useState({ account_id: '', date: today(), amount: '', memo: '' });
+  const [saving, setSaving] = useState(false);
+  const [error, setError] = useState('');
+
+  const load = async () => {
+    const result = await api.get('/api/hr/liabilities');
+    setData(result);
+    setForm((current) => ({ ...current, amount: Number(result.owed) > 0 ? String(result.owed) : '' }));
+  };
+
+  useEffect(() => {
+    load().catch((err) => setError(err.message));
+    api.get('/api/accounting/accounts').then((rows) => {
+      const cash = rows.filter((row: any) => row.is_cash && row.is_active !== false);
+      setAccounts(cash);
+      setForm((current) => ({ ...current, account_id: current.account_id || cash[0]?.id || '' }));
+    }).catch((err) => setError(err.message));
+  }, []);
+
+  const submit = async (event: FormEvent) => {
+    event.preventDefault();
+    if (!window.confirm(`Record ${money(form.amount)} of tax and contributions paid?`)) return;
+    setSaving(true);
+    try {
+      await api.post('/api/hr/liabilities/pay', form);
+      setForm((current) => ({ ...current, memo: '' }));
+      await load();
+      setError('');
+    } catch (err: any) {
+      setError(err.message);
+    } finally {
+      setSaving(false);
+    }
+  };
+
+  const owed = Number(data?.owed || 0);
+
+  return (
+    <div className="card stack">
+      <h2>Tax and contributions owed</h2>
+      {!data ? <p className="empty">{error || 'Loading…'}</p> : (
+        <>
+          <div className="stat-value">{money(data.owed)}</div>
+          <p className="muted">Income tax and contributions from approved pay runs, less what you have paid. Paying it takes the money out of a bank or cash account in Accounting.</p>
+          {owed > 0 && (
+            <form onSubmit={submit}>
+              <div className="form-grid">
+                <label>Paid from
+                  <select required value={form.account_id} onChange={(e) => setForm({ ...form, account_id: e.target.value })}>
+                    {accounts.map((row) => <option key={row.id} value={row.id}>{row.code} {row.name}</option>)}
+                  </select>
+                </label>
+                <label>Date paid<input type="date" required value={form.date} onChange={(e) => setForm({ ...form, date: e.target.value })} /></label>
+                <label>Amount<input type="number" required min="0.01" max={owed} step="0.01" value={form.amount} onChange={(e) => setForm({ ...form, amount: e.target.value })} /></label>
+                <label>Note<input maxLength={200} placeholder="Payroll tax and contributions paid" value={form.memo} onChange={(e) => setForm({ ...form, memo: e.target.value })} /></label>
+              </div>
+              {error && <p className="error">{error}</p>}
+              <div className="form-actions">
+                <button className="primary" disabled={saving || !form.account_id}>{saving ? 'Saving…' : 'Record payment'}</button>
+              </div>
+            </form>
+          )}
+          {data.payments.length > 0 && (
+            <div className="table-wrap">
+              <table>
+                <thead><tr><th>Date</th><th>Entry</th><th>Note</th><th>Paid from</th><th className="num">Amount</th></tr></thead>
+                <tbody>
+                  {data.payments.map((payment: any) => (
+                    <tr key={payment.id}>
+                      <td>{formatDate(payment.entry_date)}</td>
+                      <td>#{payment.entry_number}</td>
+                      <td className="wrap">{payment.memo}{payment.reversed && <span className="badge void"> reversed</span>}</td>
+                      <td>{payment.paid_from}</td>
+                      <td className="num">{money(payment.amount)}</td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+          )}
+        </>
+      )}
     </div>
   );
 }

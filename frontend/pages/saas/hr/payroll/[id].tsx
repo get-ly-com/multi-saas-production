@@ -239,7 +239,7 @@ function PayForm({ run, onClose, onSaved }: { run: any; onClose: () => void; onS
         </div>
         <p className="muted">
           This records {money(run.net)} of take-home pay leaving that account. The {money(Number(run.deductions) + Number(run.employer_costs))} of
-          tax and contributions stays in Payroll Liabilities until you pay it to the tax office.
+          tax and contributions stays in Payroll Liabilities until you record paying it to the tax office on the Payroll page.
         </p>
         {error && <p className="error">{error}</p>}
         <div className="form-actions">

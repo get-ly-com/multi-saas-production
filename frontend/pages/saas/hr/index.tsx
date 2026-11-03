@@ -51,6 +51,7 @@ function PeopleApp() {
   }, []);
 
   const manager = overview?.is_manager;
+  const payroll = overview?.is_payroll;
   const query = search.trim().toLowerCase();
   const visible = people
     .filter((person) => showLeft || status(person).label !== 'left')
@@ -76,7 +77,7 @@ function PeopleApp() {
           <div className="card"><div className="stat-label">Out today</div><div className="stat-value">{overview.out_today}</div></div>
           <div className="card"><div className="stat-label">Leave to decide</div><div className="stat-value">{overview.to_decide}</div>
             {overview.to_decide > 0 && <Link href="/saas/hr/leave">Review</Link>}</div>
-          {manager && <div className="card"><div className="stat-label">Monthly pay before tax</div><div className="stat-value">{money(overview.monthly_pay)}</div></div>}
+          {payroll && <div className="card"><div className="stat-label">Monthly pay before tax</div><div className="stat-value">{money(overview.monthly_pay)}</div></div>}
         </div>
       )}
 
@@ -88,7 +89,7 @@ function PeopleApp() {
               <div key={row.leave_type_id}>
                 <div className="stat-label">{row.name}</div>
                 <div className="stat-value">{row.limited ? `${row.left} left` : `${row.taken} taken`}</div>
-                {row.limited && <div className="muted">of {row.allowance} days{Number(row.pending) > 0 ? `, ${row.pending} waiting` : ''}</div>}
+                {row.limited && <div className="muted">of {row.allowance} days{Number(row.carried_over) > 0 ? ` + ${row.carried_over} carried over` : ''}{Number(row.pending) > 0 ? `, ${row.pending} waiting` : ''}</div>}
               </div>
             ))}
           </div>
@@ -112,7 +113,7 @@ function PeopleApp() {
         {loading ? <p className="empty">Loading…</p> : (
           <table>
             <thead>
-              <tr><th>#</th><th>Name</th><th>Job</th><th>Department</th><th>Manager</th><th>Type</th><th>Started</th><th>Status</th>{manager && <th className="num">Pay</th>}</tr>
+              <tr><th>#</th><th>Name</th><th>Job</th><th>Department</th><th>Manager</th><th>Type</th><th>Started</th><th>Status</th>{payroll && <th className="num">Pay</th>}</tr>
             </thead>
             <tbody>
               {visible.length === 0 && <tr><td colSpan={9} className="empty">{people.length ? 'No matches' : manager ? 'No one yet. Add your first employee.' : 'No one yet'}</td></tr>}
@@ -128,7 +129,7 @@ function PeopleApp() {
                     <td>{EMPLOYMENT_TYPES[person.employment_type]}</td>
                     <td>{formatDate(person.start_date)}</td>
                     <td><span className={`badge ${state.style}`}>{state.label}</span></td>
-                    {manager && <td className="num">{person.employment_type === 'contractor' ? '—' : payText(person.pay)}</td>}
+                    {payroll && <td className="num">{person.employment_type === 'contractor' ? '—' : payText(person.pay)}</td>}
                   </tr>
                 );
               })}

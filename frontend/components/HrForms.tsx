@@ -204,7 +204,7 @@ export function LeaveForm({ people, employeeId, onClose, onSaved }: {
         <label style={{ marginTop: 12 }}>Reason<textarea rows={2} maxLength={1000} value={form.reason} onChange={(e) => set('reason', e.target.value)} /></label>
         {balance && (
           <p className="muted">
-            {balance.limited ? `${balance.left} of ${balance.allowance} days left this year` : `${balance.taken} days taken this year`}
+            {balance.limited ? `${balance.left} of ${balance.allowance} days${Number(balance.carried_over) > 0 ? ` + ${balance.carried_over} carried over` : ''} left this year` : `${balance.taken} days taken this year`}
             {Number(balance.pending) > 0 ? `, ${balance.pending} waiting for approval` : ''}. Weekends and company holidays aren't counted.
           </p>
         )}
