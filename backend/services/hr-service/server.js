@@ -18,7 +18,7 @@ const DATE = /^\d{4}-\d{2}-\d{2}$/;
 const EMPLOYMENT_TYPES = ['full_time', 'part_time', 'contractor'];
 
 const hr = (req) => req.db.schema('hr');
-const EMPLOYEE_FIELDS = '*, department:departments(id, name), manager:employees!manager_id(id, first_name, last_name)';
+const EMPLOYEE_FIELDS = '*, department:departments(id, name)';
 const LEAVE_FIELDS = '*, employee:employees(id, first_name, last_name), leave_type:leave_types(id, name, paid)';
 
 const sendError = (res, error) => {
@@ -82,6 +82,15 @@ const rows = async (query) => {
   return data || [];
 };
 
+// Each person's manager comes from the same directory, so no second lookup is needed
+const withManagers = (people, directory = people) => {
+  const byId = new Map(directory.map((person) => [person.id, person]));
+  return people.map((person) => {
+    const manager = byId.get(person.manager_id);
+    return { ...person, manager: manager ? { id: manager.id, first_name: manager.first_name, last_name: manager.last_name } : null };
+  });
+};
+
 const employeeFields = (body) => {
   if (body.employment_type && !EMPLOYMENT_TYPES.includes(body.employment_type)) throw new Error('Choose a type of employment');
   if (body.pay_type && !['salary', 'hourly'].includes(body.pay_type)) throw new Error('Choose salary or hourly pay');
@@ -128,20 +137,21 @@ app.get('/employees', handle(async (req) => {
     rows(hr(req).from('compensation').select('employee_id, pay_type, amount, hours_per_week').eq('tenant_id', req.tenantId))
   ]);
   const payFor = new Map(pay.map((row) => [row.employee_id, row]));
-  return people.map((person) => ({ ...person, pay: payFor.get(person.id) || null }));
+  return withManagers(people).map((person) => ({ ...person, pay: payFor.get(person.id) || null }));
 }));
 
 app.get('/employees/:id', handle(async (req) => {
   const employeeId = id(req.params.id, 'Employee');
   const [people, pay, leave, payslips] = await Promise.all([
-    rows(hr(req).from('employees').select(EMPLOYEE_FIELDS).eq('tenant_id', req.tenantId).eq('id', employeeId)),
+    rows(hr(req).from('employees').select(EMPLOYEE_FIELDS).eq('tenant_id', req.tenantId)),
     rows(hr(req).from('compensation').select('*').eq('employee_id', employeeId)),
     rows(hr(req).from('leave_requests').select(LEAVE_FIELDS).eq('employee_id', employeeId)
       .order('start_date', { ascending: false }).limit(100)),
     rows(hr(req).from('pay_lines').select('id, gross, net, run:pay_runs(id, run_number, period_start, pay_date, status)')
       .eq('employee_id', employeeId))
   ]);
-  if (!people.length) {
+  const found = people.find((person) => person.id === employeeId);
+  if (!found) {
     const error = new Error('Employee not found');
     error.status = 404;
     throw error;
@@ -150,7 +160,7 @@ app.get('/employees/:id', handle(async (req) => {
   const balances = await call(req, 'leave_balances', { p_employee: employeeId, p_year: new Date().getUTCFullYear() })
     .catch(() => null);
   return {
-    ...people[0],
+    ...withManagers([found], people)[0],
     pay: pay[0] || null,
     leave,
     balances,

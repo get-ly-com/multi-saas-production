@@ -78,7 +78,7 @@ function PayRunApp() {
       <div className="page-head">
         <div>
           <h1>Payroll for {monthName(run.period_start)}</h1>
-          <p className="muted">Pay run {run.run_number} · paid on {formatDate(run.pay_date)} · <span className={`badge ${run.status === 'approved' ? 'open' : run.status}`}>{run.status}</span>
+          <p className="muted">Pay run {run.run_number} · pay date {formatDate(run.pay_date)} · <span className={`badge ${run.status === 'approved' ? 'open' : run.status}`}>{run.status}</span>
             {run.paid_on && ` · paid ${formatDate(run.paid_on)}`}</p>
         </div>
         <div className="row-actions">

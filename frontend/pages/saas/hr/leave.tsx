@@ -1,5 +1,5 @@
 import Link from 'next/link';
-import { useEffect, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import AppShell from '@/components/AppShell';
 import { LEAVE_STATUSES, LeaveForm, fullName, leaveDates } from '@/components/HrForms';
 import HrNav from '@/components/HrNav';
@@ -24,8 +24,11 @@ function LeaveApp() {
   const [filter, setFilter] = useState('pending');
   const [asking, setAsking] = useState(false);
   const [error, setError] = useState('');
+  const latest = useRef(0);
 
   const load = async () => {
+    // Only the newest load is shown, so a quick change of filter can't be overwritten by an older answer
+    const mine = ++latest.current;
     try {
       const from = today();
       const [rows, away, staff, mine, summary] = await Promise.all([
@@ -35,6 +38,7 @@ function LeaveApp() {
         api.get('/api/hr/me'),
         api.get('/api/hr/overview')
       ]);
+      if (mine !== latest.current) return;
       setRequests(rows);
       setOut(away);
       setPeople(staff);
