@@ -80,7 +80,7 @@ export default function EmailForm({ links, onClose }: { links: Links; onClose: (
         {status?.configured && Number(status.left_today) <= 0 && <p className="error">Your company has reached today's email limit.</p>}
 
         <p className="muted">
-          To <strong>{recipient?.email || '…'}</strong>. It's sent from your company's name and replies come to your own email address.
+          To <strong>{recipient ? recipient.email || 'no email address' : '…'}</strong>. It's sent from your company's name and replies come to your own email address.
           {status?.configured && ` ${status.today} of ${status.day_limit} sent today.`}
         </p>
 
