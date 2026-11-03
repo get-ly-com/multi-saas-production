@@ -1,6 +1,7 @@
 import Head from 'next/head';
 import { useRouter } from 'next/router';
 import { CSSProperties, FormEvent, KeyboardEvent, useCallback, useEffect, useRef, useState } from 'react';
+import { campaignFromUrl } from '@/lib/campaign';
 
 const BASE_URL = process.env.NEXT_PUBLIC_API_BASE_URL;
 
@@ -180,7 +181,7 @@ export default function PublicChat() {
     run(async () => {
       let current = token;
       if (!current) {
-        const started = await post(`${base}/start`, { name: name.trim(), page: startedOn(), website });
+        const started = await post(`${base}/start`, { name: name.trim(), page: startedOn(), campaign: campaignFromUrl(), website });
         current = started.token;
         saveToken(key, current);
         setToken(current);
@@ -201,7 +202,7 @@ export default function PublicChat() {
   const askPerson = () => run(async () => {
     let current = token;
     if (!current) {
-      const started = await post(`${base}/start`, { name: name.trim(), page: startedOn(), website });
+      const started = await post(`${base}/start`, { name: name.trim(), page: startedOn(), campaign: campaignFromUrl(), website });
       current = started.token;
       saveToken(key, current);
       setToken(current);

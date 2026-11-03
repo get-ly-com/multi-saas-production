@@ -14,7 +14,8 @@ const supabaseFor = (authorization) =>
   });
 
 const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
-const EVENTS = ['invoice.created', 'invoice.paid', 'contact.created', 'lead.created', 'deal.won', 'deal.lost', 'leave.approved', 'payrun.approved'];
+const EVENTS = ['invoice.created', 'invoice.paid', 'contact.created', 'lead.created', 'deal.won', 'deal.lost', 'leave.approved', 'payrun.approved',
+  'booking.created', 'booking.cancelled', 'chat.started', 'chat.handed_over', 'social.posted'];
 
 const id = (value, label) => {
   if (!UUID.test(value || '')) {

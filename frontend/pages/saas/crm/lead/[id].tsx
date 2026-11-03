@@ -77,6 +77,7 @@ function LeadApp() {
             <div>
               <h1>{lead.name} <span className={`badge ${statusBadge[lead.status]}`}>{statusLabel[lead.status]}</span></h1>
               <p className="muted">{[lead.job_title, lead.company_name, lead.email, lead.phone, lead.source, owner].filter(Boolean).join(' · ')}</p>
+              {lead.campaign && <p className="muted">Campaign: {lead.campaign}</p>}
             </div>
             <div className="row-actions">
               {open && <button className="primary" onClick={() => setForm('convert')}>Convert</button>}

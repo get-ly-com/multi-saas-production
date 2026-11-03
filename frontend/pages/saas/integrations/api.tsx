@@ -29,6 +29,22 @@ const RESOURCES = [
   }
 ];
 
+const WEBHOOK_EVENTS = [
+  { name: 'invoice.created', when: 'An invoice is created', fields: 'id, invoice_number, status, customer_id, amount, currency, invoice_date, due_date' },
+  { name: 'invoice.paid', when: 'An invoice is paid in full', fields: 'The invoice fields plus amount_paid, paid_at' },
+  { name: 'contact.created', when: 'A CRM contact is added', fields: 'id, name, email, company_id, source' },
+  { name: 'lead.created', when: 'A lead is added', fields: 'id, name, email, company_name, source, status, from_form' },
+  { name: 'deal.won', when: 'A deal moves to a won stage', fields: 'id, title, value, stage_id, stage, contact_id, company_id, closed_at' },
+  { name: 'deal.lost', when: 'A deal moves to a lost stage', fields: 'The deal fields plus lost_reason' },
+  { name: 'leave.approved', when: 'Leave is approved', fields: 'id, employee_id, leave_type_id, start_date, end_date, half_day, days' },
+  { name: 'payrun.approved', when: 'A pay run is approved', fields: 'id, run_number, period_start, period_end, pay_date, gross, deductions, net, employer_costs' },
+  { name: 'booking.created', when: 'A booking is made', fields: 'id, service_id, service, staff_id, starts_at, ends_at, status, location_type, source, contact_id, campaign, created_at, customer_name, customer_email' },
+  { name: 'booking.cancelled', when: 'A booking is cancelled', fields: 'The booking fields (without customer name and email) plus cancelled_at, cancelled_by_visitor' },
+  { name: 'chat.started', when: 'A website visitor starts a chat', fields: 'id, status, started_on, created_at, lead_id, contact_id, campaign' },
+  { name: 'chat.handed_over', when: 'A chat first asks for a person', fields: 'The chat fields plus assigned_to, handed_over_at' },
+  { name: 'social.posted', when: 'A social post is marked as posted on every account', fields: 'id, title, campaign, tags, link_url, scheduled_at, posted_at, targets (platform, account_id, posted_at, post_url)' }
+];
+
 function Guide() {
   const base = `${process.env.NEXT_PUBLIC_API_BASE_URL || 'https://your-api-address'}/api/v1`;
 
@@ -103,12 +119,24 @@ function Guide() {
         </table>
       </div>
 
-      <div className="card">
+      <div className="card table-wrap">
         <h2>Getting told when things change</h2>
         <p>
           Instead of asking the API again and again, add a <Link href="/saas/integrations">webhook</Link>. We send a signed message to your
-          address when an invoice is created or paid, a contact or lead is added, a deal is won or lost, leave is approved or a pay run is approved.
+          address when one of these happens. The details are in the message's <code>data</code>.
         </p>
+        <table>
+          <thead><tr><th>Event</th><th>When</th><th>Details</th></tr></thead>
+          <tbody>
+            {WEBHOOK_EVENTS.map((event) => (
+              <tr key={event.name}>
+                <td><code>{event.name}</code></td>
+                <td>{event.when}</td>
+                <td className="muted">{event.fields}</td>
+              </tr>
+            ))}
+          </tbody>
+        </table>
       </div>
     </div>
   );

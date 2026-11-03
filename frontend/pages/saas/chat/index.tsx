@@ -156,6 +156,60 @@ function Inbox() {
   );
 }
 
+// "Linked to <contact>", and for staff a search to link the chat to a CRM contact. A closed chat's
+// transcript goes on that contact's timeline.
+function ContactLink({ chat, canEdit, busy, onLink }: {
+  chat: any; canEdit: boolean; busy: boolean; onLink: (contactId: string | null, done: string) => void;
+}) {
+  const [picking, setPicking] = useState(false);
+  const [search, setSearch] = useState('');
+  const [found, setFound] = useState<any[]>([]);
+
+  useEffect(() => {
+    if (!picking) return;
+    const timer = window.setTimeout(() => {
+      api.get(`/api/chatbot/contacts?q=${encodeURIComponent(search.trim())}`).then(setFound).catch(() => setFound([]));
+    }, 300);
+    return () => window.clearTimeout(timer);
+  }, [picking, search]);
+
+  const pick = (contactId: string | null, done: string) => {
+    setPicking(false);
+    setSearch('');
+    onLink(contactId, done);
+  };
+
+  return (
+    <div className="stack">
+      <p className="muted">
+        {chat.contact
+          ? <>Linked to <Link href={`/saas/crm/contact/${chat.contact.id}`}>{chat.contact.name}</Link></>
+          : 'Not linked to a CRM contact'}
+        {canEdit && !picking && (
+          <>
+            {' · '}<button type="button" className="link" disabled={busy} onClick={() => setPicking(true)}>{chat.contact ? 'Change' : 'Link to a contact'}</button>
+            {chat.contact && <>{' · '}<button type="button" className="link" disabled={busy} onClick={() => pick(null, 'Unlinked')}>Unlink</button></>}
+          </>
+        )}
+      </p>
+      {picking && (
+        <div className="stack">
+          <input autoFocus aria-label="Search contacts" placeholder="Search contacts by name or email" value={search}
+            onChange={(e) => setSearch(e.target.value)} />
+          {found.length === 0 && <p className="empty">No contacts found</p>}
+          {found.map((contact) => (
+            <button key={contact.id} type="button" className="chat-item" disabled={busy}
+              onClick={() => pick(contact.id, `Linked to ${contact.name}`)}>
+              <strong>{contact.name}</strong> <small>{contact.email || ''}</small>
+            </button>
+          ))}
+          <div><button type="button" onClick={() => setPicking(false)}>Cancel</button></div>
+        </div>
+      )}
+    </div>
+  );
+}
+
 function Thread({ id, team, overview, visible, onChanged }: { id: string; team: any[]; overview: any; visible: boolean; onChanged: () => void }) {
   const [chat, setChat] = useState<any>(null);
   const [messages, setMessages] = useState<ChatMessage[]>([]);
@@ -263,6 +317,7 @@ function Thread({ id, team, overview, visible, onChanged }: { id: string; team: 
             {chat.visitor_email || 'No email yet'}
             {chat.started_on && <> · started on {chat.started_on}</>}
             {chat.wants_person && chat.status !== 'closed' && <> · asked for a person</>}
+            {chat.campaign && <> · campaign {chat.campaign}</>}
           </div>
         </div>
         {canReply && (
@@ -282,6 +337,8 @@ function Thread({ id, team, overview, visible, onChanged }: { id: string; team: 
         )}
       </div>
       {!canReply && chat.lead_id && <p><Link href={`/saas/crm/lead/${chat.lead_id}`}>Open the CRM lead</Link></p>}
+      <ContactLink chat={chat} canEdit={canReply} busy={busy}
+        onLink={(contactId, done) => act(() => api.post(`/api/chatbot/conversations/${id}/contact`, { contact_id: contactId }), done)} />
 
       <div className="chat-messages">
         {messages.map((message) => (

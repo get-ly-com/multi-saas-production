@@ -12,11 +12,12 @@ const linkFor = (key: string) => (typeof window === 'undefined' ? '' : `${window
 const iframeSnippet = (url: string) =>
   `<iframe src="${url}?embed=1" title="Chat with us" style="width:100%;max-width:400px;height:560px;border:0;border-radius:12px"></iframe>`;
 
-// A floating button that opens the chat. The chat only loads when someone clicks it.
+// A floating button that opens the chat. The chat only loads when someone clicks it, and takes the
+// campaign (utm_campaign) from the page's link so the chat is counted for it.
 const buttonSnippet = (url: string, colour: string) => `<!-- Chat button -->
 <div style="position:fixed;right:20px;bottom:20px;z-index:2147483000;text-align:right;font-family:sans-serif">
   <iframe id="chat-frame" data-src="${url}?embed=1" title="Chat with us" style="display:none;width:360px;height:520px;max-width:calc(100vw - 40px);max-height:calc(100vh - 110px);border:0;border-radius:12px;box-shadow:0 8px 30px rgba(0,0,0,.25);margin-bottom:12px;background:#fff"></iframe>
-  <button type="button" onclick="var f=document.getElementById('chat-frame');if(!f.src)f.src=f.dataset.src;f.style.display=f.style.display==='none'?'block':'none'" style="background:${colour};color:#fff;border:0;border-radius:24px;padding:12px 18px;font-size:15px;cursor:pointer;box-shadow:0 4px 14px rgba(0,0,0,.2)">Chat with us</button>
+  <button type="button" onclick="var f=document.getElementById('chat-frame');if(!f.src){var c=new URLSearchParams(location.search).get('utm_campaign');f.src=f.dataset.src+(c?'&amp;utm_campaign='+encodeURIComponent(c):'')}f.style.display=f.style.display==='none'?'block':'none'" style="background:${colour};color:#fff;border:0;border-radius:24px;padding:12px 18px;font-size:15px;cursor:pointer;box-shadow:0 4px 14px rgba(0,0,0,.2)">Chat with us</button>
 </div>`;
 
 function ChatSettings() {

@@ -3,6 +3,7 @@ import { useRouter } from 'next/router';
 
 const SECTIONS = [
   { name: 'Planner', path: '/saas/social' },
+  { name: 'Results', path: '/saas/social/results' },
   { name: 'Accounts', path: '/saas/social/accounts' },
   { name: 'Settings', path: '/saas/social/settings' }
 ];

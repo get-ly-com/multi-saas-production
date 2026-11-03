@@ -60,6 +60,7 @@ function ContactApp() {
                 {[contact.job_title, contact.email, contact.phone, contact.source].filter(Boolean).join(' · ')}
                 {contact.company && <> · <Link href={`/saas/crm/company/${contact.company.id}`}>{contact.company.name}</Link></>}
               </p>
+              {contact.campaign && <p className="muted">Campaign: {contact.campaign}</p>}
             </div>
             <div className="row-actions">
               <button onClick={() => setAdding(true)}>New deal</button>

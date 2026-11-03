@@ -1,6 +1,7 @@
 import { FormEvent, useState } from 'react';
 import Modal from '@/components/Modal';
 import { api } from '@/lib/api';
+import { withTracking } from '@/lib/campaign';
 import { getSupabase } from '@/lib/supabase';
 
 // Nothing here posts for you. Each platform needs its own approved developer app to post
@@ -279,15 +280,18 @@ export function PostView({ post, overview, onClose, onEdit, onChanged }: {
 
   const submitLabel = approvalOn && !overview.is_manager ? 'Send for approval' : post.scheduled_at ? 'Schedule' : 'Mark ready';
 
+  // The link carries the campaign (utm_ tags) so leads, contacts and chats it brings in are counted
   const postNow = async (target: any) => {
     setError('');
+    const link = withTracking(post.link_url, target.platform, post.campaign);
+    const body = post.link_url && link !== post.link_url ? (target.body || '').split(post.link_url).join(link) : target.body;
     try {
-      await navigator.clipboard.writeText(target.body);
+      await navigator.clipboard.writeText(body);
       setNotice('Text copied.');
     } catch {
       setNotice('Copy the text yourself, then paste it on the platform.');
     }
-    window.open(composeUrl(target.platform, target.body, post.link_url), '_blank', 'noopener');
+    window.open(composeUrl(target.platform, body, link || null), '_blank', 'noopener');
     setOpened(target.id);
   };
 
@@ -322,6 +326,9 @@ export function PostView({ post, overview, onClose, onEdit, onChanged }: {
         {post.review_note && <p className="muted">Note from approval: {post.review_note}</p>}
         {post.notes && <p className="muted wrap">Notes: {post.notes}</p>}
         {post.link_url && <p>Link: <a href={post.link_url} target="_blank" rel="noopener noreferrer">{post.link_url}</a></p>}
+        {post.link_url && post.campaign && withTracking(post.link_url, 'x', post.campaign) !== post.link_url && (
+          <p className="muted">“Post now” adds the campaign to the link for each platform, so the Results view can count who it brings in.</p>
+        )}
         {post.image_path && (
           <div className="social-image-row">
             <img src={imageUrl(post.image_path)} alt="" className="social-thumb" />

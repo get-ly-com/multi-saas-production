@@ -138,7 +138,8 @@ app.put('/settings', callScheduler('save_settings', (req) => ({
     min_notice_minutes: whole(req.body.min_notice_minutes ?? 0, 'Minimum notice in minutes', 0, 43200),
     max_days_ahead: whole(req.body.max_days_ahead ?? 60, 'Days ahead', 1, 365),
     slot_step_minutes: whole(req.body.slot_step_minutes ?? 30, 'Start times every', 5, 120),
-    welcome: text(req.body.welcome, 1000)
+    welcome: text(req.body.welcome, 1000),
+    draft_invoices: req.body.draft_invoices === undefined ? true : Boolean(req.body.draft_invoices)
   }
 })));
 app.post('/settings/new-key', callScheduler('new_booking_key', () => ({})));
@@ -220,7 +221,9 @@ app.post('/bookings', callScheduler('create_booking', (req) => ({
     date: date(req.body.date, 'Choose a date'),
     time: time(req.body.time, 'Choose a time'),
     contact_id: optionalId(req.body.contact_id, 'Contact') || '',
-    ...customer(req.body)
+    ...customer(req.body),
+    // Set only after the person saw the warning that someone is on leave or the company is closed
+    override_away: req.body.override_away === true ? 'true' : ''
   }
 }), 201));
 
@@ -229,7 +232,8 @@ app.post('/bookings/:id/reschedule', callScheduler('reschedule_booking', (req) =
   p_data: {
     date: date(req.body.date, 'Choose a date'),
     time: time(req.body.time, 'Choose a time'),
-    staff_id: optionalId(req.body.staff_id, 'Team member') || ''
+    staff_id: optionalId(req.body.staff_id, 'Team member') || '',
+    override_away: req.body.override_away === true ? 'true' : ''
   }
 })));
 

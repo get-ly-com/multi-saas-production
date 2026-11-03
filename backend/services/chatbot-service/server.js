@@ -18,7 +18,7 @@ const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 const STATUSES = ['open', 'waiting', 'closed'];
 // The token column is not readable by staff, so it is never listed here
 const CONVERSATION_FIELDS = 'id, status, visitor_name, visitor_email, started_on, wants_person, assigned_to, lead_id, '
-  + 'staff_unread, visitor_messages, last_message, last_message_at, created_at, closed_at';
+  + 'contact_id, campaign, staff_unread, visitor_messages, last_message, last_message_at, created_at, closed_at';
 
 const chat = (req) => req.db.schema('chat');
 
@@ -131,8 +131,29 @@ app.get('/conversations/:id', handle(async (req) => {
       : messageQuery.order('id', { ascending: false }).limit(500))
   ]);
   if (!found.length) throw notFound('Chat not found');
-  return { ...found[0], messages: after > 0 ? messages : messages.reverse() };
+  // The linked CRM contact's name, for "Linked to ..."
+  let contact = null;
+  if (found[0].contact_id) {
+    const linked = await rows(req.db.schema('crm').from('contacts').select('id, name, email')
+      .eq('tenant_id', req.tenantId).eq('id', found[0].contact_id));
+    contact = linked[0] || null;
+  }
+  return { ...found[0], contact, messages: after > 0 ? messages : messages.reverse() };
 }));
+
+// CRM contacts to link a chat to. ?q=name or email
+app.get('/contacts', handle((req) => {
+  const search = text(req.query.q, 100).replace(/[%_,()*\\]/g, ' ').trim();
+  let query = req.db.schema('crm').from('contacts').select('id, name, email').eq('tenant_id', req.tenantId);
+  if (search) query = query.or(`name.ilike.%${search}%,email.ilike.%${search}%`);
+  return rows(query.order('name').limit(20));
+}));
+
+// Link the chat to a CRM contact, or unlink it with contact_id null
+app.post('/conversations/:id/contact', callChat('link_contact', (req) => ({
+  p_conversation: id(req.params.id, 'Chat'),
+  p_contact: req.body.contact_id ? id(req.body.contact_id, 'Contact') : null
+})));
 
 // Viewers can read but not mark read; that is not an error for them
 app.post('/conversations/:id/read', async (req, res) => {

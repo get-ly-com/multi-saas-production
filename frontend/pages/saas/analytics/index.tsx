@@ -63,12 +63,23 @@ function Dashboard() {
   const cash = (value: number | string) => money(value, data?.currency);
 
   const download = () => downloadCsv(`business-trend-${data.trend[data.trend.length - 1].month.slice(0, 7)}.csv`, [
-    ['Month', 'Invoiced', 'Cash in', 'Cash out', 'Profit', 'New leads', 'Deals won', ...(data.sees_payroll ? ['Payroll cost'] : [])],
+    ['Month', 'Invoiced', 'Cash in', 'Cash out', 'Profit', 'New leads', 'Deals won', 'Bookings', 'Chats', ...(data.sees_payroll ? ['Payroll cost'] : [])],
     ...data.trend.map((row: any) => [
       row.month.slice(0, 7), Number(row.revenue), Number(row.cash_in), Number(row.cash_out), Number(row.profit),
-      Number(row.new_leads), Number(row.won_value), ...(data.sees_payroll ? [Number(row.payroll)] : [])
+      Number(row.new_leads), Number(row.won_value), Number(row.bookings || 0), Number(row.chats || 0),
+      ...(data.sees_payroll ? [Number(row.payroll)] : [])
     ])
   ]);
+
+  const marketing = data?.marketing;
+  const plural = (count: number, one: string, many: string) => `${count} ${Number(count) === 1 ? one : many}`;
+  const replyTime = (minutes: number | null) => {
+    if (minutes === null || minutes === undefined) return 'No staff replies yet';
+    const value = Number(minutes);
+    if (value < 1) return 'Under a minute';
+    if (value < 60) return `${Math.round(value)} min`;
+    return `${Math.floor(value / 60)} h ${Math.round(value % 60)} min`;
+  };
 
   return (
     <div className="stack">
@@ -111,6 +122,23 @@ function Dashboard() {
               note={`${data.pipeline.open_deals} open ${data.pipeline.open_deals === 1 ? 'deal' : 'deals'} · ${cash(data.pipeline.weighted)} likely`} />
           </div>
 
+          {marketing && (
+            <>
+              <h2>Customers and marketing</h2>
+              <div className="stats">
+                <Stat label="Bookings made" value={marketing.current.bookings} now={marketing.current.bookings} before={marketing.previous.bookings} compare={compare} href="/saas/scheduler"
+                  note={`${cash(marketing.current.booking_value)} at service prices · ${plural(marketing.current.cancellations, 'cancellation', 'cancellations')}`} />
+                <Stat label="Booked for the next 7 days" value={marketing.upcoming.bookings} href="/saas/scheduler"
+                  note={`${cash(marketing.upcoming.value)} at service prices`} />
+                <Stat label="Chats started" value={marketing.current.chats} now={marketing.current.chats} before={marketing.previous.chats} compare={compare} href="/saas/chat"
+                  note={`${marketing.current.chats_wanted_person} asked for a person · ${plural(marketing.current.chat_leads, 'lead', 'leads')} from chat`} />
+                <Stat label="First staff reply" value={replyTime(marketing.current.first_reply_minutes)} href="/saas/chat"
+                  note="Average time from the visitor's first message" />
+                <Stat label="Social posts posted" value={marketing.current.posts} now={marketing.current.posts} before={marketing.previous.posts} compare={compare} href="/saas/social" />
+              </div>
+            </>
+          )}
+
           <h2>Stock and staff</h2>
           <div className="stats">
             <Stat label="Stock value" value={cash(data.stock.value)} href="/saas/inventory" note={`${data.stock.items} ${data.stock.items === 1 ? 'item' : 'items'}`} />
@@ -150,6 +178,7 @@ function Dashboard() {
                 <tr>
                   <th>Month</th><th className="num">Invoiced</th><th className="num">Cash in</th><th className="num">Cash out</th>
                   <th className="num">Profit</th><th className="num">New leads</th><th className="num">Deals won</th>
+                  <th className="num">Bookings</th><th className="num">Chats</th>
                   {data.sees_payroll && <th className="num">Payroll cost</th>}
                 </tr>
               </thead>
@@ -163,6 +192,8 @@ function Dashboard() {
                     <td className="num">{cash(row.profit)}</td>
                     <td className="num">{row.new_leads}</td>
                     <td className="num">{cash(row.won_value)}</td>
+                    <td className="num">{row.bookings ?? 0}</td>
+                    <td className="num">{row.chats ?? 0}</td>
                     {data.sees_payroll && <td className="num">{cash(row.payroll)}</td>}
                   </tr>
                 ))}
@@ -209,7 +240,8 @@ function Dashboard() {
           <p className="muted">
             Amounts are in {data.currency}. Invoiced counts sent invoices by their date, before tax. Profit is income minus
             expenses in your books. Cash in and out are money moving through your bank and cash accounts; transfers between
-            them aren't counted. {!data.sees_payroll && 'Payroll totals are shown to owners and admins only.'}
+            them aren't counted. Bookings count bookings made in the period that are still on, valued at each service's
+            price. {!data.sees_payroll && 'Payroll totals are shown to owners and admins only.'}
           </p>
         </>
       )}

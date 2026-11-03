@@ -246,7 +246,9 @@ app.post('/api/forms/:key', formLimit, express.json({ limit: '16kb' }), async (r
       email: req.body?.email,
       phone: req.body?.phone,
       company: req.body?.company,
-      message: req.body?.message
+      message: req.body?.message,
+      // From the link the visitor came in by (utm_campaign)
+      campaign: typeof req.body?.campaign === 'string' ? req.body.campaign.slice(0, 100) : undefined
     }
   });
   if (error) return res.status(400).json({ error: error.message });
@@ -375,12 +377,15 @@ app.post('/api/book/:key', bookingLimit, express.json({ limit: '16kb' }), async 
     return res.status(400).json({ error: 'Choose a service and a time' });
   }
   const field = (name, max) => (typeof req.body[name] === 'string' ? req.body[name].slice(0, max) : '');
+  // The campaign from the page's own link (utm_campaign or ?campaign=). A long one is cut, not refused.
+  const campaign = typeof req.body.campaign === 'string'
+    ? req.body.campaign.replace(/[\u0000-\u001f\u007f]/g, '').trim().slice(0, 100).trim() : '';
   const { data, error } = await publicDb().rpc('book_slot', {
     p_key: req.params.key,
     p_service: service,
     p_staff: staff || null,
     p_start: new Date(start).toISOString(),
-    p_visitor: { name: field('name', 200), email: field('email', 254), phone: field('phone', 40), notes: field('notes', 2000) }
+    p_visitor: { name: field('name', 200), email: field('email', 254), phone: field('phone', 40), notes: field('notes', 2000), campaign }
   });
   if (error) return bookingReply(res, error, 'Could not book. Please try again.');
   res.status(201).json(data);
@@ -433,7 +438,7 @@ app.post('/api/book/:key', bookingLimit, express.json({ limit: '16kb' }), async 
     }
     const { data, error } = await publicDb().rpc('chat_start', {
       p_key: req.params.key,
-      p_visitor: { name: field(req, 'name', 100), email: field(req, 'email', 254), page: field(req, 'page', 500) }
+      p_visitor: { name: field(req, 'name', 100), email: field(req, 'email', 254), page: field(req, 'page', 500), campaign: field(req, 'campaign', 100) }
     });
     if (error) return chatReply(res, error, 'Could not start the chat. Please try again.');
     res.status(201).json(data);

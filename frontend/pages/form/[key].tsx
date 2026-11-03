@@ -1,6 +1,7 @@
 import Head from 'next/head';
 import { useRouter } from 'next/router';
 import { FormEvent, useEffect, useState } from 'react';
+import { campaignFromUrl } from '@/lib/campaign';
 
 const BASE_URL = process.env.NEXT_PUBLIC_API_BASE_URL;
 
@@ -29,7 +30,7 @@ export default function PublicForm() {
       const response = await fetch(`${BASE_URL}/api/forms/${encodeURIComponent(key as string)}`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify(form)
+        body: JSON.stringify({ ...form, campaign: campaignFromUrl() })
       });
       const result = await response.json().catch(() => null);
       if (!response.ok) throw new Error(result?.error || 'Too many tries. Please wait a minute and try again.');

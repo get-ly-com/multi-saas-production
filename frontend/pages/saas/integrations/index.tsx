@@ -167,7 +167,8 @@ function WebhookForm({ hook, onSave, onClose }: { hook: Hook | null; onSave: (bo
             </label>
           ))}
         </div>
-        <p className="muted">HR messages only carry ids, dates and pay run totals, never names, reasons or anyone's own pay.</p>
+        <p className="muted">HR messages only carry ids, dates and pay run totals, never names, reasons or anyone's own pay.
+          Chat and social messages never include what was written. Only "Booking made" includes the customer's name and email.</p>
         <div className="form-actions">
           <button type="button" onClick={onClose}>Cancel</button>
           <button className="primary" disabled={form.events.length === 0}>{hook ? 'Save' : 'Add webhook'}</button>

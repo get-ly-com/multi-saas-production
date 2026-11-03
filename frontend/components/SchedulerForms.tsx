@@ -4,6 +4,23 @@ import Modal from '@/components/Modal';
 import { LOCATIONS, dayLabel } from '@/components/SchedulerNav';
 import { api, money } from '@/lib/api';
 
+// Leave (from HR) and company holidays block a day. Staff can still book after this warning.
+const AWAY = /away on leave|closed that day/i;
+
+function AwayWarning({ message, action, onConfirm, onBack }: {
+  message: string; action: string; onConfirm: () => void; onBack: () => void;
+}) {
+  return (
+    <div className="card" role="alert" style={{ marginTop: 12 }}>
+      <p><strong>{message}.</strong> Free times skip this day. Only go ahead if you've checked it's fine.</p>
+      <div className="form-actions">
+        <button type="button" className="danger" onClick={onConfirm}>{action} anyway</button>
+        <button type="button" onClick={onBack}>Pick another time</button>
+      </div>
+    </div>
+  );
+}
+
 // Free start times on one day, with a box to type any other time
 function TimePicker({ service, staff, date, booking, time, onPick }: {
   service: string; staff: string; date: string; booking?: string; time: string;
@@ -36,7 +53,7 @@ function TimePicker({ service, staff, date, booking, time, onPick }: {
       <label style={{ marginTop: 8 }}>Or type a time
         <input type="time" value={time} onChange={(e) => onPick(e.target.value)} />
       </label>
-      <p className="muted">Typed times can be outside opening hours. The person still can't be booked twice at once.</p>
+      <p className="muted">Typed times can be outside opening hours. The person still can't be booked twice at once. Free times skip HR leave and company holidays.</p>
     </div>
   );
 }
@@ -81,20 +98,32 @@ export function NewBooking({ data, date, onClose, onSaved }: {
   });
   const [anyone, setAnyone] = useState(false);
   const [error, setError] = useState('');
+  const [away, setAway] = useState('');
   const set = (field: string, value: any) => setForm({ ...form, [field]: value });
 
   const service = services.find((row: any) => row.id === form.service_id);
   const offered = staff.filter((row: any) => !service?.staff_ids?.length || service.staff_ids.includes(row.user_id));
 
-  const submit = async (event: FormEvent) => {
-    event.preventDefault();
+  useEffect(() => setAway(''), [form.date, form.time, form.staff_id]);
+
+  const send = async (overrideAway: boolean) => {
     try {
-      const saved = await api.post('/api/scheduler/bookings', form);
+      const saved = await api.post('/api/scheduler/bookings', { ...form, override_away: overrideAway });
       onSaved(saved);
       onClose();
     } catch (err: any) {
-      setError(err.message);
+      if (!overrideAway && AWAY.test(err.message)) {
+        setAway(err.message);
+        setError('');
+      } else {
+        setError(err.message);
+      }
     }
+  };
+
+  const submit = (event: FormEvent) => {
+    event.preventDefault();
+    send(false);
   };
 
   if (!services.length || !staff.length) {
@@ -143,7 +172,8 @@ export function NewBooking({ data, date, onClose, onSaved }: {
           <label>Phone<input maxLength={40} required={service?.location_type === 'phone'} value={form.phone} onChange={(e) => set('phone', e.target.value)} /></label>
         </div>
         <label style={{ marginTop: 12 }}>Notes<textarea rows={2} maxLength={2000} value={form.notes} onChange={(e) => set('notes', e.target.value)} /></label>
-        <p className="muted">With an email, the booking is added to that CRM contact's timeline (a new contact is made if needed).{service?.location_type === 'video' ? ' A Jitsi Meet video link is made for it.' : ''}</p>
+        <p className="muted">With an email, the booking is added to that CRM contact's timeline (a new contact is made if needed).{service?.location_type === 'video' ? ' A Jitsi Meet video link is made for it.' : ''}{Number(service?.price) > 0 && data.settings?.draft_invoices !== false ? ' A draft invoice is made in Accounting for the service price.' : ''}</p>
+        {away && <AwayWarning message={away} action="Book" onConfirm={() => send(true)} onBack={() => { setAway(''); set('time', ''); }} />}
         {error && <p className="error">{error}</p>}
         <div className="form-actions">
           <button className="primary" disabled={!form.time || !form.staff_id}>Book</button>
@@ -160,19 +190,30 @@ export function BookingDetails({ booking, data, onClose, onSaved }: {
   const [moving, setMoving] = useState(false);
   const [form, setForm] = useState({ date: booking.local_date, time: booking.start_time, staff_id: booking.staff_id || '' });
   const [error, setError] = useState('');
+  const [away, setAway] = useState('');
   const service = data.services.find((row: any) => row.id === booking.service_id);
   const staff = data.staff.filter((row: any) => row.set_up && (!service?.staff_ids?.length || service.staff_ids.includes(row.user_id)));
   const live = booking.status === 'booked';
 
-  const act = async (work: () => Promise<any>) => {
+  const act = async (work: () => Promise<any>, warnAway = false) => {
     try {
       await work();
       onSaved();
       onClose();
     } catch (err: any) {
-      setError(err.message);
+      if (warnAway && AWAY.test(err.message)) {
+        setAway(err.message);
+        setError('');
+      } else {
+        setError(err.message);
+      }
     }
   };
+
+  useEffect(() => setAway(''), [form.date, form.time, form.staff_id]);
+
+  const move = (overrideAway: boolean) =>
+    act(() => api.post(`/api/scheduler/bookings/${booking.id}/reschedule`, { ...form, override_away: overrideAway }), !overrideAway);
 
   const cancel = () => {
     const reason = window.prompt('Cancel this booking? You can add a reason (optional).');
@@ -195,7 +236,19 @@ export function BookingDetails({ booking, data, onClose, onSaved }: {
           {booking.customer_email && <div className="muted">{booking.customer_email}</div>}
           {booking.customer_phone && <div className="muted">{booking.customer_phone}</div>}
         </div>
-        <div><div className="stat-label">Booked</div>{booking.source === 'public' ? 'Online by the customer' : 'By the team'}</div>
+        <div><div className="stat-label">Booked</div>{booking.source === 'public' ? 'Online by the customer' : 'By the team'}
+          {booking.campaign && <div className="muted">Campaign: {booking.campaign}</div>}
+        </div>
+        {(booking.invoice_id || booking.invoice_note) && (
+          <div><div className="stat-label">Invoice</div>
+            {booking.invoice_id && (
+              <Link href={`/saas/accounting/invoice/${booking.invoice_id}`}>
+                {booking.invoice_number || 'Open invoice'}{booking.invoice_status ? ` (${booking.invoice_status})` : ''}
+              </Link>
+            )}
+            {booking.invoice_note && <div className="muted">{booking.invoice_note}</div>}
+          </div>
+        )}
       </div>
       {booking.notes && <p className="wrap">{booking.notes}</p>}
       {booking.cancel_reason && <p className="muted">Reason: {booking.cancel_reason}</p>}
@@ -217,10 +270,10 @@ export function BookingDetails({ booking, data, onClose, onSaved }: {
           <TimePicker service={booking.service_id} staff={form.staff_id} date={form.date} booking={booking.id} time={form.time}
             onPick={(time) => setForm({ ...form, time })} />
           <div className="form-actions">
-            <button className="primary" disabled={!form.time}
-              onClick={() => act(() => api.post(`/api/scheduler/bookings/${booking.id}/reschedule`, form))}>Move booking</button>
+            <button className="primary" disabled={!form.time} onClick={() => move(false)}>Move booking</button>
             <button type="button" onClick={() => setMoving(false)}>Back</button>
           </div>
+          {away && <AwayWarning message={away} action="Move" onConfirm={() => move(true)} onBack={() => { setAway(''); setForm({ ...form, time: '' }); }} />}
         </div>
       )}
 

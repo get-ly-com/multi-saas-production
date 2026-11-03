@@ -120,6 +120,8 @@ function SettingsApp() {
             </label>
           </div>
           <label className="check"><input type="checkbox" checked={form.booking_enabled} onChange={(e) => set('booking_enabled', e.target.checked)} /> Booking page is open</label>
+          <label className="check"><input type="checkbox" checked={form.draft_invoices !== false} onChange={(e) => set('draft_invoices', e.target.checked)} /> Create a draft invoice for paid bookings</label>
+          <p className="muted">The draft goes to Accounting for the customer's CRM contact, at the service price. Nothing is sent until you send it. If the booking is cancelled, the draft is deleted.</p>
           <label style={{ marginTop: 12 }}>Welcome message on the booking page<textarea rows={3} maxLength={1000} value={form.welcome} onChange={(e) => set('welcome', e.target.value)} /></label>
           <p className="muted">Opening hours and booking times all use this time zone. Visitors see times in it too.</p>
           {manager && <div className="form-actions"><button className="primary">Save</button></div>}

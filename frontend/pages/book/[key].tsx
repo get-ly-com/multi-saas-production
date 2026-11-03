@@ -19,6 +19,9 @@ const getJson = async (path: string, init?: RequestInit) => {
 export default function BookingPage() {
   const router = useRouter();
   const key = router.query.key as string | undefined;
+  // Which campaign the visitor came from, from this page's own link
+  const rawCampaign = router.query.utm_campaign ?? router.query.campaign;
+  const campaign = (Array.isArray(rawCampaign) ? rawCampaign[0] : rawCampaign || '').trim().slice(0, 100).trim();
   const [info, setInfo] = useState<any>(null);
   const [closed, setClosed] = useState(false);
   const [serviceId, setServiceId] = useState('');
@@ -75,13 +78,13 @@ export default function BookingPage() {
       const result = await getJson(`/api/book/${encodeURIComponent(key as string)}`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ ...form, service_id: service.id, staff_id: staffId || null, start: slot.start })
+        body: JSON.stringify({ ...form, service_id: service.id, staff_id: staffId || null, start: slot.start, campaign })
       });
       setDone(result);
     } catch (err: any) {
       setError(err.message);
       // The time may have just gone, so show fresh times
-      if (/no longer free|already booked/i.test(err.message)) {
+      if (/no longer free|already booked|away on leave|closed that day/i.test(err.message)) {
         setSlot(null);
         setSlots(null);
         const params = new URLSearchParams({ service: service.id, from, days: String(WINDOW) });

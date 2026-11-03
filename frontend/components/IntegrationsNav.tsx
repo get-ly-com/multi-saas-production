@@ -18,7 +18,12 @@ export const EVENTS = [
   { name: 'deal.won', label: 'Deal won' },
   { name: 'deal.lost', label: 'Deal lost' },
   { name: 'leave.approved', label: 'Leave approved' },
-  { name: 'payrun.approved', label: 'Pay run approved' }
+  { name: 'payrun.approved', label: 'Pay run approved' },
+  { name: 'booking.created', label: 'Booking made' },
+  { name: 'booking.cancelled', label: 'Booking cancelled' },
+  { name: 'chat.started', label: 'Chat started' },
+  { name: 'chat.handed_over', label: 'Chat asked for a person' },
+  { name: 'social.posted', label: 'Social post posted' }
 ];
 
 export const eventLabel = (name: string) => EVENTS.find((event) => event.name === name)?.label || (name === 'test' ? 'Test' : name);

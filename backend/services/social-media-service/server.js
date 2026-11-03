@@ -126,6 +126,9 @@ app.get('/overview', handle(async (req) => ({ ...(await call(req, 'overview', {}
 // Alerts people about posts due today. The planner calls it when it opens.
 app.post('/check-due', callSocial('check_due', () => ({})));
 
+// Per campaign: posts, and the leads, contacts, chats and won deals that came from it
+app.get('/campaign-results', callSocial('campaign_results', () => ({})));
+
 app.put('/settings', callSocial('save_settings', (req) => ({
   p_require_approval: Boolean(req.body.require_approval),
   p_timezone: text(req.body.timezone, 64).trim() || 'UTC'
