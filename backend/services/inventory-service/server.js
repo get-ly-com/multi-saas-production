@@ -36,12 +36,24 @@ const parsePrice = (value) => {
   return parsed;
 };
 
-const adjustStock = async (req, itemId, change, reason) => {
+// Blank means "at the average cost"
+const parseCost = (value) => {
+  if (value === '' || value === null || value === undefined) return null;
+  const parsed = Number(value);
+  if (!(parsed >= 0) || parsed >= 1e10) throw new Error('Enter a valid unit cost');
+  return parsed;
+};
+
+const DATE = /^\d{4}-\d{2}-\d{2}$/;
+
+const adjustStock = async (req, itemId, change, reason, unitCost = null, opening = false) => {
   const { data, error } = await db(req).rpc('adjust_stock', {
     p_tenant: req.tenantId,
     p_item: itemId,
     p_change: change,
-    p_reason: reason || null
+    p_reason: reason || null,
+    p_unit_cost: unitCost,
+    p_opening: opening
   });
 
   if (error) throw error;
@@ -73,9 +85,10 @@ app.get('/items', async (req, res) => {
 
 app.post('/items', async (req, res) => {
   try {
-    const { sku, name, quantity, price, reorder_level } = req.body;
+    const { sku, name, quantity, price, reorder_level, unit_cost } = req.body;
     if (!sku || !name) throw new Error('SKU and name are required');
     const opening = parseWhole(quantity || 0, 'Quantity');
+    const cost = parseCost(unit_cost);
 
     const { data, error } = await items(req)
       .insert([{
@@ -89,7 +102,7 @@ app.post('/items', async (req, res) => {
 
     if (error) throw error;
     const item = opening > 0
-      ? await adjustStock(req, data[0].id, opening, 'Opening stock')
+      ? await adjustStock(req, data[0].id, opening, 'Opening stock', cost, true)
       : data[0];
     res.status(201).json(item);
   } catch (error) {
@@ -150,7 +163,32 @@ app.post('/items/:id/adjust', async (req, res) => {
     if (!Number.isInteger(change) || change === 0) {
       throw new Error('Change must be a whole number, positive or negative');
     }
-    res.json(await adjustStock(req, req.params.id, change, req.body.reason));
+    res.json(await adjustStock(req, req.params.id, change, req.body.reason, change > 0 ? parseCost(req.body.unit_cost) : null));
+  } catch (error) {
+    sendError(res, error);
+  }
+});
+
+// Values stock that was on hand before costs were tracked
+app.post('/items/:id/cost', async (req, res) => {
+  try {
+    const cost = parseCost(req.body.unit_cost);
+    if (cost === null) throw new Error('Enter a valid unit cost');
+    const { data, error } = await db(req).rpc('set_item_cost', { p_tenant: req.tenantId, p_item: req.params.id, p_unit_cost: cost });
+    if (error) throw error;
+    res.json(data);
+  } catch (error) {
+    sendError(res, error);
+  }
+});
+
+app.get('/profit', async (req, res) => {
+  try {
+    const { from, to } = req.query;
+    if (!DATE.test(from || '') || !DATE.test(to || '')) throw new Error('Choose a start and end date');
+    const { data, error } = await db(req).rpc('product_profit', { p_tenant: req.tenantId, p_from: from, p_to: to });
+    if (error) throw error;
+    res.json(data);
   } catch (error) {
     sendError(res, error);
   }

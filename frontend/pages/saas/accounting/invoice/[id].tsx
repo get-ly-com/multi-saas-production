@@ -46,6 +46,7 @@ function InvoiceDocument() {
   if (!invoice) return <p className="empty">Loading…</p>;
 
   const balance = Number(invoice.amount) - Number(invoice.amount_paid) - Number(invoice.amount_credited);
+  const sales = Math.round(Number(invoice.subtotal) * Number(invoice.exchange_rate) * 100) / 100;
 
   return (
     <div className="stack">
@@ -118,6 +119,18 @@ function InvoiceDocument() {
 
         {invoice.description && <p className="wrap">{invoice.description}</p>}
       </div>
+
+      {Number(invoice.stock_cost) !== 0 && (
+        <div className="card no-print">
+          <h2>Profit</h2>
+          <p className="muted">In your main currency{Number(invoice.exchange_rate) !== 1 && ', at this invoice\'s rate'}, before tax. Stock is costed at its average cost when the invoice was sent.</p>
+          <div className="stats">
+            <div><div className="stat-label">Sales</div><div className="stat-value">{money(sales)}</div></div>
+            <div><div className="stat-label">Cost of stock</div><div className="stat-value">{money(invoice.stock_cost)}</div></div>
+            <div><div className="stat-label">Gross profit</div><div className="stat-value">{money(sales - Number(invoice.stock_cost))}</div><div className="muted">{sales ? `${Math.round(((sales - Number(invoice.stock_cost)) / sales) * 100)}% margin` : ''}</div></div>
+          </div>
+        </div>
+      )}
 
       {invoice.payments.length > 0 && (
         <div className="card table-wrap no-print">

@@ -372,6 +372,7 @@ app.get('/deals/:id/history', list((req) => crm(req).from('deal_history')
   .eq('deal_id', req.params.id)
   .eq('tenant_id', req.tenantId)
   .order('changed_at', { ascending: false })));
+app.get('/deals/:id/profit', callCrm('deal_profit', (req) => ({ p_deal: req.params.id })));
 app.post('/deals', create(deals, DEAL_FIELDS, (body) => {
   if (!body.title) throw new Error('Title is required');
   return dealFields(body);

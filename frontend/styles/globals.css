@@ -121,7 +121,7 @@ input, select, textarea {
 .lines { display: grid; gap: 8px; margin: 12px 0; }
 .line { display: grid; grid-template-columns: 1fr 70px 100px 110px 32px; gap: 8px; align-items: center; }
 .line button { padding: 6px 0; }
-.bill-line { display: grid; grid-template-columns: 1fr 1fr 90px 100px 100px 32px; gap: 8px; align-items: center; }
+.bill-line { display: grid; grid-template-columns: 1fr 1fr 64px 90px 100px 100px 32px; gap: 8px; align-items: center; }
 .bill-line button { padding: 6px 0; }
 .order-line { display: grid; grid-template-columns: 1fr 1fr 60px 80px 90px 90px 32px; gap: 6px; align-items: center; }
 .order-line button { padding: 6px 0; }

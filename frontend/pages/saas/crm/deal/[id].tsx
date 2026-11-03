@@ -23,6 +23,7 @@ function DealApp() {
   const [history, setHistory] = useState<any[]>([]);
   const [pipelines, setPipelines] = useState<any[]>([]);
   const [quotes, setQuotes] = useState<any[]>([]);
+  const [profit, setProfit] = useState<any>(null);
   const [error, setError] = useState('');
   const [editing, setEditing] = useState(false);
   const [quoting, setQuoting] = useState(false);
@@ -30,12 +31,14 @@ function DealApp() {
 
   const load = async () => {
     try {
-      const [row, historyRows, pipelineRows, quoteRows] = await Promise.all([
+      const [row, historyRows, pipelineRows, quoteRows, profitRow] = await Promise.all([
         api.get(`/api/crm/deals/${id}`),
         api.get(`/api/crm/deals/${id}/history`),
         api.get('/api/crm/pipelines'),
-        api.get(`/api/crm/quotes?deal_id=${id}`)
+        api.get(`/api/crm/quotes?deal_id=${id}`),
+        api.get(`/api/crm/deals/${id}/profit`).catch(() => null)
       ]);
+      setProfit(profitRow);
       setDeal(row);
       setHistory(historyRows);
       setPipelines(pipelineRows);
@@ -88,6 +91,11 @@ function DealApp() {
     at: row.changed_at,
     content: <div className="timeline-item"><div><span className="badge">close date</span> {formatDate(row.from_close)} → {formatDate(row.to_close)}<div className="muted">{formatDate(row.changed_at)}</div></div></div>
   }));
+  // From the deal's invoices, after the cost of the stock they took
+  const revenue = Number(profit?.revenue || 0);
+  const earned = Number(profit?.invoices) > 0 && revenue
+    ? `profit ${money(revenue - Number(profit.cost))} (${Math.round(((revenue - Number(profit.cost)) / revenue) * 100)}%) on ${money(revenue)} invoiced`
+    : '';
   const forecast = deal?.stage?.kind === 'open'
     ? `${categoryName(deal.forecast_category || automaticCategory(deal.stage.probability))}${deal.forecast_category ? '' : ' (from the stage)'}`
     : '';
@@ -109,6 +117,7 @@ function DealApp() {
                 {owner && ` · ${owner}`}
                 {deal.source && ` · ${deal.source}`}
                 {forecast && ` · forecast: ${forecast}`}
+                {earned && ` · ${earned}`}
               </p>
             </div>
             <div className="row-actions">

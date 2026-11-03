@@ -126,6 +126,9 @@ const Total = ({ label, value }: { label: string; value: number }) => (
   <tr className="total"><td>{label}</td><td className="num">{money(value)}</td></tr>
 );
 
+// Matches the accounts the database counts in gross profit
+const COST_OF_SALES = ['5000', '5100'];
+
 function ProfitAndLoss({ data }: { data: any }) {
   return (
     <table>
@@ -133,8 +136,15 @@ function ProfitAndLoss({ data }: { data: any }) {
         <Section title="Revenue" />
         <AccountRows rows={data.revenue} />
         <Total label="Total revenue" value={data.total_revenue} />
+        {Number(data.cost_of_sales) !== 0 && (
+          <>
+            <Section title="Cost of sales" />
+            <AccountRows rows={data.expenses.filter(({ code }: any) => COST_OF_SALES.includes(code))} />
+            <Total label="Gross profit" value={data.gross_profit} />
+          </>
+        )}
         <Section title="Expenses" />
-        <AccountRows rows={data.expenses} />
+        <AccountRows rows={Number(data.cost_of_sales) !== 0 ? data.expenses.filter(({ code }: any) => !COST_OF_SALES.includes(code)) : data.expenses} />
         <Total label="Total expenses" value={data.total_expenses} />
         <Total label="Net income" value={data.net_income} />
       </tbody>

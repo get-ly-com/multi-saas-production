@@ -22,6 +22,7 @@ function BillsApp() {
   const [accounts, setAccounts] = useState<any[]>([]);
   const [taxRates, setTaxRates] = useState<any[]>([]);
   const [costCenters, setCostCenters] = useState<any[]>([]);
+  const [items, setItems] = useState<any[]>([]);
   const [crediting, setCrediting] = useState<any>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState('');
@@ -31,19 +32,22 @@ function BillsApp() {
 
   const load = async () => {
     try {
-      const [billRows, vendorRows, accountRows, rateRows, centerRows] = await Promise.all([
+      const [billRows, vendorRows, accountRows, rateRows, centerRows, itemRows] = await Promise.all([
         api.get('/api/accounting/bills'),
         api.get('/api/accounting/vendors'),
         api.get('/api/accounting/accounts'),
         api.get('/api/accounting/tax-rates'),
-        api.get('/api/accounting/cost-centers')
+        api.get('/api/accounting/cost-centers'),
+        api.get('/api/inventory/items').catch(() => [])
       ]);
       setBills(billRows);
       setVendors(vendorRows);
       setTaxRates(rateRows);
       setCostCenters(centerRows);
+      setItems(itemRows);
+      // Inventory only moves with a stock item, so it isn't offered as a plain account
       setAccounts(accountRows.filter((account: any) =>
-        ['expense', 'asset'].includes(account.type) && account.is_active && !account.is_cash && !['1200', '1300', '1590'].includes(account.code)));
+        ['expense', 'asset'].includes(account.type) && account.is_active && !account.is_cash && !['1200', '1300', '1400', '1590'].includes(account.code)));
       setError('');
     } catch (err: any) {
       setError(err.message);
@@ -147,7 +151,7 @@ function BillsApp() {
         <p className="muted">Bills need a vendor. <Link href="/saas/accounting/vendors">Add your first vendor</Link>.</p>
       )}
 
-      {form && <BillForm initial={form} vendors={vendors} accounts={accounts} taxRates={taxRates} costCenters={costCenters} onClose={() => setForm(null)} onSaved={load} />}
+      {form && <BillForm initial={form} vendors={vendors} accounts={accounts} items={items} taxRates={taxRates} costCenters={costCenters} onClose={() => setForm(null)} onSaved={load} />}
       {paying && (
         <PaymentForm
           target={{ bill_id: paying.id }}
@@ -243,7 +247,7 @@ function VendorCreditForm({ bill, accounts, onClose, onSaved }: { bill: any; acc
   );
 }
 
-function BillForm({ initial, vendors, accounts, taxRates, costCenters, onClose, onSaved }: { initial: any; vendors: any[]; accounts: any[]; taxRates: any[]; costCenters: any[]; onClose: () => void; onSaved: () => void }) {
+function BillForm({ initial, vendors, accounts, items, taxRates, costCenters, onClose, onSaved }: { initial: any; vendors: any[]; accounts: any[]; items: any[]; taxRates: any[]; costCenters: any[]; onClose: () => void; onSaved: () => void }) {
   const [form, setForm] = useState<any>(initial);
   const [error, setError] = useState('');
   const set = (field: string, value: unknown) => setForm({ ...form, [field]: value });
@@ -251,6 +255,18 @@ function BillForm({ initial, vendors, accounts, taxRates, costCenters, onClose, 
 
   const setLine = (index: number, field: string, value: string) =>
     set('line_items', form.line_items.map((line: any, i: number) => (i === index ? { ...line, [field]: value } : line)));
+
+  // One choice covers both: a stock item (posted to Inventory) or an account
+  const lineTarget = (line: any) => (line.item_id ? `item:${line.item_id}` : line.account_id);
+  const setTarget = (index: number, value: string) =>
+    set('line_items', form.line_items.map((line: any, i: number) => {
+      if (i !== index) return line;
+      if (value.startsWith('item:')) {
+        const item = items.find(({ id }) => id === value.slice(5));
+        return { ...line, item_id: value.slice(5), account_id: '', quantity: line.quantity || '1', description: line.description || item?.name || '' };
+      }
+      return { ...line, item_id: '', quantity: '', account_id: value };
+    }));
 
   const subtotal = form.line_items.reduce((sum: number, line: any) => sum + Number(line.amount || 0), 0);
   const tax = form.line_items.reduce((sum: number, line: any) => {
@@ -298,10 +314,20 @@ function BillForm({ initial, vendors, accounts, taxRates, costCenters, onClose, 
           {form.line_items.map((line: any, index: number) => (
             <div className="bill-line" key={index}>
               <input aria-label="Description" placeholder="Description" value={line.description || ''} onChange={(e) => setLine(index, 'description', e.target.value)} />
-              <select required aria-label="Account" value={line.account_id} onChange={(e) => setLine(index, 'account_id', e.target.value)}>
-                <option value="">Choose an account</option>
-                {accounts.map((account) => <option key={account.id} value={account.id}>{account.code} {account.name}</option>)}
+              <select required aria-label="Account or stock item" value={lineTarget(line)} onChange={(e) => setTarget(index, e.target.value)}>
+                <option value="">Choose an account or item</option>
+                {items.length > 0 && (
+                  <optgroup label="Stock items (to Inventory)">
+                    {items.map((item) => <option key={item.id} value={`item:${item.id}`}>{item.sku} {item.name}</option>)}
+                  </optgroup>
+                )}
+                <optgroup label="Accounts">
+                  {accounts.map((account) => <option key={account.id} value={account.id}>{account.code} {account.name}</option>)}
+                </optgroup>
               </select>
+              {line.item_id
+                ? <input required aria-label="Quantity" placeholder="Qty" type="number" min="1" step="1" value={line.quantity} onChange={(e) => setLine(index, 'quantity', e.target.value)} />
+                : <span />}
               <input required aria-label="Amount" placeholder="Amount" type="number" min="0.01" step="0.01" value={line.amount} onChange={(e) => setLine(index, 'amount', e.target.value)} />
               <select aria-label="Tax" value={line.tax_rate_id || ''} onChange={(e) => setLine(index, 'tax_rate_id', e.target.value)}>
                 <option value="">No tax</option>

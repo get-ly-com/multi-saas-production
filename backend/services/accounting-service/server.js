@@ -72,7 +72,22 @@ const parseBillLines = (lineItems) => {
     throw new Error('Add at least one line');
   }
 
-  return lineItems.map(({ description, account_id, amount, tax_rate_id, cost_center_id }) => {
+  // A stock line names the item and quantity, and the database posts it to Inventory
+  return lineItems.map(({ description, account_id, amount, tax_rate_id, cost_center_id, item_id, quantity }) => {
+    if (item_id) {
+      const qty = Number(quantity);
+      if (!UUID.test(item_id) || !Number.isInteger(qty) || qty <= 0 || !(Number(amount) > 0)) {
+        throw new Error('Each stock line needs an item, a whole quantity and an amount');
+      }
+      return {
+        description: description || null,
+        item_id,
+        quantity: qty,
+        amount: Number(amount),
+        tax_rate_id: tax_rate_id || null,
+        cost_center_id: cost_center_id || null
+      };
+    }
     if (!UUID.test(account_id || '') || !(Number(amount) > 0)) {
       throw new Error('Each line needs an account and an amount');
     }
@@ -142,7 +157,15 @@ app.get('/invoices/:id', async (req, res) => {
 
     if (error) throw error;
     if (!data) return res.status(404).json({ error: 'Invoice not found' });
-    res.json(data);
+
+    // What the stock on this invoice cost, so the page can show gross profit
+    const { data: moves, error: moveError } = await req.db.schema('inventory')
+      .from('movements')
+      .select('cost')
+      .eq('invoice_id', data.id)
+      .eq('tenant_id', req.tenantId);
+    if (moveError) throw moveError;
+    res.json({ ...data, stock_cost: -moves.reduce((sum, move) => sum + Number(move.cost), 0) });
   } catch (error) {
     sendError(res, error);
   }
