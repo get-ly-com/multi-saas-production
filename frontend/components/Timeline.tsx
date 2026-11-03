@@ -1,4 +1,5 @@
 import { FormEvent, ReactNode, useEffect, useState } from 'react';
+import EmailForm from '@/components/EmailForm';
 import { CRM_SAVED, api, formatDate, today } from '@/lib/api';
 
 const KINDS = [
@@ -15,6 +16,7 @@ export default function Timeline({ links, extra = [], onChange }: { links: Links
   const [items, setItems] = useState<any[]>([]);
   const [form, setForm] = useState({ kind: 'note', subject: '', body: '', due_on: '' });
   const [error, setError] = useState('');
+  const [emailing, setEmailing] = useState(false);
   const query = new URLSearchParams(links as Record<string, string>).toString();
 
   const load = async () => {
@@ -60,7 +62,10 @@ export default function Timeline({ links, extra = [], onChange }: { links: Links
 
   return (
     <div className="card">
-      <h2>Timeline</h2>
+      <div className="page-head">
+        <h2>Timeline</h2>
+        {(links.contact_id || links.lead_id || links.deal_id) && <button onClick={() => setEmailing(true)}>Send email</button>}
+      </div>
       <form onSubmit={add}>
         <div className="tabs">
           {KINDS.map(({ id, name }) => (
@@ -84,6 +89,7 @@ export default function Timeline({ links, extra = [], onChange }: { links: Links
         {entries.length === 0 && <p className="empty">Nothing logged yet</p>}
         {entries.map(({ id, content }) => <div key={id}>{content}</div>)}
       </div>
+      {emailing && <EmailForm links={{ contact_id: links.contact_id, lead_id: links.lead_id, deal_id: links.deal_id }} onClose={() => setEmailing(false)} />}
     </div>
   );
 }

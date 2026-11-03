@@ -2,6 +2,7 @@ import { FormEvent, useEffect, useState } from 'react';
 import AppShell from '@/components/AppShell';
 import CrmNav from '@/components/CrmNav';
 import CustomFieldSettings from '@/components/CustomFieldSettings';
+import EmailSettings from '@/components/EmailSettings';
 import LeadSettings from '@/components/LeadSettings';
 import { api } from '@/lib/api';
 
@@ -138,6 +139,7 @@ function SettingsApp() {
       )}
 
       <LeadSettings />
+      <EmailSettings />
       <CustomFieldSettings />
     </div>
   );

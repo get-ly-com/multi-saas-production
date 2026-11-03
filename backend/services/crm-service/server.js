@@ -495,4 +495,87 @@ app.post('/pipelines', callCrm('save_pipeline', (req) => ({
 })));
 app.delete('/pipelines/:id', callCrm('delete_pipeline', (req) => ({ p_pipeline: req.params.id })));
 
+// Email. The database checks who may be emailed and the limits; the provider only sends.
+const emailReady = () => Boolean(process.env.RESEND_API_KEY && process.env.EMAIL_FROM);
+
+// The company name shows as the sender, so nothing in it may break the header
+const senderName = (name) => `"${String(name || 'Get-ly').replace(/["\\<>\r\n]/g, '').slice(0, 80)}"`;
+
+const sendThroughProvider = async (email) => {
+  try {
+    const response = await fetch(process.env.EMAIL_API_URL || 'https://api.resend.com/emails', {
+      method: 'POST',
+      headers: { Authorization: `Bearer ${process.env.RESEND_API_KEY}`, 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        from: `${senderName(email.from_name)} <${process.env.EMAIL_FROM}>`,
+        to: [email.to],
+        subject: email.subject,
+        text: email.body,
+        ...(email.reply_to ? { reply_to: email.reply_to } : {})
+      }),
+      signal: AbortSignal.timeout(15000)
+    });
+    const result = await response.json().catch(() => ({}));
+    if (!response.ok) return { error: result.message || `The email service answered ${response.status}` };
+    return { id: result.id || null };
+  } catch (error) {
+    return { error: error.name === 'TimeoutError' ? 'The email service took too long to answer' : 'Could not reach the email service' };
+  }
+};
+
+app.get('/emails/status', async (req, res) => {
+  try {
+    const { data, error } = await crm(req).rpc('email_usage', { p_tenant: req.tenantId });
+    if (error) throw error;
+    res.json({ configured: emailReady(), ...data });
+  } catch (error) {
+    sendError(res, error);
+  }
+});
+
+app.post('/emails', async (req, res) => {
+  try {
+    if (!emailReady()) return res.status(503).json({ error: "Email sending isn't set up yet" });
+    const { contact_id, lead_id, deal_id, to, subject, body } = req.body;
+    const { data: email, error } = await crm(req).rpc('start_email', {
+      p_tenant: req.tenantId,
+      p_contact: optional(contact_id),
+      p_lead: optional(lead_id),
+      p_deal: optional(deal_id),
+      p_to: optional(to),
+      p_subject: typeof subject === 'string' ? subject : null,
+      p_body: typeof body === 'string' ? body : null
+    });
+    if (error) throw error;
+
+    const sent = await sendThroughProvider(email);
+    const { data: result, error: finishError } = await crm(req).rpc('finish_email', {
+      p_tenant: req.tenantId,
+      p_email: email.id,
+      p_provider_id: sent.id || null,
+      p_error: sent.error || null
+    });
+    if (finishError) throw finishError;
+    if (result.status === 'failed') return res.status(502).json({ error: `The email wasn't sent: ${result.error}` });
+    res.status(201).json({ ...result, to: email.to });
+  } catch (error) {
+    sendError(res, error);
+  }
+});
+
+const templates = (req) => crm(req).from('email_templates');
+const templateFields = (body) => {
+  if (body.name !== undefined && !String(body.name).trim()) throw new Error('Name the template');
+  if (body.subject !== undefined && !String(body.subject).trim()) throw new Error('Enter a subject');
+  if (body.body !== undefined && !String(body.body).trim()) throw new Error('Write the message');
+  return pick(body, { name: (value) => String(value).trim(), subject: (value) => String(value).trim(), body: (value) => String(value) });
+};
+app.get('/email-templates', list((req) => templates(req).select('*').eq('tenant_id', req.tenantId).order('name')));
+app.post('/email-templates', create(templates, '*', (body) => {
+  if (!body.name || !body.subject || !body.body) throw new Error('A template needs a name, subject and message');
+  return templateFields(body);
+}));
+app.put('/email-templates/:id', update(templates, '*', (body) => ({ ...templateFields(body), updated_at: new Date().toISOString() }), 'Template'));
+app.delete('/email-templates/:id', remove(templates, 'Template'));
+
 app.listen(PORT, () => console.log(`👥 CRM Service running on port ${PORT}`));
