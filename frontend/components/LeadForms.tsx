@@ -3,6 +3,7 @@ import { FormEvent, useEffect, useState } from 'react';
 import { Actions, OwnerField, useForm, useTeam } from '@/components/CrmForms';
 import { CustomInputs, useCustomFields } from '@/components/CustomFields';
 import Modal from '@/components/Modal';
+import { TagPicker, useTags } from '@/components/Tags';
 import { api } from '@/lib/api';
 
 export const SOURCES = ['Web form', 'Referral', 'Event', 'Cold call', 'Advertising', 'Import'];
@@ -16,10 +17,11 @@ export const statusBadge: Record<string, string> = { new: 'open', working: 'sent
 export function LeadForm({ initial, onClose, onSaved }: { initial?: any; onClose: () => void; onSaved: (result?: any) => void }) {
   const members = useTeam();
   const fields = useCustomFields('lead');
+  const tags = useTags();
   const { form, set, error, submit } = useForm(
-    { name: '', email: '', phone: '', company_name: '', job_title: '', source: '', owner_id: '', notes: '', custom: {}, ...initial },
-    ({ id, name, email, phone, company_name, job_title, source, owner_id, notes, custom }) => {
-      const body = { name, email, phone, company_name, job_title, source, owner_id, notes, custom };
+    { name: '', email: '', phone: '', company_name: '', job_title: '', source: '', owner_id: '', notes: '', custom: {}, tags: [], ...initial },
+    ({ id, name, email, phone, company_name, job_title, source, owner_id, notes, custom, tags }) => {
+      const body = { name, email, phone, company_name, job_title, source, owner_id, notes, custom, tags: tags || [] };
       return id ? api.put(`/api/crm/leads/${id}`, body) : api.post('/api/crm/leads', body);
     },
     onClose,
@@ -43,6 +45,7 @@ export function LeadForm({ initial, onClose, onSaved }: { initial?: any; onClose
           <CustomInputs fields={fields} values={form.custom} onChange={(custom) => set('custom', custom)} />
         </div>
         <label style={{ marginTop: 12 }}>Notes<textarea rows={3} value={form.notes || ''} onChange={(e) => set('notes', e.target.value)} /></label>
+        <TagPicker value={form.tags} onChange={(ids) => set('tags', ids)} tags={tags} />
         <Actions error={error} onClose={onClose} />
       </form>
     </Modal>

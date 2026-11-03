@@ -6,8 +6,10 @@ import { useTeam } from '@/components/CrmForms';
 import { useCustomFields } from '@/components/CustomFields';
 import { LeadForm, SOURCES, scoreBadge, scoreLabel, statusBadge, statusLabel } from '@/components/LeadForms';
 import SavedViews, { Filters, ListFilters, matchesFilters } from '@/components/SavedViews';
+import BulkBar, { useSelection } from '@/components/BulkBar';
+import { TagChips, TagFilter, tagNames, useTags } from '@/components/Tags';
 import { api, formatDate } from '@/lib/api';
-import { readPeople } from '@/lib/csv';
+import { downloadCsv, readPeople } from '@/lib/csv';
 
 export default function Leads() {
   return <AppShell><LeadsApp /></AppShell>;
@@ -16,6 +18,7 @@ export default function Leads() {
 function LeadsApp() {
   const members = useTeam();
   const fields = useCustomFields('lead');
+  const tags = useTags();
   const [leads, setLeads] = useState<any[]>([]);
   const [filters, setFilters] = useState<Filters>({ status: 'open' });
   const [loading, setLoading] = useState(true);
@@ -64,6 +67,16 @@ function LeadsApp() {
       return matchesFilters(lead, filters, fields, [lead.name, lead.email, lead.company_name, lead.phone]);
     })
     .sort((a, b) => b.score - a.score);
+  const selection = useSelection(visible.map(({ id }) => id));
+  const ownerName = (id: string) => members.find(({ user_id }) => user_id === id)?.email || (id ? 'Former member' : 'Unassigned');
+
+  const exportCsv = () => {
+    const rows = selection.selected.length ? visible.filter(({ id }) => selection.has(id)) : visible;
+    downloadCsv(`leads-${new Date().toISOString().slice(0, 10)}.csv`, [
+      ['Name', 'Company', 'Job title', 'Email', 'Phone', 'Score', 'Status', 'Source', 'Campaign', 'Owner', 'Tags', 'Added'],
+      ...rows.map((row) => [row.name, row.company_name, row.job_title, row.email, row.phone, row.score, statusLabel[row.status], row.source, row.campaign, ownerName(row.owner_id), tagNames(row.tags, tags), formatDate(row.created_at)])
+    ]);
+  };
 
   return (
     <div className="stack">
@@ -72,6 +85,7 @@ function LeadsApp() {
         <h1>Leads</h1>
         <div className="row-actions">
           <label className="button">Import CSV<input type="file" accept=".csv,text/csv" hidden onChange={importFile} /></label>
+          <button disabled={!visible.length} onClick={exportCsv}>{selection.selected.length ? 'Export selected' : 'Export CSV'}</button>
           <button className="primary" onClick={() => setAdding(true)}>New lead</button>
         </div>
       </div>
@@ -107,24 +121,30 @@ function LeadsApp() {
               {sources.map((source) => <option key={source}>{source}</option>)}
             </select>
           </label>
+          <TagFilter value={filters.tag || ''} onChange={(tag) => set('tag', tag)} tags={tags} />
           <ListFilters filters={filters} onChange={setFilters} members={members} fields={fields} />
         </div>
       </div>
 
+      <BulkBar entity="lead" selected={selection.selected} onClear={selection.clear} tags={tags} members={members}
+        onDone={async (message) => { setNotice(message); await load(); }} />
+
       <div className="card table-wrap">
         {loading ? <p className="empty">Loading…</p> : (
           <table>
-            <thead><tr><th>Name</th><th>Company</th><th className="num">Score</th><th>Status</th><th>Source</th><th>Owner</th><th>Added</th></tr></thead>
+            <thead><tr><th className="pick"><input type="checkbox" aria-label="Select all shown" checked={selection.all} onChange={selection.toggleAll} /></th><th>Name</th><th>Company</th><th className="num">Score</th><th>Status</th><th>Source</th><th>Owner</th><th>Tags</th><th>Added</th></tr></thead>
             <tbody>
-              {visible.length === 0 && <tr><td colSpan={7} className="empty">{leads.length ? 'No matches' : 'No leads yet'}</td></tr>}
+              {visible.length === 0 && <tr><td colSpan={9} className="empty">{leads.length ? 'No matches' : 'No leads yet'}</td></tr>}
               {visible.map((lead) => (
-                <tr key={lead.id}>
+                <tr key={lead.id} className={selection.has(lead.id) ? 'picked' : ''}>
+                  <td className="pick"><input type="checkbox" aria-label={`Select ${lead.name}`} checked={selection.has(lead.id)} onChange={() => selection.toggle(lead.id)} /></td>
                   <td className="wrap"><Link href={`/saas/crm/lead/${lead.id}`}>{lead.name}</Link></td>
                   <td className="wrap">{lead.company_name || '—'}</td>
                   <td className="num">{lead.score} <span className={`badge ${scoreBadge(lead.score)}`}>{scoreLabel(lead.score)}</span></td>
                   <td><span className={`badge ${statusBadge[lead.status]}`}>{statusLabel[lead.status]}</span></td>
                   <td>{lead.source || '—'}</td>
-                  <td>{members.find(({ user_id }) => user_id === lead.owner_id)?.email || (lead.owner_id ? 'Former member' : 'Unassigned')}</td>
+                  <td>{ownerName(lead.owner_id)}</td>
+                  <td className="wrap"><TagChips ids={lead.tags} tags={tags} /></td>
                   <td>{formatDate(lead.created_at)}</td>
                 </tr>
               ))}

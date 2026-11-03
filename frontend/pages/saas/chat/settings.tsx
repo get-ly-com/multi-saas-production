@@ -1,11 +1,22 @@
 import { FormEvent, useEffect, useState } from 'react';
 import AppShell from '@/components/AppShell';
-import ChatNav from '@/components/ChatNav';
+import ChatNav, { PRIORITY } from '@/components/ChatNav';
 import { api } from '@/lib/api';
 
 export default function ChatSettingsPage() {
   return <AppShell><ChatSettings /></AppShell>;
 }
+
+const DAYS = ['Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday', 'Sunday'];
+
+// The browser's list of time zones, where it has one
+const timeZones = (): string[] => {
+  try {
+    return (Intl as any).supportedValuesOf?.('timeZone') || ['UTC'];
+  } catch {
+    return ['UTC'];
+  }
+};
 
 const linkFor = (key: string) => (typeof window === 'undefined' ? '' : `${window.location.origin}/chat/${key}`);
 
@@ -49,7 +60,13 @@ function ChatSettings() {
         welcome_message: form.welcome_message,
         handoff_message: form.handoff_message,
         opening_hours: form.opening_hours,
-        colour: form.colour
+        colour: form.colour,
+        hours_enabled: form.hours_enabled,
+        hours_timezone: form.hours_timezone,
+        weekly_hours: form.weekly_hours,
+        offline_message: form.offline_message,
+        ask_rating: form.ask_rating,
+        sla_hours: form.sla_hours
       });
       setForm(saved);
       setNotice('Saved');
@@ -99,6 +116,53 @@ function ChatSettings() {
           <label>When the bot hands over to a person, it says<textarea rows={2} maxLength={500} required value={form.handoff_message} onChange={(e) => set('handoff_message', e.target.value)} /></label>
           <label>Opening hours (shown to visitors)<input maxLength={200} placeholder="Mon to Fri, 9am to 5pm" value={form.opening_hours} onChange={(e) => set('opening_hours', e.target.value)} /></label>
           <label className="chat-colour">Colour<input type="color" value={form.colour} onChange={(e) => set('colour', e.target.value)} /></label>
+
+          <h2>When your team is in</h2>
+          <label className="check"><input type="checkbox" checked={form.hours_enabled} onChange={(e) => set('hours_enabled', e.target.checked)} /> Use these hours</label>
+          <p className="muted">Outside them, the chat page says you're away and the bot asks for a name and email with the message below. The bot still answers what it can.</p>
+          {form.hours_enabled && (
+            <>
+              <label>Time zone
+                <input list="chat-time-zones" maxLength={64} value={form.hours_timezone} onChange={(e) => set('hours_timezone', e.target.value)} />
+              </label>
+              <datalist id="chat-time-zones">{timeZones().map((zone) => <option key={zone} value={zone} />)}</datalist>
+              <div className="chat-hours">
+                {DAYS.map((day, index) => {
+                  const hours = form.weekly_hours?.[index];
+                  const setDay = (value: any) => set('weekly_hours', form.weekly_hours.map((old: any, at: number) => (at === index ? value : old)));
+                  return (
+                    <div key={day} className="chat-hours-row">
+                      <label className="check"><input type="checkbox" checked={Boolean(hours)}
+                        onChange={(e) => setDay(e.target.checked ? { from: '09:00', to: '17:00' } : null)} /> {day}</label>
+                      {hours ? (
+                        <>
+                          <input type="time" aria-label={`${day} opens`} value={hours.from} onChange={(e) => setDay({ ...hours, from: e.target.value })} />
+                          <span>to</span>
+                          <input type="time" aria-label={`${day} closes`} value={hours.to === '24:00' ? '23:59' : hours.to}
+                            onChange={(e) => setDay({ ...hours, to: e.target.value })} />
+                        </>
+                      ) : <span className="muted">Closed</span>}
+                    </div>
+                  );
+                })}
+              </div>
+            </>
+          )}
+          <label>When your team is away, the chat says<textarea rows={2} maxLength={500} required value={form.offline_message} onChange={(e) => set('offline_message', e.target.value)} /></label>
+
+          <h2>Ratings</h2>
+          <label className="check"><input type="checkbox" checked={form.ask_rating} onChange={(e) => set('ask_rating', e.target.checked)} /> Ask visitors to rate the chat when it's closed</label>
+
+          <h2>Ticket response targets</h2>
+          <p className="muted">Hours to deal with a ticket, counted from when it was opened. 0 means no target.</p>
+          <div className="form-grid">
+            {Object.entries(PRIORITY).reverse().map(([level, label]) => (
+              <label key={level}>{label}
+                <input type="number" min={0} max={720} step={1} value={form.sla_hours?.[level] ?? 0}
+                  onChange={(e) => set('sla_hours', { ...form.sla_hours, [level]: e.target.value })} />
+              </label>
+            ))}
+          </div>
         </fieldset>
         {error && <p className="error">{error}</p>}
         {notice && <p className="notice">{notice}</p>}

@@ -1,6 +1,8 @@
+import Link from 'next/link';
 import { FormEvent, useEffect, useState } from 'react';
 import AppShell from '@/components/AppShell';
 import HrNav from '@/components/HrNav';
+import Modal from '@/components/Modal';
 import { api, formatDate } from '@/lib/api';
 
 export default function HrSettings() {
@@ -42,7 +44,7 @@ function SettingsApp() {
     try {
       await work();
       await load();
-      setNotice(done);
+      if (done) setNotice(done);
       return true;
     } catch (err: any) {
       setError(err.message);
@@ -146,7 +148,15 @@ function SettingsApp() {
         </table>
         <NewNamed fields={[{ name: 'holiday_date', type: 'date', label: 'Date' }, { name: 'name', label: 'Name' }]} onAdd={(body) => run(() => api.post('/api/hr/holidays', body))} />
         <p className="muted">Holidays aren't counted as leave days or working days.</p>
+        <PublicHolidays onImport={(body) => run(async () => {
+          const result = await api.post('/api/hr/public-holidays/import', body);
+          setNotice(`Added ${result.added} holidays${result.skipped ? `, ${result.skipped} were already there` : ''}.`);
+        })} />
       </div>
+
+      <ExpenseCategories />
+      <Checklists />
+      <KioskSignIn current={rates.kiosk_user_id || ''} onSave={(userId) => run(() => api.put('/api/hr/settings/kiosk', { user_id: userId || null }), 'Kiosk sign-in saved.')} />
 
       <div className="card table-wrap">
         <h2>Departments</h2>
@@ -211,6 +221,294 @@ function NewLeaveType({ onAdd }: { onAdd: (body: any) => Promise<boolean> }) {
       <label className="check" style={{ marginTop: 0 }}>Carry over <input aria-label="Days that carry over to next year" title="Unused days that move to next year (0 for none)" type="number" min="0" max="366" step="0.5" value={form.max_carry_over} onChange={(e) => setForm({ ...form, max_carry_over: e.target.value })} /></label>
       <label className="check" style={{ marginTop: 0 }}><input type="checkbox" checked={form.paid} onChange={(e) => setForm({ ...form, paid: e.target.checked })} /> Paid</label>
       <button>Add</button>
+    </form>
+  );
+}
+
+// Works out a country's public holidays for a year and adds the chosen ones
+function PublicHolidays({ onImport }: { onImport: (body: any) => Promise<boolean> }) {
+  const [countries, setCountries] = useState<any[]>([]);
+  const [country, setCountry] = useState('');
+  const [year, setYear] = useState(String(new Date().getFullYear()));
+  const [list, setList] = useState<any[] | null>(null);
+  const [skip, setSkip] = useState<string[]>([]);
+  const [error, setError] = useState('');
+
+  useEffect(() => {
+    api.get('/api/hr/public-holidays/countries').then((rows) => {
+      setCountries(rows);
+      setCountry(rows[0]?.code || '');
+    }).catch((err) => setError(err.message));
+  }, []);
+
+  const preview = async (event: FormEvent) => {
+    event.preventDefault();
+    setError('');
+    try {
+      setList(await api.get(`/api/hr/public-holidays?country=${country}&year=${year}`));
+      setSkip([]);
+    } catch (err: any) {
+      setError(err.message);
+    }
+  };
+
+  const add = async () => {
+    if (await onImport({ country, year: Number(year), skip })) setList(null);
+  };
+
+  return (
+    <div style={{ marginTop: 16 }}>
+      <h3>Add public holidays</h3>
+      <form className="row-actions" style={{ justifyContent: 'flex-start' }} onSubmit={preview}>
+        <select aria-label="Country" value={country} onChange={(e) => setCountry(e.target.value)}>
+          {countries.map((row) => <option key={row.code} value={row.code}>{row.name}</option>)}
+        </select>
+        <input aria-label="Year" type="number" min="2000" max="2100" value={year} onChange={(e) => setYear(e.target.value)} />
+        <button>Show holidays</button>
+      </form>
+      {error && <p className="error">{error}</p>}
+      {list && (
+        <>
+          <table>
+            <tbody>
+              {list.map((row) => (
+                <tr key={row.date}>
+                  <td><input type="checkbox" aria-label={`Add ${row.name}`} checked={!skip.includes(row.date)}
+                    onChange={(e) => setSkip(e.target.checked ? skip.filter((value) => value !== row.date) : [...skip, row.date])} /></td>
+                  <td>{formatDate(row.date)}</td>
+                  <td>{row.name}</td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+          <div className="form-actions">
+            <button className="primary" disabled={skip.length === list.length} onClick={add}>Add {list.length - skip.length} holidays</button>
+            <button onClick={() => setList(null)}>Cancel</button>
+          </div>
+        </>
+      )}
+      <p className="muted">National holidays only. Add regional ones (like a German state&apos;s or a US state&apos;s) by hand. Dates already on your list are left as they are.</p>
+    </div>
+  );
+}
+
+// Expense claim categories and the ledger account each one books to
+function ExpenseCategories() {
+  const [rows, setRows] = useState<any[]>([]);
+  const [accounts, setAccounts] = useState<any[]>([]);
+  const [name, setName] = useState('');
+  const [error, setError] = useState('');
+
+  const load = async () => {
+    try {
+      setRows(await api.get('/api/hr/expense-categories'));
+    } catch (err: any) {
+      setError(err.message);
+    }
+  };
+
+  useEffect(() => {
+    load();
+    api.get('/api/accounting/accounts')
+      .then((list) => setAccounts(list.filter((row: any) => row.type === 'expense' && row.is_active !== false)))
+      .catch(() => setAccounts([]));
+  }, []);
+
+  const save = async (row: any, changes: any) => {
+    setError('');
+    try {
+      await api.put(`/api/hr/expense-categories/${row.id}`, { name: row.name, account_id: row.account_id || null, ...changes });
+      await load();
+    } catch (err: any) {
+      setError(err.message);
+    }
+  };
+
+  const add = async (event: FormEvent) => {
+    event.preventDefault();
+    setError('');
+    try {
+      await api.post('/api/hr/expense-categories', { name });
+      setName('');
+      await load();
+    } catch (err: any) {
+      setError(err.message);
+    }
+  };
+
+  return (
+    <div className="card table-wrap">
+      <h2>Expense categories</h2>
+      {error && <p className="error">{error}</p>}
+      <table>
+        <thead><tr><th>Name</th><th>Books to</th><th>In use</th><th /></tr></thead>
+        <tbody>
+          {rows.map((row) => (
+            <tr key={row.id}>
+              <td>{row.name}</td>
+              <td>
+                <select aria-label={`Account for ${row.name}`} value={row.account_id || ''} onChange={(e) => save(row, { account_id: e.target.value || null })}>
+                  <option value="">6000 General Expenses</option>
+                  {accounts.filter((account) => account.code !== '6000').map((account) => <option key={account.id} value={account.id}>{account.code} {account.name}</option>)}
+                </select>
+              </td>
+              <td>{row.is_active ? 'Yes' : 'Turned off'}</td>
+              <td><div className="row-actions">
+                <button onClick={() => { const next = window.prompt('New name', row.name); if (next) save(row, { name: next }); }}>Rename</button>
+                <button onClick={() => save(row, { is_active: !row.is_active })}>{row.is_active ? 'Turn off' : 'Turn on'}</button>
+              </div></td>
+            </tr>
+          ))}
+        </tbody>
+      </table>
+      <form className="row-actions" style={{ justifyContent: 'flex-start', marginTop: 12 }} onSubmit={add}>
+        <input aria-label="Name" placeholder="Name, like Mileage" required maxLength={60} value={name} onChange={(e) => setName(e.target.value)} />
+        <button>Add</button>
+      </form>
+      <p className="muted">When a claim is approved, its category&apos;s account is charged and 2510 Expenses to Reimburse shows what you owe the person until it&apos;s paid.</p>
+    </div>
+  );
+}
+
+const STEP_WHO: Record<string, string> = { hr: 'HR', manager: 'Their manager', employee: 'The person' };
+
+// Onboarding and offboarding checklists that can be started on anyone's record
+function Checklists() {
+  const [rows, setRows] = useState<any[]>([]);
+  const [editing, setEditing] = useState<any>(null);
+  const [error, setError] = useState('');
+
+  const load = async () => {
+    try {
+      setRows(await api.get('/api/hr/checklists'));
+    } catch (err: any) {
+      setError(err.message);
+    }
+  };
+
+  useEffect(() => {
+    load();
+  }, []);
+
+  const remove = async (row: any) => {
+    if (!window.confirm(`Delete the ${row.name} checklist? Steps already started on people stay.`)) return;
+    try {
+      await api.delete(`/api/hr/checklists/${row.id}`);
+      await load();
+    } catch (err: any) {
+      setError(err.message);
+    }
+  };
+
+  return (
+    <div className="card table-wrap">
+      <h2>Onboarding and offboarding checklists</h2>
+      {error && <p className="error">{error}</p>}
+      <table>
+        <thead><tr><th>Name</th><th>For</th><th className="num">Steps</th><th /></tr></thead>
+        <tbody>
+          {rows.length === 0 && <tr><td colSpan={4} className="empty">No checklists yet</td></tr>}
+          {rows.map((row) => (
+            <tr key={row.id}>
+              <td>{row.name}</td>
+              <td>{row.kind === 'onboarding' ? 'New starters' : 'Leavers'}</td>
+              <td className="num">{row.items.length}</td>
+              <td><div className="row-actions">
+                <button onClick={() => setEditing(row)}>Edit</button>
+                <button className="danger" onClick={() => remove(row)}>Delete</button>
+              </div></td>
+            </tr>
+          ))}
+        </tbody>
+      </table>
+      <div className="form-actions"><button onClick={() => setEditing({ kind: 'onboarding', name: '', items: [{ title: '', days: 0, who: 'hr' }] })}>New checklist</button></div>
+      <p className="muted">Start one from a person&apos;s record. Each step is due a number of days before (minus) or after their start date or last day.</p>
+      {editing && <ChecklistForm initial={editing} onClose={() => setEditing(null)} onSaved={load} />}
+    </div>
+  );
+}
+
+function ChecklistForm({ initial, onClose, onSaved }: { initial: any; onClose: () => void; onSaved: () => void }) {
+  const [form, setForm] = useState<any>({ ...initial, items: initial.items.map((item: any) => ({ ...item })) });
+  const [error, setError] = useState('');
+  const setItem = (index: number, field: string, value: any) =>
+    setForm({ ...form, items: form.items.map((item: any, at: number) => (at === index ? { ...item, [field]: value } : item)) });
+
+  const submit = async (event: FormEvent) => {
+    event.preventDefault();
+    const body = { kind: form.kind, name: form.name, items: form.items.filter((item: any) => String(item.title).trim()) };
+    try {
+      if (form.id) await api.put(`/api/hr/checklists/${form.id}`, body);
+      else await api.post('/api/hr/checklists', body);
+      await onSaved();
+      onClose();
+    } catch (err: any) {
+      setError(err.message);
+    }
+  };
+
+  return (
+    <Modal title={form.id ? `Edit ${initial.name}` : 'New checklist'}>
+      <form onSubmit={submit}>
+        <div className="form-grid">
+          <label>Name<input required maxLength={100} value={form.name} onChange={(e) => setForm({ ...form, name: e.target.value })} /></label>
+          <label>For
+            <select value={form.kind} onChange={(e) => setForm({ ...form, kind: e.target.value })}>
+              <option value="onboarding">New starters (days from the start date)</option>
+              <option value="offboarding">Leavers (days from the last day)</option>
+            </select>
+          </label>
+        </div>
+        <h3>Steps</h3>
+        {form.items.map((item: any, index: number) => (
+          <div className="row-actions" key={index} style={{ justifyContent: 'flex-start', marginBottom: 8 }}>
+            <input aria-label="Step" placeholder="Step" maxLength={200} value={item.title} onChange={(e) => setItem(index, 'title', e.target.value)} style={{ flex: 1 }} />
+            <input aria-label="Days" title="Days before (minus) or after" type="number" min="-90" max="365" value={item.days} onChange={(e) => setItem(index, 'days', e.target.value)} style={{ width: 80 }} />
+            <select aria-label="Who" value={item.who} onChange={(e) => setItem(index, 'who', e.target.value)}>
+              {Object.entries(STEP_WHO).map(([value, label]) => <option key={value} value={value}>{label}</option>)}
+            </select>
+            <button type="button" onClick={() => setForm({ ...form, items: form.items.filter((_: any, at: number) => at !== index) })}>Remove</button>
+          </div>
+        ))}
+        <button type="button" onClick={() => setForm({ ...form, items: [...form.items, { title: '', days: 0, who: 'hr' }] })}>Add a step</button>
+        {error && <p className="error">{error}</p>}
+        <div className="form-actions">
+          <button className="primary">Save</button>
+          <button type="button" onClick={onClose}>Cancel</button>
+        </div>
+      </form>
+    </Modal>
+  );
+}
+
+// Besides owners and admins, one team member's sign-in may run the shared clock-in kiosk
+function KioskSignIn({ current, onSave }: { current: string; onSave: (userId: string) => Promise<boolean> }) {
+  const [members, setMembers] = useState<any[]>([]);
+  const [chosen, setChosen] = useState(current);
+
+  useEffect(() => {
+    api.get('/api/team').then((team) => setMembers(team.members || [])).catch(() => setMembers([]));
+  }, []);
+
+  useEffect(() => setChosen(current), [current]);
+
+  return (
+    <form className="card" onSubmit={(event) => { event.preventDefault(); onSave(chosen); }}>
+      <h2>Clock-in kiosk</h2>
+      <p className="muted">
+        Open <Link href="/saas/hr/kiosk">the kiosk</Link> on a tablet by the door. Staff clock in with their employee number and PIN.
+        For a shared tablet, invite a separate team member as a viewer, sign the tablet in with it and choose it here,
+        so the tablet isn&apos;t signed in as an owner or admin.
+      </p>
+      <div className="row-actions" style={{ justifyContent: 'flex-start' }}>
+        <select aria-label="Kiosk sign-in" value={chosen} onChange={(e) => setChosen(e.target.value)}>
+          <option value="">Only owners and admins</option>
+          {members.filter((member) => !['owner', 'admin'].includes(member.role)).map((member) => (
+            <option key={member.user_id} value={member.user_id}>{member.email} ({member.role})</option>
+          ))}
+        </select>
+        <button className="primary">Save</button>
+      </div>
     </form>
   );
 }

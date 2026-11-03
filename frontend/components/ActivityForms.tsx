@@ -1,0 +1,130 @@
+import { FormEvent, useState } from 'react';
+import { OwnerField, useTeam } from '@/components/CrmForms';
+import Modal from '@/components/Modal';
+import { api, formatDate, today } from '@/lib/api';
+
+// Activities that can be planned for a date
+export const PLANNED_KINDS = [
+  { id: 'call', name: 'Call' },
+  { id: 'meeting', name: 'Meeting' },
+  { id: 'email', name: 'Email' },
+  { id: 'task', name: 'To-do' }
+];
+
+export const kindName = (kind: string) =>
+  PLANNED_KINDS.find(({ id }) => id === kind)?.name || (kind === 'note' ? 'Note' : kind);
+
+// Overdue, today or later, the same way everywhere
+export const dueState = (activity: { due_on?: string | null; done_at?: string | null }) => {
+  if (activity.done_at) return 'done';
+  if (!activity.due_on) return 'later';
+  const now = today();
+  if (activity.due_on < now) return 'overdue';
+  if (activity.due_on === now) return 'today';
+  return 'later';
+};
+
+export const dueText = (activity: { due_on?: string | null; due_time?: string | null }) =>
+  activity.due_on ? `${formatDate(activity.due_on)}${activity.due_time ? ` ${activity.due_time.slice(0, 5)}` : ''}` : 'No date';
+
+export function NextActivity({ activity, empty = 'Nothing planned' }: { activity: any; empty?: string }) {
+  if (!activity) return <span className="next-activity none">{empty}</span>;
+  const state = dueState(activity);
+  return (
+    <span className={`next-activity ${state}`} title={state === 'overdue' ? 'Overdue' : state === 'today' ? 'Due today' : 'Planned'}>
+      {kindName(activity.kind)}: {activity.subject} · {dueText(activity)}
+    </span>
+  );
+}
+
+type NextStep = { kind: string; subject: string; due_on: string; due_time: string; owner_id: string };
+
+function NextStepFields({ value, onChange, members, emptyOwner }: { value: NextStep; onChange: (value: NextStep) => void; members: any[]; emptyOwner: string }) {
+  const set = (field: keyof NextStep, text: string) => onChange({ ...value, [field]: text });
+  return (
+    <div className="form-grid">
+      <label>Type
+        <select value={value.kind} onChange={(e) => set('kind', e.target.value)}>
+          {PLANNED_KINDS.map(({ id, name }) => <option key={id} value={id}>{name}</option>)}
+        </select>
+      </label>
+      <label>What<input required maxLength={200} value={value.subject} onChange={(e) => set('subject', e.target.value)} /></label>
+      <label>Date<input type="date" required value={value.due_on} onChange={(e) => set('due_on', e.target.value)} /></label>
+      <label>Time (optional)<input type="time" value={value.due_time} onChange={(e) => set('due_time', e.target.value)} /></label>
+      <OwnerField value={value.owner_id} members={members} onChange={(owner) => set('owner_id', owner)} empty={emptyOwner} />
+    </div>
+  );
+}
+
+const blankStep = (): NextStep => ({ kind: 'call', subject: '', due_on: today(), due_time: '', owner_id: '' });
+
+// Mark done, say how it went, and plan what comes next on the same record
+export function FinishForm({ activity, onClose, onSaved }: { activity: any; onClose: () => void; onSaved: () => void }) {
+  const members = useTeam();
+  const [feedback, setFeedback] = useState('');
+  const [planNext, setPlanNext] = useState(false);
+  const [next, setNext] = useState<NextStep>(blankStep());
+  const [error, setError] = useState('');
+  const linked = activity.deal_id || activity.lead_id || activity.contact_id || activity.company_id;
+
+  const submit = async (event: FormEvent) => {
+    event.preventDefault();
+    try {
+      await api.post(`/api/crm/activities/${activity.id}/finish`, { feedback, next: planNext ? next : null });
+      await onSaved();
+      onClose();
+    } catch (err: any) {
+      setError(err.message);
+    }
+  };
+
+  return (
+    <Modal title={`Done: ${activity.subject}`}>
+      <form onSubmit={submit} className="stack">
+        <label>How did it go? (optional)<textarea rows={3} maxLength={4000} value={feedback} onChange={(e) => setFeedback(e.target.value)} /></label>
+        {linked && (
+          <label className="check"><input type="checkbox" checked={planNext} onChange={(e) => setPlanNext(e.target.checked)} />Plan the next step</label>
+        )}
+        {planNext && <NextStepFields value={next} onChange={setNext} members={members} emptyOwner="Same person" />}
+        {error && <p className="error">{error}</p>}
+        <div className="form-actions">
+          <button className="primary">Mark done</button>
+          <button type="button" onClick={onClose}>Cancel</button>
+        </div>
+      </form>
+    </Modal>
+  );
+}
+
+// Plan a call, meeting, email or to-do on a record (or on its own)
+export function PlanForm({ links = {}, onClose, onSaved }: { links?: Record<string, string | undefined>; onClose: () => void; onSaved: () => void }) {
+  const members = useTeam();
+  const [step, setStep] = useState<NextStep>(blankStep());
+  const [body, setBody] = useState('');
+  const [error, setError] = useState('');
+
+  const submit = async (event: FormEvent) => {
+    event.preventDefault();
+    try {
+      await api.post('/api/crm/activities', { ...links, ...step, body });
+      await onSaved();
+      onClose();
+    } catch (err: any) {
+      setError(err.message);
+    }
+  };
+
+  return (
+    <Modal title="Plan an activity">
+      <form onSubmit={submit} className="stack">
+        <NextStepFields value={step} onChange={setStep} members={members} emptyOwner="Me" />
+        <label>Details (optional)<textarea rows={2} value={body} onChange={(e) => setBody(e.target.value)} /></label>
+        {error && <p className="error">{error}</p>}
+        <div className="form-actions">
+          <button className="primary">Plan it</button>
+          <button type="button" onClick={onClose}>Cancel</button>
+        </div>
+      </form>
+    </Modal>
+  );
+}

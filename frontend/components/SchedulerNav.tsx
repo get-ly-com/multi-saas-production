@@ -4,6 +4,8 @@ import { useRouter } from 'next/router';
 const SECTIONS = [
   { name: 'Bookings', path: '/saas/scheduler' },
   { name: 'Services', path: '/saas/scheduler/services' },
+  { name: 'Follow-up', path: '/saas/scheduler/follow-up' },
+  { name: 'Reports', path: '/saas/scheduler/reports' },
   { name: 'Hours', path: '/saas/scheduler/hours' },
   { name: 'Settings', path: '/saas/scheduler/settings' }
 ];
@@ -48,3 +50,15 @@ export const timeZones = (): string[] => {
     return ['UTC', 'Europe/London', 'Europe/Paris', 'America/New_York', 'America/Chicago', 'America/Los_Angeles', 'Asia/Karachi', 'Asia/Dubai', 'Asia/Kolkata', 'Asia/Singapore', 'Australia/Sydney'];
   }
 };
+
+// "Add to Google Calendar" needs no key: it opens Google's own new-event page filled in
+const googleTime = (iso: string) => new Date(iso).toISOString().replace(/[-:]/g, '').replace(/\.\d{3}/, '');
+export const googleCalendarLink = (title: string, startsAt: string, endsAt: string, details = '', location = '') => {
+  const params = new URLSearchParams({ action: 'TEMPLATE', text: title, dates: `${googleTime(startsAt)}/${googleTime(endsAt)}` });
+  if (details) params.set('details', details);
+  if (location) params.set('location', location);
+  return `https://calendar.google.com/calendar/render?${params}`;
+};
+
+export const placesText = (seatsLeft: number | null | undefined) =>
+  seatsLeft === null || seatsLeft === undefined ? '' : seatsLeft === 1 ? '1 place left' : `${seatsLeft} places left`;

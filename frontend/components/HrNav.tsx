@@ -3,7 +3,10 @@ import { useRouter } from 'next/router';
 
 const SECTIONS = [
   { name: 'People', path: '/saas/hr' },
+  { name: 'Org chart', path: '/saas/hr/org-chart' },
   { name: 'Leave', path: '/saas/hr/leave' },
+  { name: 'Attendance', path: '/saas/hr/attendance' },
+  { name: 'Expenses', path: '/saas/hr/expenses' },
   { name: 'Payroll', path: '/saas/hr/payroll' },
   { name: 'Settings', path: '/saas/hr/settings' }
 ];

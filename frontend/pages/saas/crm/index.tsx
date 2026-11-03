@@ -2,6 +2,7 @@ import Link from 'next/link';
 import { useEffect, useState } from 'react';
 import AppShell from '@/components/AppShell';
 import CrmNav from '@/components/CrmNav';
+import { FinishForm, kindName } from '@/components/ActivityForms';
 import { DealForm } from '@/components/CrmForms';
 import { scoreBadge, scoreLabel } from '@/components/LeadForms';
 import { api, formatDate, money, today } from '@/lib/api';
@@ -18,6 +19,7 @@ function TodayApp() {
   const [leads, setLeads] = useState<any>(null);
   const [error, setError] = useState('');
   const [adding, setAdding] = useState(false);
+  const [finishing, setFinishing] = useState<any>(null);
 
   const load = async () => {
     try {
@@ -34,14 +36,6 @@ function TodayApp() {
     load();
   }, []);
 
-  const finish = async (task: any) => {
-    try {
-      await api.put(`/api/crm/activities/${task.id}/done`, { done: true });
-      await load();
-    } catch (err: any) {
-      setError(err.message);
-    }
-  };
 
   const decided = data ? Number(data.won_90) + Number(data.lost_90) : 0;
 
@@ -65,20 +59,20 @@ function TodayApp() {
           </div>
 
           <div className="card table-wrap">
-            <h2>Your tasks</h2>
+            <h2>Your activities <Link href="/saas/crm/tasks" className="muted">All activities</Link></h2>
             <table>
               <tbody>
                 {data.my_tasks.length === 0 && <tr><td className="empty">Nothing due today</td></tr>}
                 {data.my_tasks.map((task: any) => (
                   <tr key={task.id}>
                     <td className="wrap">
-                      {task.subject}
+                      {task.kind && task.kind !== 'task' && <span className="badge">{kindName(task.kind)}</span>} {task.subject}
                       {task.deal_id && <> · <Link href={`/saas/crm/deal/${task.deal_id}`}>{task.deal_title}</Link></>}
                       {!task.deal_id && task.lead_id && <> · <Link href={`/saas/crm/lead/${task.lead_id}`}>{task.lead_name}</Link></>}
                       {!task.deal_id && !task.lead_id && task.contact_id && <> · <Link href={`/saas/crm/contact/${task.contact_id}`}>{task.contact_name}</Link></>}
                     </td>
-                    <td>{task.due_on && <span className={`badge ${task.due_on < today() ? 'lost' : ''}`}>{task.due_on < today() ? `overdue ${formatDate(task.due_on)}` : 'today'}</span>}</td>
-                    <td><div className="row-actions"><button onClick={() => finish(task)}>Done</button></div></td>
+                    <td>{task.due_on && <span className={`badge ${task.due_on < today() ? 'lost' : ''}`}>{task.due_on < today() ? `overdue ${formatDate(task.due_on)}` : task.due_time ? `today ${task.due_time.slice(0, 5)}` : 'today'}</span>}</td>
+                    <td><div className="row-actions"><button onClick={() => setFinishing(task)}>Done</button></div></td>
                   </tr>
                 ))}
               </tbody>
@@ -112,7 +106,7 @@ function TodayApp() {
               {Number(data.undated_deals) > 0 && <p>Open deals with no expected close: {data.undated_deals}. They aren't in the forecast below.</p>}
               {data.stale_deals.length > 0 && (
                 <table>
-                  <thead><tr><th>Quiet for 14 days or more</th><th>Stage</th><th>Last touched</th><th className="num">Value</th></tr></thead>
+                  <thead><tr><th>Going stale (nothing happening)</th><th>Stage</th><th>Last touched</th><th className="num">Value</th></tr></thead>
                   <tbody>
                     {data.stale_deals.map((deal: any) => (
                       <tr key={deal.id}>
@@ -165,6 +159,7 @@ function TodayApp() {
       )}
 
       {adding && <DealForm onClose={() => setAdding(false)} onSaved={load} />}
+      {finishing && <FinishForm activity={finishing} onClose={() => setFinishing(null)} onSaved={load} />}
     </div>
   );
 }

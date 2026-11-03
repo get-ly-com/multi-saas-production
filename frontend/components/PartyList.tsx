@@ -1,3 +1,4 @@
+import Link from 'next/link';
 import { FormEvent, useEffect, useState } from 'react';
 import AccountingNav from '@/components/AccountingNav';
 import Modal from '@/components/Modal';
@@ -5,9 +6,9 @@ import { api, money } from '@/lib/api';
 
 const blank = { name: '', email: '', phone: '', address: '' };
 
-type Props = { title: string; noun: string; path: string; balanceLabel: string };
+type Props = { title: string; noun: string; path: string; balanceLabel: string; statementPath?: string };
 
-export default function PartyList({ title, noun, path, balanceLabel }: Props) {
+export default function PartyList({ title, noun, path, balanceLabel, statementPath }: Props) {
   const [rows, setRows] = useState<any[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState('');
@@ -65,6 +66,7 @@ export default function PartyList({ title, noun, path, balanceLabel }: Props) {
                     <div className="row-actions">
                       <button onClick={() => setForm({ ...row, email: row.email || '', phone: row.phone || '', address: row.address || '' })}>Edit</button>
                       <button onClick={() => setActive(row, !row.is_active)}>{row.is_active ? 'Deactivate' : 'Reactivate'}</button>
+                      {statementPath && <Link href={`${statementPath}?customer=${row.id}`}>Statement</Link>}
                     </div>
                   </td>
                 </tr>

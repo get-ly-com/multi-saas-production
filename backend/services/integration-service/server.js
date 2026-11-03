@@ -80,4 +80,31 @@ app.post('/deliveries/:id/retry', call('retry_delivery', (req) => ({ p_delivery:
 app.post('/api-keys', call('create_api_key', (req) => ({ p_name: text(req.body.name, 80).trim() }), 201));
 app.delete('/api-keys/:id', call('revoke_api_key', (req) => ({ p_key: id(req.params.id, 'API key') })));
 
+// A key that only reads, or one that can also add contacts and leads
+app.post('/api-keys/scoped', call('make_api_key', (req) => ({
+  p_name: text(req.body.name, 80).trim(),
+  p_scope: req.body.scope === 'write' ? 'write' : 'read'
+}), 201));
+app.get('/api-keys/:id/requests', call('api_key_log', (req) => ({ p_key: id(req.params.id, 'API key') })));
+
+// Incoming webhooks: secret addresses other tools post leads to. The address comes back once.
+app.get('/inbound', call('inbound_overview', () => ({})));
+app.post('/inbound', call('save_inbound', (req) => ({
+  p_hook: null,
+  p_name: text(req.body.name, 80).trim(),
+  p_source: text(req.body.source, 100).trim()
+}), 201));
+app.put('/inbound/:id', call('save_inbound', (req) => ({
+  p_hook: id(req.params.id, 'Incoming webhook'),
+  p_name: text(req.body.name, 80).trim(),
+  p_source: text(req.body.source, 100).trim()
+})));
+app.post('/inbound/:id/enabled', call('set_inbound_enabled', (req) => ({
+  p_hook: id(req.params.id, 'Incoming webhook'),
+  p_enabled: Boolean(req.body.enabled)
+})));
+app.post('/inbound/:id/token', call('roll_inbound_token', (req) => ({ p_hook: id(req.params.id, 'Incoming webhook') })));
+app.get('/inbound/:id/log', call('inbound_history', (req) => ({ p_hook: id(req.params.id, 'Incoming webhook') })));
+app.delete('/inbound/:id', call('delete_inbound', (req) => ({ p_hook: id(req.params.id, 'Incoming webhook') })));
+
 app.listen(PORT, () => console.log(`Integration Service on ${PORT}`));

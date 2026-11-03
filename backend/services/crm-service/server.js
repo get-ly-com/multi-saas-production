@@ -63,6 +63,21 @@ const parseCategory = (value) => {
 // Forms send an empty string for "none"
 const optional = (value) => (value === '' || value === undefined ? null : value);
 
+// A list of tag ids; the database checks they belong to this company
+const parseTags = (value) => {
+  if (!Array.isArray(value) || value.length > 20 || !value.every((id) => typeof id === 'string' && UUID.test(id))) {
+    throw new Error('Choose up to 20 tags');
+  }
+  return value;
+};
+
+const TIME = /^([01]\d|2[0-3]):[0-5]\d(:[0-5]\d)?$/;
+const parseTime = (value) => {
+  if (value === '' || value === null || value === undefined) return null;
+  if (typeof value !== 'string' || !TIME.test(value)) throw new Error('Enter a valid time');
+  return value;
+};
+
 const optionalNumber = (value) => (value === '' || value === null || value === undefined ? null : Number(value));
 
 // Only the fields that were sent, so a stage move can't wipe the rest of a deal
@@ -161,7 +176,8 @@ const companyFields = (body) => {
       phone: optional,
       notes: optional,
       owner_id: optional,
-      custom: (value) => value
+      custom: (value) => value,
+      tags: parseTags
     }),
     updated_at: new Date().toISOString()
   };
@@ -178,7 +194,8 @@ const contactFields = (body) => {
       company_id: optional,
       notes: optional,
       owner_id: optional,
-      custom: (value) => value
+      custom: (value) => value,
+      tags: parseTags
     }),
     updated_at: new Date().toISOString()
   };
@@ -198,7 +215,8 @@ const leadFields = (body) => {
     status: (value) => value,
     disqualified_reason: optional,
     owner_id: optional,
-    custom: (value) => value
+    custom: (value) => value,
+    tags: parseTags
   });
 };
 
@@ -214,7 +232,8 @@ const dealFields = (body) => {
     expected_close: parseDate,
     forecast_category: parseCategory,
     lost_reason: optional,
-    custom: (value) => value
+    custom: (value) => value,
+    tags: parseTags
   });
 };
 
@@ -226,6 +245,7 @@ const activityFields = (body) => {
     subject: (value) => value,
     body: optional,
     due_on: parseDate,
+    due_time: parseTime,
     contact_id: optional,
     company_id: optional,
     deal_id: optional,
@@ -324,6 +344,58 @@ app.get('/lead-settings', async (req, res) => {
 app.post('/lead-settings', callCrm('save_lead_settings', (req) => ({ p_settings: req.body })));
 app.post('/lead-settings/form-key', callCrm('new_form_key', () => ({})));
 
+// Tags. Anyone who can edit can add or rename one; only owners and admins can delete.
+const TAG_COLORS = ['grey', 'red', 'orange', 'yellow', 'green', 'teal', 'blue', 'purple', 'pink'];
+const tagsTable = (req) => crm(req).from('tags');
+const tagFields = (body) => {
+  const fields = {};
+  if (body.name !== undefined) {
+    const name = String(body.name || '').trim();
+    if (!name || name.length > 40) throw new Error('Name the tag in up to 40 characters');
+    fields.name = name;
+  }
+  if (body.color !== undefined) {
+    if (!TAG_COLORS.includes(body.color)) throw new Error('Choose a colour');
+    fields.color = body.color;
+  }
+  return fields;
+};
+app.get('/tags', list((req) => tagsTable(req).select('*').eq('tenant_id', req.tenantId).order('name')));
+app.post('/tags', create(tagsTable, '*', (body) => {
+  if (!body.name) throw new Error('Name the tag');
+  return tagFields(body);
+}));
+app.put('/tags/:id', update(tagsTable, '*', tagFields, 'Tag'));
+app.delete('/tags/:id', remove(tagsTable, 'Tag'));
+
+// Lost reasons to pick from. Only owners and admins can change the list.
+const reasonsTable = (req) => crm(req).from('lost_reasons');
+app.get('/lost-reasons', list((req) => reasonsTable(req).select('*').eq('tenant_id', req.tenantId).order('name')));
+app.post('/lost-reasons', create(reasonsTable, '*', (body) => {
+  const name = String(body.name || '').trim();
+  if (!name || name.length > 80) throw new Error('Enter a reason in up to 80 characters');
+  return { name };
+}));
+app.delete('/lost-reasons/:id', remove(reasonsTable, 'Reason'));
+
+// Changing many records at once
+const BULK_ENTITIES = ['contact', 'company', 'lead', 'deal'];
+const BULK_ACTIONS = ['owner', 'add_tag', 'remove_tag', 'stage', 'status', 'delete'];
+app.post('/bulk', callCrm('bulk_update', (req) => {
+  const { entity, ids, action, value, reason } = req.body;
+  if (!BULK_ENTITIES.includes(entity) || !BULK_ACTIONS.includes(action)) throw new Error('Choose what to change');
+  if (!Array.isArray(ids) || !ids.length) throw new Error('Select at least one row');
+  if (ids.length > 500) throw new Error('Select up to 500 rows at a time');
+  if (!ids.every((id) => typeof id === 'string' && UUID.test(id))) throw new Error('Select at least one row');
+  return {
+    p_entity: entity,
+    p_ids: ids,
+    p_action: action,
+    p_value: typeof value === 'string' ? value : null,
+    p_reason: typeof reason === 'string' ? reason : null
+  };
+}));
+
 // Custom fields
 app.get('/custom-fields', list((req) => {
   const query = crm(req).from('custom_fields')
@@ -366,6 +438,7 @@ app.get('/deals', list((req) => {
   if (req.query.contact_id) query = query.eq('contact_id', req.query.contact_id);
   return query;
 }));
+app.get('/deal-signals', callCrm('deal_signals', () => ({})));
 app.get('/deals/:id', one((req) => deals(req).select(DEAL_FIELDS), 'Deal'));
 app.get('/deals/:id/history', list((req) => crm(req).from('deal_history')
   .select('*, from_stage:stages!deal_history_from_stage_id_fkey(name), to_stage:stages!deal_history_to_stage_id_fkey(name)')
@@ -403,6 +476,40 @@ app.put('/activities/:id/done', update(activities, ACTIVITY_FIELDS, (body) => ({
   done_at: body.done === false ? null : new Date().toISOString()
 }), 'Activity'));
 app.delete('/activities/:id', remove(activities, 'Activity'));
+
+// Planned calls, meetings, emails and tasks, for the activities list and calendar
+app.get('/activities/schedule', list((req) => {
+  let query = activities(req)
+    .select(ACTIVITY_FIELDS)
+    .eq('tenant_id', req.tenantId)
+    .neq('kind', 'note')
+    .order('due_on', { ascending: true, nullsFirst: false })
+    .order('due_time', { ascending: true, nullsFirst: true })
+    .limit(1000);
+  if (req.query.from) query = query.gte('due_on', requiredDate(req.query.from));
+  if (req.query.to) query = query.lte('due_on', requiredDate(req.query.to));
+  if (req.query.done !== '1') query = query.is('done_at', null);
+  if (req.query.owner) {
+    if (!UUID.test(req.query.owner)) throw new Error('Choose a person');
+    query = query.eq('owner_id', req.query.owner);
+  }
+  return query;
+}));
+app.post('/activities/:id/finish', callCrm('finish_activity', (req) => {
+  const next = req.body.next;
+  if (next !== undefined && next !== null && (typeof next !== 'object' || Array.isArray(next))) throw new Error('Choose the next step');
+  return {
+    p_activity: req.params.id,
+    p_feedback: typeof req.body.feedback === 'string' ? req.body.feedback : null,
+    p_next: next ? {
+      kind: next.kind,
+      subject: typeof next.subject === 'string' ? next.subject : '',
+      due_on: parseDate(next.due_on),
+      due_time: parseTime(next.due_time),
+      owner_id: next.owner_id && UUID.test(next.owner_id) ? next.owner_id : null
+    } : null
+  };
+}));
 
 // Quotes
 const QUOTE_FIELDS = '*, deal:deals(id, title), contact:contacts(id, name, email), company:companies(id, name)';

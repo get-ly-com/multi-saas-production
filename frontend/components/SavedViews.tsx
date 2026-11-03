@@ -10,6 +10,7 @@ export const matchesFilters = (row: any, filters: Filters, fields: any[], search
   if (text && !searchIn.some((value) => (value || '').toLowerCase().includes(text))) return false;
   if (filters.owner === 'none' && row.owner_id) return false;
   if (filters.owner && filters.owner !== 'none' && row.owner_id !== filters.owner) return false;
+  if (filters.tag && !(row.tags || []).includes(filters.tag)) return false;
 
   const field = fields.find(({ slug }) => slug === filters.customField);
   const wanted = (filters.customValue || '').trim().toLowerCase();

@@ -2,7 +2,7 @@ import Link from 'next/link';
 import { useRouter } from 'next/router';
 import { FormEvent, KeyboardEvent, useCallback, useEffect, useRef, useState } from 'react';
 import AppShell from '@/components/AppShell';
-import ChatNav, { ChatMessage, STATUS_LABELS, STATUS_STYLES, timeText } from '@/components/ChatNav';
+import ChatNav, { ChatMessage, STATUS_LABELS, STATUS_STYLES, stars, timeText } from '@/components/ChatNav';
 import { api } from '@/lib/api';
 
 export default function ChatInbox() {
@@ -19,6 +19,7 @@ type Conversation = {
   assigned_to: string | null;
   lead_id: string | null;
   staff_unread: number;
+  rating?: number | null;
   last_message: string | null;
   last_message_at: string;
   created_at: string;
@@ -48,6 +49,7 @@ function Inbox() {
   const visible = useVisible();
   const [overview, setOverview] = useState<any>(null);
   const [team, setTeam] = useState<any[]>([]);
+  const [canned, setCanned] = useState<any[]>([]);
   const [tab, setTab] = useState('waiting');
   const [mine, setMine] = useState(false);
   const [search, setSearch] = useState('');
@@ -85,6 +87,7 @@ function Inbox() {
 
   useEffect(() => {
     api.get('/api/chatbot/team').then(setTeam).catch(() => setTeam([]));
+    api.get('/api/chatbot/canned').then(setCanned).catch(() => setCanned([]));
   }, []);
 
   useEffect(() => {
@@ -110,6 +113,9 @@ function Inbox() {
         <p className="muted">Chat is switched off, so visitors can't start new chats. {overview.is_manager
           ? <Link href="/saas/chat/settings">Turn it on in Settings.</Link> : 'Ask an owner or admin to turn it on.'}</p>
       )}
+      {overview && overview.enabled && !overview.online && (
+        <p className="notice">Outside your opening hours: visitors see that you're away and are asked for their name and email.</p>
+      )}
       {overview && (
         <div className="stats">
           <div className="card"><div className="stat-label">Waiting for a reply</div><div className="stat-value">{overview.waiting}</div></div>
@@ -117,6 +123,11 @@ function Inbox() {
           <div className="card"><div className="stat-label">Unread messages</div><div className="stat-value">{overview.unread}</div></div>
           <div className="card"><div className="stat-label">Questions the bot missed</div><div className="stat-value">{overview.unanswered}</div>
             {overview.unanswered > 0 && <Link href="/saas/chat/answers">Add answers</Link>}</div>
+          <div className="card"><div className="stat-label">Open tickets</div><div className="stat-value">{overview.tickets_open}</div>
+            {overview.tickets_overdue > 0 && <Link href="/saas/chat/tickets?overdue=1" className="error">{overview.tickets_overdue} late</Link>}</div>
+          <div className="card"><div className="stat-label">Rating, last 30 days</div>
+            <div className="stat-value">{overview.rating_count ? `${Number(overview.rating_average).toFixed(1)} / 5` : '—'}</div>
+            {overview.rating_count > 0 && <Link href="/saas/chat/ratings">{overview.rating_count} rating{overview.rating_count === 1 ? '' : 's'}</Link>}</div>
         </div>
       )}
 
@@ -142,6 +153,7 @@ function Inbox() {
               <span className="chat-item-text">{chat.last_message || 'No messages yet'}</span>
               <span className="chat-item-head">
                 <small>{chat.assigned_to ? team.find((person) => person.id === chat.assigned_to)?.email || 'Someone' : 'Not assigned'}</small>
+                {chat.rating ? <small title={`Rated ${chat.rating} of 5`}>{stars(chat.rating)}</small> : null}
                 {chat.staff_unread > 0 && <span className="chat-unread">{chat.staff_unread}</span>}
               </span>
             </button>
@@ -149,7 +161,7 @@ function Inbox() {
         </div>
 
         {selected
-          ? <Thread key={selected} id={selected} team={team} overview={overview} visible={visible} onChanged={loadList} />
+          ? <Thread key={selected} id={selected} team={team} canned={canned} overview={overview} visible={visible} onChanged={loadList} />
           : <div className="card chat-thread"><p className="empty">Choose a chat to read and reply</p></div>}
       </div>
     </div>
@@ -210,7 +222,13 @@ function ContactLink({ chat, canEdit, busy, onLink }: {
   );
 }
 
-function Thread({ id, team, overview, visible, onChanged }: { id: string; team: any[]; overview: any; visible: boolean; onChanged: () => void }) {
+// A saved reply's text, with {name} as the visitor's first name
+const fillReply = (body: string, chat: any) =>
+  body.replace(/\{name\}/g, (chat?.visitor_name || '').trim().split(/\s+/)[0] || 'there');
+
+function Thread({ id, team, canned, overview, visible, onChanged }: {
+  id: string; team: any[]; canned: any[]; overview: any; visible: boolean; onChanged: () => void;
+}) {
   const [chat, setChat] = useState<any>(null);
   const [messages, setMessages] = useState<ChatMessage[]>([]);
   const [reply, setReply] = useState('');
@@ -218,8 +236,22 @@ function Thread({ id, team, overview, visible, onChanged }: { id: string; team: 
   const [error, setError] = useState('');
   const [notice, setNotice] = useState('');
   const lastId = useRef(0);
+  const lastTyping = useRef(0);
   const bottom = useRef<HTMLDivElement>(null);
   const canReply = Boolean(overview?.can_reply);
+  // Typing "/" and the start of a shortcut lists the saved replies that match
+  const shortcut = /^\/([a-z0-9_-]*)$/i.exec(reply.trim())?.[1]?.toLowerCase();
+  const suggestions = shortcut === undefined ? [] : canned.filter((row) => row.shortcut.startsWith(shortcut)).slice(0, 8);
+
+  // Tells the visitor someone is typing, at most every 3 seconds
+  const typed = (value: string) => {
+    setReply(value);
+    if (!value.trim() || value.trim().startsWith('/') || Date.now() - lastTyping.current < 3000) return;
+    lastTyping.current = Date.now();
+    api.post(`/api/chatbot/conversations/${id}/typing`, {}).catch(() => null);
+  };
+
+  const pickCanned = (row: any) => setReply(fillReply(row.body, chat));
 
   const markRead = useCallback(() => api.post(`/api/chatbot/conversations/${id}/read`, {}).catch(() => null), [id]);
 
@@ -288,6 +320,11 @@ function Thread({ id, team, overview, visible, onChanged }: { id: string; team: 
   };
 
   const onKey = (event: KeyboardEvent<HTMLTextAreaElement>) => {
+    if ((event.key === 'Tab' || event.key === 'Enter') && suggestions.length) {
+      event.preventDefault();
+      pickCanned(suggestions[0]);
+      return;
+    }
     if (event.key === 'Enter' && !event.shiftKey) {
       event.preventDefault();
       send();
@@ -298,6 +335,11 @@ function Thread({ id, team, overview, visible, onChanged }: { id: string; team: 
     const result = await api.post(`/api/chatbot/conversations/${id}/lead`, {});
     setChat((current: any) => ({ ...current, lead_id: result.lead_id }));
   }, 'Saved as a CRM lead');
+
+  const makeTicket = () => act(async () => {
+    const result = await api.post(`/api/chatbot/conversations/${id}/ticket`, { priority: 'normal' });
+    setNotice(result.existing ? `This chat already has ticket #${result.ticket.number}` : `Ticket #${result.ticket.number} made`);
+  });
 
   if (!chat) return <div className="card chat-thread">{error ? <p className="error">{error}</p> : <p className="empty">Loading…</p>}</div>;
 
@@ -319,6 +361,10 @@ function Thread({ id, team, overview, visible, onChanged }: { id: string; team: 
             {chat.wants_person && chat.status !== 'closed' && <> · asked for a person</>}
             {chat.campaign && <> · campaign {chat.campaign}</>}
           </div>
+          {chat.rating && (
+            <div className="muted">Visitor rated this chat <strong title={`${chat.rating} of 5`}>{stars(chat.rating)}</strong>
+              {chat.rating_comment && <> · “{chat.rating_comment}”</>}</div>
+          )}
         </div>
         {canReply && (
           <div className="row-actions">
@@ -330,6 +376,9 @@ function Thread({ id, team, overview, visible, onChanged }: { id: string; team: 
             {chat.lead_id
               ? <Link className="button" href={`/saas/crm/lead/${chat.lead_id}`}>Open lead</Link>
               : <button disabled={busy || !chat.visitor_email} title={chat.visitor_email ? '' : 'Ask the visitor for their email first'} onClick={makeLead}>Make CRM lead</button>}
+            {chat.tickets?.length
+              ? <Link className="button" href={`/saas/chat/tickets?t=${chat.tickets[0].id}`}>Ticket #{chat.tickets[0].number}</Link>
+              : <button disabled={busy} onClick={makeTicket} title="Keep track of this request as a ticket">Make ticket</button>}
             {chat.status === 'closed'
               ? <button disabled={busy} onClick={() => act(() => api.post(`/api/chatbot/conversations/${id}/status`, { status: 'open' }))}>Reopen</button>
               : <button disabled={busy} onClick={() => act(() => api.post(`/api/chatbot/conversations/${id}/status`, { status: 'closed' }))}>Close</button>}
@@ -351,6 +400,7 @@ function Thread({ id, team, overview, visible, onChanged }: { id: string; team: 
               </div>
             )
         ))}
+        {chat.visitor_typing && <p className="chat-typing">{chat.visitor_name || 'The visitor'} is typing…</p>}
         <div ref={bottom} />
       </div>
 
@@ -358,8 +408,21 @@ function Thread({ id, team, overview, visible, onChanged }: { id: string; team: 
       {notice && <p className="notice">{notice}</p>}
       {canReply ? (
         <form className="chat-reply" onSubmit={send}>
-          <textarea rows={3} maxLength={2000} placeholder="Type a reply. Enter sends, Shift+Enter adds a line."
-            value={reply} onChange={(e) => setReply(e.target.value)} onKeyDown={onKey} aria-label="Reply" />
+          <textarea rows={3} maxLength={2000} placeholder="Type a reply, or / and a shortcut for a saved reply. Enter sends, Shift+Enter adds a line."
+            value={reply} onChange={(e) => typed(e.target.value)} onKeyDown={onKey} aria-label="Reply" />
+          {suggestions.length > 0 && (
+            <div className="chat-canned" role="listbox" aria-label="Saved replies">
+              {suggestions.map((row) => (
+                <button key={row.id} type="button" className="chat-item" onClick={() => pickCanned(row)}>
+                  <strong>/{row.shortcut}</strong> <span className="chat-item-text">{row.body}</span>
+                </button>
+              ))}
+              <small className="muted">Tab or Enter uses the first one</small>
+            </div>
+          )}
+          {shortcut !== undefined && suggestions.length === 0 && (
+            <small className="muted">No saved reply starts with /{shortcut}. <Link href="/saas/chat/replies">Add saved replies</Link></small>
+          )}
           <div className="form-actions">
             <button className="primary always" disabled={busy || !reply.trim()}>Send</button>
             <span className="muted">The visitor sees replies within a few seconds while their chat page is open.</span>

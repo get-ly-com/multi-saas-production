@@ -16,6 +16,10 @@ const status = (person: any) => {
   return { label: 'active', style: 'paid' };
 };
 
+const UPCOMING: Record<string, string> = {
+  starts: 'Starts', last_day: 'Last day', probation_ends: 'Probation ends', step_due: 'Checklist step due'
+};
+
 const payText = (pay: any) => {
   if (!pay || !Number(pay.amount)) return '—';
   return pay.pay_type === 'salary' ? `${money(pay.amount)} a year` : `${money(pay.amount)} an hour`;
@@ -25,6 +29,7 @@ function PeopleApp() {
   const [overview, setOverview] = useState<any>(null);
   const [me, setMe] = useState<any>(null);
   const [people, setPeople] = useState<any[]>([]);
+  const [upcoming, setUpcoming] = useState<any[]>([]);
   const [search, setSearch] = useState('');
   const [showLeft, setShowLeft] = useState(false);
   const [loading, setLoading] = useState(true);
@@ -39,6 +44,7 @@ function PeopleApp() {
       setMe(mine);
       setPeople(rows);
       setError('');
+      api.get('/api/hr/upcoming?days=45').then(setUpcoming).catch(() => setUpcoming([]));
     } catch (err: any) {
       setError(err.message);
     } finally {
@@ -98,6 +104,23 @@ function PeopleApp() {
               <span key={slip.id}>{index > 0 && ' · '}<Link href={`/saas/hr/payslip/${slip.id}`}>{slip.period_start.slice(0, 7)}</Link></span>
             ))}</p>
           )}
+        </div>
+      )}
+      {upcoming.length > 0 && (
+        <div className="card table-wrap">
+          <h2>Coming up</h2>
+          <table>
+            <tbody>
+              {upcoming.slice(0, 12).map((row: any, index: number) => (
+                <tr key={`${row.employee_id}-${row.kind}-${index}`}>
+                  <td className={row.on_date < today() ? 'late' : ''}>{formatDate(row.on_date)}</td>
+                  <td className="wrap"><Link href={`/saas/hr/employee/${row.employee_id}`}>{row.name}</Link></td>
+                  <td>{UPCOMING[row.kind] || row.kind}</td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+          {upcoming.length > 12 && <p className="muted">And {upcoming.length - 12} more.</p>}
         </div>
       )}
       {me && !me.employee && !manager && (

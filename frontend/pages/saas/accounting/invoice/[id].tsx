@@ -3,6 +3,7 @@ import { useRouter } from 'next/router';
 import { FormEvent, useEffect, useState } from 'react';
 import AppShell from '@/components/AppShell';
 import Modal from '@/components/Modal';
+import WriteOffForm from '@/components/WriteOffForm';
 import { api, formatDate, money, today } from '@/lib/api';
 
 export default function Invoice() {
@@ -16,6 +17,7 @@ function InvoiceDocument() {
   const [company, setCompany] = useState('');
   const [error, setError] = useState('');
   const [refunding, setRefunding] = useState(false);
+  const [writingOff, setWritingOff] = useState(false);
 
   const load = async () => {
     try {
@@ -53,6 +55,10 @@ function InvoiceDocument() {
       <div className="page-head no-print">
         <Link href="/saas/accounting">← Invoices</Link>
         <div className="row-actions">
+          {invoice.customer_id && <Link href={`/saas/accounting/statements?customer=${invoice.customer_id}`}>Customer statement</Link>}
+          {(invoice.status === 'sent' || invoice.status === 'partial') && balance > 0 && (
+            <button onClick={() => setWritingOff(true)}>Write off</button>
+          )}
           {Number(invoice.amount_paid) > 0 && <button onClick={() => setRefunding(true)}>Refund</button>}
           {invoice.status === 'sent' && (
             <button className="danger" onClick={() => run(
@@ -141,14 +147,16 @@ function InvoiceDocument() {
               {invoice.payments.map((payment: any) => (
                 <tr key={payment.id}>
                   <td>{formatDate(payment.payment_date)}</td>
-                  <td>{payment.account?.code} {payment.account?.name}</td>
-                  <td>{payment.reference || '—'}</td>
+                  <td>{payment.account?.code} {payment.account?.name}{payment.is_write_off && <span className="badge">write-off</span>}</td>
+                  <td className="wrap">{payment.reference || '—'}</td>
                   <td className="num">{money(payment.amount, invoice.currency)}</td>
                   <td className="num">
                     {payment.voided_at
                       ? <span className="badge void">void</span>
                       : <button className="danger" onClick={() => run(
-                          'Void this payment? Its ledger entry will be reversed.',
+                          payment.is_write_off
+                            ? 'Undo this write-off? Its ledger entry will be reversed and the balance will be owed again.'
+                            : 'Void this payment? Its ledger entry will be reversed.',
                           () => api.post(`/api/accounting/payments/${payment.id}/void`, {})
                         )}>Void</button>}
                   </td>
@@ -186,6 +194,7 @@ function InvoiceDocument() {
         </div>
       )}
 
+      {writingOff && <WriteOffForm invoice={invoice} onClose={() => setWritingOff(false)} onSaved={load} />}
       {refunding && <RefundForm invoice={invoice} onClose={() => setRefunding(false)} onSaved={load} />}
     </div>
   );

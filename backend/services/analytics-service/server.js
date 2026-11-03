@@ -64,4 +64,78 @@ app.get('/dashboard', callAnalytics('dashboard', (req) => {
   return { p_from: from, p_to: to };
 }));
 
+// The dashboard's totals for any other range, to compare against (for example the same dates last year)
+app.get('/compare', callAnalytics('compare', (req) => {
+  const from = date(req.query.from, 'Choose a start date');
+  const to = date(req.query.to, 'Choose an end date');
+  if (from > to) throw new Error('Choose a start date before the end date');
+  return { p_from: from, p_to: to };
+}));
+
+// Report builder. The database only accepts the dataset, group, measure, date and filter keys it
+// knows; nothing sent here is put into a query as text.
+const KEY = /^[a-z_]{1,30}$/;
+const reportSpec = (body) => {
+  const spec = body && typeof body === 'object' ? body : {};
+  const pick = (name) => (typeof spec[name] === 'string' && KEY.test(spec[name]) ? spec[name] : undefined);
+  const day = (name) => (typeof spec[name] === 'string' && DATE.test(spec[name]) ? spec[name] : undefined);
+  return {
+    dataset: pick('dataset'),
+    group: pick('group'),
+    measure: pick('measure'),
+    date_field: pick('date_field'),
+    filter: pick('filter'),
+    by_month: spec.by_month === true,
+    period: pick('period'),
+    chart: pick('chart'),
+    from: day('from'),
+    to: day('to')
+  };
+};
+
+const id = (value, label) => {
+  if (!UUID.test(value || '')) {
+    const error = new Error(`${label} not found`);
+    error.status = 404;
+    throw error;
+  }
+  return value;
+};
+
+app.get('/reports', callAnalytics('list_reports', () => ({})));
+app.post('/reports/run', callAnalytics('run_report', (req) => ({ p_spec: reportSpec(req.body?.spec) })));
+app.post('/reports', callAnalytics('save_report', (req) => ({
+  p_report: null,
+  p_name: String(req.body?.name ?? '').slice(0, 80),
+  p_spec: reportSpec(req.body?.spec)
+})));
+app.put('/reports/:id', callAnalytics('save_report', (req) => ({
+  p_report: id(req.params.id, 'Report'),
+  p_name: String(req.body?.name ?? '').slice(0, 80),
+  p_spec: reportSpec(req.body?.spec)
+})));
+app.delete('/reports/:id', callAnalytics('delete_report', (req) => ({ p_report: id(req.params.id, 'Report') })));
+
+// Monthly goals. Owners and admins set them; everyone in the company sees progress.
+app.get('/goals', callAnalytics('goal_progress', (req) => ({
+  p_month: req.query.month ? date(req.query.month, 'Choose a month') : null
+})));
+app.post('/goals', callAnalytics('set_goal', (req) => {
+  const target = req.body?.target === null || req.body?.target === '' ? null : Number(req.body?.target);
+  if (target !== null && !Number.isFinite(target)) throw new Error('Enter a goal of 0 or more');
+  const months = Number(req.body?.months || 1);
+  if (!Number.isInteger(months)) throw new Error('Set a goal for 1 to 12 months at a time');
+  return {
+    p_metric: String(req.body?.metric ?? ''),
+    p_month: date(req.body?.month, 'Choose a month'),
+    p_target: target,
+    p_months: months
+  };
+}));
+
+// Daily snapshots of money owed, pipeline, stock, staff, open leads and chats
+app.get('/history', callAnalytics('snapshot_history', (req) => ({
+  p_days: Math.min(Math.max(Number.parseInt(req.query.days, 10) || 90, 7), 400)
+})));
+
 app.listen(PORT, () => console.log(`Analytics Service on ${PORT}`));

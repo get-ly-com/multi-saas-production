@@ -5,6 +5,7 @@ import Modal from '@/components/Modal';
 
 const SECTIONS = [
   { name: 'Webhooks', path: '/saas/integrations' },
+  { name: 'Incoming webhooks', path: '/saas/integrations/inbound' },
   { name: 'API keys', path: '/saas/integrations/keys' },
   { name: 'API guide', path: '/saas/integrations/api' },
   { name: 'Background jobs', path: '/saas/integrations/jobs' }

@@ -4,6 +4,7 @@ import CrmNav from '@/components/CrmNav';
 import CustomFieldSettings from '@/components/CustomFieldSettings';
 import EmailSettings from '@/components/EmailSettings';
 import LeadSettings from '@/components/LeadSettings';
+import { LostReasonSettings, TagSettings } from '@/components/TagSettings';
 import { api } from '@/lib/api';
 
 const blankPipeline = {
@@ -57,7 +58,8 @@ function SettingsApp() {
   const save = async (event: FormEvent) => {
     event.preventDefault();
     try {
-      await api.post('/api/crm/pipelines', { id: editing.id, name: editing.name, stages: editing.stages });
+      const stages = editing.stages.map((stage: any) => ({ ...stage, rot_days: stage.kind === 'open' ? stage.rot_days ?? '' : '' }));
+      await api.post('/api/crm/pipelines', { id: editing.id, name: editing.name, stages });
       setEditing(null);
       setNotice('Pipeline saved.');
       await load();
@@ -85,7 +87,7 @@ function SettingsApp() {
         <button className="primary" onClick={() => open(blankPipeline)}>New pipeline</button>
       </div>
 
-      <p className="muted">Each stage's chance of winning drives the weighted forecast. Only owners and admins can change these settings.</p>
+      <p className="muted">Each stage's chance of winning drives the weighted forecast. A deal goes stale when nothing has happened on it for the stage's number of days (14 if left blank); stale deals are marked on the pipeline. Only owners and admins can change these settings.</p>
 
       {error && <p className="error">{error}</p>}
       {notice && <p className="notice">{notice}</p>}
@@ -100,10 +102,10 @@ function SettingsApp() {
             </div>
           </div>
           <table>
-            <thead><tr><th>Stage</th><th>Type</th><th className="num">Chance</th></tr></thead>
+            <thead><tr><th>Stage</th><th>Type</th><th className="num">Chance</th><th className="num">Stale after</th></tr></thead>
             <tbody>
               {[...pipeline.stages].sort((a: any, b: any) => a.position - b.position).map((stage: any) => (
-                <tr key={stage.id}><td>{stage.name}</td><td>{stage.kind}</td><td className="num">{stage.probability}%</td></tr>
+                <tr key={stage.id}><td>{stage.name}</td><td>{stage.kind}</td><td className="num">{stage.probability}%</td><td className="num">{stage.kind === 'open' ? `${stage.rot_days || 14} days` : '—'}</td></tr>
               ))}
             </tbody>
           </table>
@@ -114,9 +116,10 @@ function SettingsApp() {
         <form className="card" onSubmit={save}>
           <h2>{editing.id ? `Edit ${editing.name}` : 'New pipeline'}</h2>
           <label>Name<input required value={editing.name} onChange={(e) => setEditing({ ...editing, name: e.target.value })} /></label>
+          <div className="stage-line with-stale stage-line-head muted"><span>Stage</span><span>Type</span><span>Chance %</span><span>Stale after days</span></div>
           <div className="lines">
             {editing.stages.map((stage: any, index: number) => (
-              <div className="stage-line" key={stage.id || index}>
+              <div className="stage-line with-stale" key={stage.id || index}>
                 <input required aria-label="Stage name" value={stage.name} onChange={(e) => setStage(index, 'name', e.target.value)} />
                 <select aria-label="Stage type" value={stage.kind} onChange={(e) => setStage(index, 'kind', e.target.value)}>
                   <option value="open">Open</option>
@@ -124,6 +127,7 @@ function SettingsApp() {
                   <option value="lost">Lost</option>
                 </select>
                 <input required aria-label="Chance of winning" type="number" min="0" max="100" value={stage.probability} onChange={(e) => setStage(index, 'probability', e.target.value)} />
+                <input aria-label="Days before a deal goes stale" title="Days before a deal goes stale (blank means 14)" placeholder="14 days" type="number" min="1" max="365" disabled={stage.kind !== 'open'} value={stage.kind === 'open' ? stage.rot_days ?? '' : ''} onChange={(e) => setStage(index, 'rot_days', e.target.value)} />
                 <button type="button" aria-label="Move up" disabled={index === 0} onClick={() => moveStage(index, -1)}>↑</button>
                 <button type="button" aria-label="Move down" disabled={index === editing.stages.length - 1} onClick={() => moveStage(index, 1)}>↓</button>
                 <button type="button" aria-label="Remove stage" onClick={() => setEditing({ ...editing, stages: editing.stages.filter((_: any, i: number) => i !== index) })}>×</button>
@@ -138,6 +142,8 @@ function SettingsApp() {
         </form>
       )}
 
+      <TagSettings />
+      <LostReasonSettings />
       <LeadSettings />
       <EmailSettings />
       <CustomFieldSettings />

@@ -1,6 +1,6 @@
-import Link from 'next/link';
 import { useEffect, useState } from 'react';
 import AppShell from '@/components/AppShell';
+import InventoryNav from '@/components/InventoryNav';
 import { api, money } from '@/lib/api';
 import { downloadCsv } from '@/lib/csv';
 import { RANGES, rangeDates } from '@/lib/ranges';
@@ -43,12 +43,10 @@ function ProfitApp() {
   return (
     <div className="stack">
       <div className="page-head">
-        <div>
-          <Link href="/saas/inventory">← Inventory</Link>
-          <h1>Profit by product</h1>
-        </div>
+        <h1>Profit by product</h1>
         {data && data.items.length > 0 && <button onClick={download}>Download CSV</button>}
       </div>
+      <InventoryNav />
 
       <div className="report-filters">
         <label>Dates

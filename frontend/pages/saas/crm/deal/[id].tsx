@@ -3,6 +3,7 @@ import { useRouter } from 'next/router';
 import { useEffect, useMemo, useState } from 'react';
 import AppShell from '@/components/AppShell';
 import CrmNav from '@/components/CrmNav';
+import { TagChips, useTags } from '@/components/Tags';
 import { DealForm, LostForm, useTeam } from '@/components/CrmForms';
 import { CustomValues } from '@/components/CustomFields';
 import QuoteForm from '@/components/QuoteForm';
@@ -25,6 +26,7 @@ function DealApp() {
   const [quotes, setQuotes] = useState<any[]>([]);
   const [profit, setProfit] = useState<any>(null);
   const [error, setError] = useState('');
+  const tags = useTags();
   const [editing, setEditing] = useState(false);
   const [quoting, setQuoting] = useState(false);
   const [losing, setLosing] = useState('');
@@ -109,6 +111,7 @@ function DealApp() {
           <div className="page-head">
             <div>
               <h1>{deal.title}</h1>
+              <TagChips ids={deal.tags} tags={tags} />
               <p className="muted">
                 {money(deal.value)}
                 {deal.contact && <> · <Link href={`/saas/crm/contact/${deal.contact.id}`}>{deal.contact.name}</Link></>}

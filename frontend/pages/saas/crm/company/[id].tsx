@@ -4,6 +4,7 @@ import { useEffect, useState } from 'react';
 import AppShell from '@/components/AppShell';
 import Billing from '@/components/Billing';
 import CrmNav from '@/components/CrmNav';
+import { TagChips, useTags } from '@/components/Tags';
 import { CompanyForm, ContactForm, DealForm } from '@/components/CrmForms';
 import { CustomValues } from '@/components/CustomFields';
 import Timeline from '@/components/Timeline';
@@ -20,6 +21,7 @@ function CompanyApp() {
   const [contacts, setContacts] = useState<any[]>([]);
   const [deals, setDeals] = useState<any[]>([]);
   const [error, setError] = useState('');
+  const tags = useTags();
   const [form, setForm] = useState('');
 
   const load = async () => {
@@ -64,6 +66,7 @@ function CompanyApp() {
           <div className="page-head">
             <div>
               <h1>{company.name}</h1>
+              <TagChips ids={company.tags} tags={tags} />
               <p className="muted">{[company.industry, company.website, company.phone].filter(Boolean).join(' · ')}</p>
             </div>
             <div className="row-actions">

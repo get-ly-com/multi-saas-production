@@ -5,6 +5,7 @@ import AppShell from '@/components/AppShell';
 import CurrencyFields from '@/components/CurrencyFields';
 import Modal from '@/components/Modal';
 import PaymentForm from '@/components/PaymentForm';
+import WriteOffForm from '@/components/WriteOffForm';
 import { api, formatDate, money, today } from '@/lib/api';
 
 const blankLine = { description: '', quantity: '1', unit_price: '', tax_rate_id: '' };
@@ -35,6 +36,7 @@ function AccountingApp() {
   const [expenseForm, setExpenseForm] = useState<any>(null);
   const [paying, setPaying] = useState<any>(null);
   const [crediting, setCrediting] = useState<any>(null);
+  const [writingOff, setWritingOff] = useState<any>(null);
 
   const load = async () => {
     try {
@@ -140,6 +142,7 @@ function AccountingApp() {
                         <>
                           <button onClick={() => setPaying(invoice)}>Record payment</button>
                           <button onClick={() => setCrediting(invoice)}>Credit note</button>
+                          <button onClick={() => setWritingOff(invoice)}>Write off</button>
                         </>
                       )}
                       {invoice.status !== 'void' && (
@@ -196,6 +199,7 @@ function AccountingApp() {
         />
       )}
       {crediting && <CreditForm invoice={crediting} onClose={() => setCrediting(null)} onSaved={load} />}
+      {writingOff && <WriteOffForm invoice={writingOff} onClose={() => setWritingOff(null)} onSaved={load} />}
       {expenseForm && <ExpenseForm initial={expenseForm} accounts={accounts} costCenters={costCenters} onClose={() => setExpenseForm(null)} onSaved={load} />}
     </div>
   );

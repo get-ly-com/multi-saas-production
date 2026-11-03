@@ -9,8 +9,11 @@ const BASE_URL = process.env.NEXT_PUBLIC_API_BASE_URL;
 // touch sign-in or the company choice. The conversation's secret token is kept in this browser
 // so a visitor who reloads carries on where they left off.
 type Message = { id: number; from: string; body: string; at: string };
-type Info = { company: string; welcome: string; hours: string; colour: string; bot: boolean };
-type State = { status: string; needs_contact: boolean; name: string | null; email: string | null; messages: Message[] };
+type Info = { company: string; welcome: string; hours: string; colour: string; bot: boolean; online?: boolean; away?: string | null };
+type State = {
+  status: string; needs_contact: boolean; name: string | null; email: string | null; messages: Message[];
+  online?: boolean; staff_typing?: boolean; seen_up_to?: number; can_rate?: boolean; rating?: number | null;
+};
 
 const FAST = 3000;
 const SLOW = 15000;
@@ -75,6 +78,9 @@ export default function PublicChat() {
   const [name, setName] = useState('');
   const [website, setWebsite] = useState('');
   const [contact, setContact] = useState({ name: '', email: '' });
+  const [rating, setRating] = useState(0);
+  const [comment, setComment] = useState('');
+  const lastTyping = useRef(0);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState('');
   const lastId = useRef(0);
@@ -159,7 +165,7 @@ export default function PublicChat() {
 
   useEffect(() => {
     bottom.current?.scrollIntoView({ block: 'end' });
-  }, [messages.length, state?.needs_contact]);
+  }, [messages.length, state?.needs_contact, state?.can_rate, state?.staff_typing]);
 
   const run = async (work: () => Promise<void>) => {
     setBusy(true);
@@ -189,6 +195,22 @@ export default function PublicChat() {
       }
       take(await post(`${base}/messages`, { token: current, body, after: lastId.current }));
       setText('');
+    });
+  };
+
+  // Lets the team see "typing...", at most every 3 seconds
+  const typed = (value: string) => {
+    setText(value);
+    if (!token || !value.trim() || Date.now() - lastTyping.current < 3000) return;
+    lastTyping.current = Date.now();
+    post(`${base}/typing`, { token }).catch(() => null);
+  };
+
+  const sendRating = (event: FormEvent) => {
+    event.preventDefault();
+    if (!rating) return;
+    run(async () => {
+      take(await post(`${base}/rate`, { token, rating, comment: comment.trim(), after: lastId.current }));
     });
   };
 
@@ -229,6 +251,10 @@ export default function PublicChat() {
   const colour = info?.colour || '#1f5eff';
   const style = { '--chat-colour': colour } as CSSProperties;
   const shown: Message[] = messages.length || !info?.welcome ? messages : [{ id: 0, from: 'bot', body: info.welcome, at: '' }];
+  const online = state?.online ?? info?.online ?? true;
+  // "Seen" goes under the visitor's newest message once the team has read it
+  const lastMine = [...shown].reverse().find((message) => message.from === 'visitor');
+  const seen = Boolean(lastMine && state?.seen_up_to && lastMine.id <= state.seen_up_to);
 
   return (
     <div className={`chat-public ${embedded ? 'embedded' : ''}`} style={style}>
@@ -240,6 +266,7 @@ export default function PublicChat() {
           <header className="chat-header">
             <strong>{info.company}</strong>
             {info.hours && <small>Hours: {info.hours}</small>}
+            {!online && <small>We're away right now. Leave a message and your email, and we'll reply when we're back.</small>}
           </header>
 
           <div className="chat-messages" aria-live="polite">
@@ -251,15 +278,30 @@ export default function PublicChat() {
                     <small>{message.from === 'visitor' ? 'You' : message.from === 'bot' ? `${info.company} (automatic reply)` : info.company}
                       {message.at && ` · ${timeText(message.at)}`}</small>
                     <div className="chat-body">{message.body}</div>
+                    {seen && message.id === lastMine?.id && <small className="chat-seen">Seen</small>}
                   </div>
                 )
             ))}
+            {state?.staff_typing && <p className="chat-typing">{info.company} is typing…</p>}
 
             {state?.needs_contact && (
               <form className="chat-contact" onSubmit={saveContact}>
                 <label>Your name<input maxLength={100} value={contact.name} onChange={(e) => setContact({ ...contact, name: e.target.value })} /></label>
                 <label>Your email<input type="email" required maxLength={254} value={contact.email} onChange={(e) => setContact({ ...contact, email: e.target.value })} /></label>
                 <button className="chat-send" disabled={busy}>Send my details</button>
+              </form>
+            )}
+            {state?.can_rate && (
+              <form className="chat-contact" onSubmit={sendRating}>
+                <strong>How was this chat?</strong>
+                <div className="chat-stars" role="radiogroup" aria-label="Rating">
+                  {[1, 2, 3, 4, 5].map((value) => (
+                    <button key={value} type="button" role="radio" aria-checked={rating === value} aria-label={`${value} of 5`}
+                      className={value <= rating ? 'on' : ''} onClick={() => setRating(value)}>★</button>
+                  ))}
+                </div>
+                <label>Anything to add? (optional)<textarea rows={2} maxLength={500} value={comment} onChange={(e) => setComment(e.target.value)} /></label>
+                <button className="chat-send" disabled={busy || !rating}>Send rating</button>
               </form>
             )}
             <div ref={bottom} />
@@ -275,7 +317,7 @@ export default function PublicChat() {
               </>
             )}
             <textarea rows={2} maxLength={1000} aria-label="Message" placeholder="Type your message"
-              value={text} onChange={(e) => setText(e.target.value)} onKeyDown={onKey} />
+              value={text} onChange={(e) => typed(e.target.value)} onKeyDown={onKey} />
             <div className="chat-compose-actions">
               {state?.status !== 'waiting' && (
                 <button type="button" className="link" disabled={busy} onClick={askPerson}>Talk to a person</button>

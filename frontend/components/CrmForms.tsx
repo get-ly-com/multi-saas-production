@@ -1,6 +1,7 @@
 import { FormEvent, useEffect, useState } from 'react';
 import { CustomInputs, useCustomFields } from '@/components/CustomFields';
 import Modal from '@/components/Modal';
+import { TagPicker, useTags } from '@/components/Tags';
 import { api } from '@/lib/api';
 import { CATEGORIES } from '@/lib/forecast';
 
@@ -59,10 +60,11 @@ type FormProps = { initial?: any; onClose: () => void; onSaved: (result?: any) =
 export function CompanyForm({ initial, onClose, onSaved }: FormProps) {
   const members = useTeam();
   const fields = useCustomFields('company');
+  const tags = useTags();
   const { form, set, error, submit } = useForm(
-    { name: '', website: '', industry: '', phone: '', notes: '', owner_id: '', custom: {}, ...initial },
-    ({ id, name, website, industry, phone, notes, owner_id, custom }) => {
-      const body = { name, website, industry, phone, notes, owner_id, custom };
+    { name: '', website: '', industry: '', phone: '', notes: '', owner_id: '', custom: {}, tags: [], ...initial },
+    ({ id, name, website, industry, phone, notes, owner_id, custom, tags }) => {
+      const body = { name, website, industry, phone, notes, owner_id, custom, tags: tags || [] };
       return id ? api.put(`/api/crm/companies/${id}`, body) : api.post('/api/crm/companies', body);
     },
     onClose,
@@ -80,6 +82,7 @@ export function CompanyForm({ initial, onClose, onSaved }: FormProps) {
           <OwnerField value={form.owner_id} members={members} onChange={(value) => set('owner_id', value)} />
           <CustomInputs fields={fields} values={form.custom} onChange={(custom) => set('custom', custom)} />
         </div>
+        <TagPicker value={form.tags} onChange={(ids) => set('tags', ids)} tags={tags} />
         <label style={{ marginTop: 12 }}>Notes<textarea rows={3} value={form.notes || ''} onChange={(e) => set('notes', e.target.value)} /></label>
         <Actions error={error} onClose={onClose} />
       </form>
@@ -90,11 +93,12 @@ export function CompanyForm({ initial, onClose, onSaved }: FormProps) {
 export function ContactForm({ initial, onClose, onSaved }: FormProps) {
   const members = useTeam();
   const fields = useCustomFields('contact');
+  const tags = useTags();
   const [companies, setCompanies] = useState<any[]>([]);
   const { form, set, error, submit } = useForm(
-    { name: '', email: '', phone: '', job_title: '', company_id: '', notes: '', owner_id: '', custom: {}, ...initial },
-    ({ id, name, email, phone, job_title, company_id, notes, owner_id, custom }) => {
-      const body = { name, email, phone, job_title, company_id, notes, owner_id, custom };
+    { name: '', email: '', phone: '', job_title: '', company_id: '', notes: '', owner_id: '', custom: {}, tags: [], ...initial },
+    ({ id, name, email, phone, job_title, company_id, notes, owner_id, custom, tags }) => {
+      const body = { name, email, phone, job_title, company_id, notes, owner_id, custom, tags: tags || [] };
       return id ? api.put(`/api/crm/contacts/${id}`, body) : api.post('/api/crm/contacts', body);
     },
     onClose,
@@ -122,6 +126,7 @@ export function ContactForm({ initial, onClose, onSaved }: FormProps) {
           <OwnerField value={form.owner_id} members={members} onChange={(value) => set('owner_id', value)} />
           <CustomInputs fields={fields} values={form.custom} onChange={(custom) => set('custom', custom)} />
         </div>
+        <TagPicker value={form.tags} onChange={(ids) => set('tags', ids)} tags={tags} />
         <label style={{ marginTop: 12 }}>Notes<textarea rows={3} value={form.notes || ''} onChange={(e) => set('notes', e.target.value)} /></label>
         <Actions error={error} onClose={onClose} />
       </form>
@@ -132,13 +137,14 @@ export function ContactForm({ initial, onClose, onSaved }: FormProps) {
 export function DealForm({ initial, onClose, onSaved }: FormProps) {
   const members = useTeam();
   const fields = useCustomFields('deal');
+  const tags = useTags();
   const [pipelines, setPipelines] = useState<any[]>([]);
   const [contacts, setContacts] = useState<any[]>([]);
   const [companies, setCompanies] = useState<any[]>([]);
   const { form, set, error, submit } = useForm(
-    { title: '', value: '', stage_id: '', contact_id: '', company_id: '', owner_id: '', expected_close: '', forecast_category: '', custom: {}, ...initial },
-    ({ id, title, value, stage_id, contact_id, company_id, owner_id, expected_close, forecast_category, custom }) => {
-      const body = { title, value, stage_id, contact_id, company_id, owner_id, expected_close, forecast_category: forecast_category || '', custom };
+    { title: '', value: '', stage_id: '', contact_id: '', company_id: '', owner_id: '', expected_close: '', forecast_category: '', custom: {}, tags: [], ...initial },
+    ({ id, title, value, stage_id, contact_id, company_id, owner_id, expected_close, forecast_category, custom, tags }) => {
+      const body = { title, value, stage_id, contact_id, company_id, owner_id, expected_close, forecast_category: forecast_category || '', custom, tags: tags || [] };
       return id ? api.put(`/api/crm/deals/${id}`, body) : api.post('/api/crm/deals', body);
     },
     onClose,
@@ -193,6 +199,7 @@ export function DealForm({ initial, onClose, onSaved }: FormProps) {
           <OwnerField value={form.owner_id} members={members} onChange={(value) => set('owner_id', value)} />
           <CustomInputs fields={fields} values={form.custom} onChange={(custom) => set('custom', custom)} />
         </div>
+        <TagPicker value={form.tags} onChange={(ids) => set('tags', ids)} tags={tags} />
         <Actions error={error} onClose={onClose} />
       </form>
     </Modal>
@@ -200,6 +207,13 @@ export function DealForm({ initial, onClose, onSaved }: FormProps) {
 }
 
 export function LostForm({ deal, stageId, onClose, onSaved }: { deal: any; stageId: string; onClose: () => void; onSaved: () => void }) {
+  const [reasons, setReasons] = useState<any[]>([]);
+  const [other, setOther] = useState(false);
+
+  useEffect(() => {
+    api.get('/api/crm/lost-reasons').then(setReasons).catch(() => setReasons([]));
+  }, []);
+
   const { form, set, error, submit } = useForm(
     { lost_reason: '' },
     ({ lost_reason }) => api.put(`/api/crm/deals/${deal.id}`, { stage_id: stageId, lost_reason }),
@@ -210,7 +224,17 @@ export function LostForm({ deal, stageId, onClose, onSaved }: { deal: any; stage
   return (
     <Modal title={`Why was ${deal.title} lost?`}>
       <form onSubmit={submit}>
-        <label>Reason<input required value={form.lost_reason} onChange={(e) => set('lost_reason', e.target.value)} /></label>
+        {reasons.length > 0 && !other ? (
+          <label>Reason
+            <select required value={form.lost_reason} onChange={(e) => (e.target.value === '__other' ? (setOther(true), set('lost_reason', '')) : set('lost_reason', e.target.value))}>
+              <option value="">Choose a reason</option>
+              {reasons.map((reason) => <option key={reason.id} value={reason.name}>{reason.name}</option>)}
+              <option value="__other">Something else…</option>
+            </select>
+          </label>
+        ) : (
+          <label>Reason<input required maxLength={200} value={form.lost_reason} onChange={(e) => set('lost_reason', e.target.value)} /></label>
+        )}
         <Actions error={error} onClose={onClose} />
       </form>
     </Modal>

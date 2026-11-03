@@ -364,3 +364,133 @@ tr.section td { font-weight: 600; padding-top: 16px; }
   .sched-day { min-height: 0; }
   .hours-day { grid-template-columns: 1fr; }
 }
+
+/* CRM: tags, picking many rows, planned activities, stale deals, activity calendar */
+.tag-list { display: inline-flex; flex-wrap: wrap; gap: 4px; align-items: center; }
+.tag { display: inline-flex; align-items: center; gap: 5px; font-size: 12px; line-height: 18px; padding: 0 8px; border-radius: 10px; border: 1px solid var(--border); background: var(--sunken); color: var(--text); white-space: nowrap; }
+.tag::before { content: ''; width: 8px; height: 8px; border-radius: 50%; background: var(--tag-dot, #8a94a3); }
+.tag-red { --tag-dot: #e5484d; } .tag-orange { --tag-dot: #f76b15; } .tag-yellow { --tag-dot: #e2b203; }
+.tag-green { --tag-dot: #30a46c; } .tag-teal { --tag-dot: #12a594; } .tag-blue { --tag-dot: #3e63dd; }
+.tag-purple { --tag-dot: #8e4ec6; } .tag-pink { --tag-dot: #d6409f; } .tag-grey { --tag-dot: #8a94a3; }
+button.tag { cursor: pointer; }
+button.tag.unchosen { opacity: 0.55; background: transparent; }
+button.tag.chosen { border-color: var(--accent); }
+.tag-picker { margin-top: 12px; display: flex; flex-direction: column; gap: 6px; }
+.tag-picker-label { font-size: 14px; color: var(--muted); }
+.tag-picker input { width: 170px; font-size: 13px; padding: 3px 8px; }
+.tag-picker button:not(.tag) { padding: 3px 10px; font-size: 13px; }
+.tag-row { display: inline-flex; align-items: center; gap: 6px; padding: 4px 8px 4px 0; }
+.tag-row select { width: auto; font-size: 12px; padding: 2px 4px; }
+.deal .tag-list { margin-top: 4px; }
+
+.bulk-bar { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; padding: 10px 12px; border: 1px solid var(--accent); border-radius: 8px; background: var(--surface); position: sticky; top: 0; z-index: 5; }
+.bulk-bar select, .bulk-bar input { width: auto; max-width: 240px; }
+.bulk-bar .error { flex-basis: 100%; margin: 0; }
+th.pick, td.pick { width: 32px; padding-right: 0; }
+th.pick input, td.pick input { width: auto; }
+tr.picked td { background: var(--sunken); }
+
+.next-activity { font-size: 12px; color: var(--muted); }
+.next-activity::before { content: '●'; margin-right: 4px; color: var(--good); }
+.next-activity.today::before { color: var(--warn); }
+.next-activity.overdue { color: var(--danger); }
+.next-activity.overdue::before { color: var(--danger); }
+.next-activity.none::before { color: var(--border); }
+.deal.stale { border-left: 3px solid var(--warn); }
+tr.stale td:nth-child(2) { box-shadow: inset 3px 0 0 var(--warn); }
+.stale-note { color: var(--warn); font-size: 12px; }
+
+.stage-line.with-stale { grid-template-columns: 1fr 100px 80px 90px 32px 32px 32px; }
+.stage-line-head { font-size: 12px; margin-top: 8px; }
+
+.calendar { display: grid; grid-template-columns: repeat(7, minmax(0, 1fr)); gap: 4px; margin-top: 8px; }
+.calendar-head { font-size: 12px; color: var(--muted); text-align: center; padding: 4px 0; }
+.calendar-day { min-height: 92px; border: 1px solid var(--border); border-radius: 6px; padding: 4px; display: flex; flex-direction: column; gap: 2px; min-width: 0; }
+.calendar-day.other-month { opacity: 0.5; }
+.calendar-day.is-today { outline: 2px solid var(--accent); }
+.calendar-date { font-size: 12px; color: var(--muted); }
+.calendar-item { display: block; width: 100%; text-align: left; font-size: 12px; padding: 1px 4px; border: 0; border-left: 3px solid var(--good); border-radius: 3px; background: var(--sunken); color: var(--text); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.calendar-item.today { border-left-color: var(--warn); }
+.calendar-item.overdue { border-left-color: var(--danger); }
+.calendar-item.done { opacity: 0.5; text-decoration: line-through; cursor: default; }
+@media (max-width: 760px) {
+  .calendar { grid-template-columns: 1fr; }
+  .calendar-head, .calendar-day.other-month { display: none; }
+  .calendar-day { min-height: 0; }
+  .stage-line.with-stale { grid-template-columns: 1fr 1fr; }
+}
+
+/* Chat: saved replies, typing, seen, ratings, opening hours */
+.chat-typing { color: var(--muted); font-size: 13px; font-style: italic; margin: 0; }
+.chat-seen { display: block; text-align: right; margin-top: 2px; font-size: 11px; opacity: 0.8; }
+.chat-canned { display: grid; gap: 4px; margin-top: 6px; max-height: 220px; overflow-y: auto; }
+.chat-canned .chat-item { display: flex; gap: 8px; align-items: baseline; }
+.chat-hours { display: grid; gap: 6px; }
+.chat-hours-row { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
+.chat-hours-row label.check { margin-top: 0; min-width: 120px; }
+.chat-hours-row input[type="time"] { width: auto; }
+.chat-stars { display: flex; gap: 4px; }
+.chat-stars button { font-size: 26px; line-height: 1; background: none; border: 0; padding: 2px; cursor: pointer; color: var(--border); }
+.chat-stars button.on { color: var(--chat-colour, var(--accent)); }
+.chat-score-row { display: grid; grid-template-columns: 90px 1fr 40px; gap: 10px; align-items: center; }
+
+/* Social: library, results typed in, comments, repeats, best times */
+.social-library-pick { width: auto; max-width: 220px; font-size: 13px; }
+.social-stats { display: flex; flex-wrap: wrap; gap: 6px; align-items: flex-end; margin-top: 6px; }
+.social-stats label { width: 90px; font-size: 12px; }
+.social-comment { border-left: 3px solid var(--border); padding: 2px 0 2px 10px; margin: 6px 0; }
+.social-comment .social-body { margin: 2px 0; }
+.social-comment-form { display: grid; gap: 6px; }
+.social-repeat { display: flex; flex-wrap: wrap; gap: 8px; align-items: flex-end; background: var(--sunken); border-radius: 8px; padding: 10px; }
+.social-repeat label { width: 180px; }
+.social-best { margin: 0; padding-left: 20px; display: grid; gap: 4px; }
+@media (max-width: 700px) {
+  .chat-score-row { grid-template-columns: 80px 1fr 32px; }
+  .social-stats label, .social-repeat label { width: calc(50% - 6px); }
+}
+
+/* Analytics: goals, report builder and daily history */
+.goal-strip { display: grid; gap: 8px; }
+.goal-strip-items { display: grid; grid-template-columns: repeat(auto-fit, minmax(160px, 1fr)); gap: 10px; }
+.goal-meter { position: relative; height: 8px; background: var(--sunken); border-radius: 4px; overflow: hidden; margin: 6px 0; }
+.goal-meter span { display: block; height: 100%; background: var(--accent); }
+.goal-meter span.done { background: var(--good); }
+.goal-meter i { position: absolute; top: 0; bottom: 0; width: 2px; background: var(--text); opacity: 0.5; }
+.month-label { min-width: 130px; text-align: center; align-self: center; }
+.sparkline { width: 100%; height: 60px; display: block; margin-top: 6px; }
+.sparkline path { fill: none; stroke: var(--series-1); stroke-width: 2; vector-effect: non-scaling-stroke; }
+button.link { background: none; border: 0; padding: 0; color: var(--accent); text-align: left; }
+button.link:hover { text-decoration: underline; }
+tr.active td { background: var(--sunken); }
+.report-builder .check { display: flex; align-items: center; gap: 6px; width: auto; }
+
+/* Scheduler: group places, booking questions and answers */
+.slot-places { display: block; font-size: 11px; color: var(--muted); font-weight: 400; }
+.sched-question { margin-bottom: 8px; padding: 10px; }
+.sched-answers { display: grid; gap: 6px; margin: 8px 0; }
+.sched-answers dt { font-size: 12px; color: var(--muted); }
+.sched-answers dd { margin: 0; }
+
+/* HR: buttons viewers may use on their own time and claims */
+.read-only td button.always, .read-only .row-actions button.always { display: inline-block; }
+
+/* HR org chart */
+.org-chart-wrap { overflow-x: auto; }
+.org-chart, .org-chart ul { list-style: none; margin: 0; padding: 0; }
+.org-chart ul { margin-left: 24px; padding-left: 16px; border-left: 1px solid var(--border); }
+.org-chart li { margin: 8px 0; }
+.org-card { display: inline-flex; flex-direction: column; gap: 2px; min-width: 200px; max-width: 100%; padding: 8px 12px; border: 1px solid var(--border); border-radius: 8px; background: var(--surface); color: var(--text); }
+.org-card:hover { border-color: var(--accent); }
+.org-card span { font-size: 13px; }
+.org-card.dim { opacity: 0.55; }
+
+/* HR clock-in kiosk */
+.kiosk { min-height: 100vh; display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 8px; padding: 24px 16px; }
+.kiosk-clock { font-size: 56px; font-weight: 600; font-variant-numeric: tabular-nums; }
+.kiosk-date { margin-bottom: 12px; }
+.kiosk-pad { width: 100%; max-width: 360px; display: flex; flex-direction: column; gap: 12px; }
+.kiosk-value { font-size: 28px; text-align: center; letter-spacing: 6px; padding: 10px; }
+.kiosk-keys { display: grid; grid-template-columns: repeat(3, 1fr); gap: 8px; }
+.kiosk-keys button { font-size: 24px; padding: 16px 0; min-height: 60px; }
+.kiosk-message { font-size: 17px; text-align: center; }
+.kiosk-foot { text-align: center; max-width: 360px; }

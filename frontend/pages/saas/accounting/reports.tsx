@@ -24,12 +24,14 @@ function ReportsApp() {
   const [to, setTo] = useState(today());
   const [asOf, setAsOf] = useState(today());
   const [company, setCompany] = useState('');
+  const [basis, setBasis] = useState<'accrual' | 'cash'>('accrual');
   const [loaded, setLoaded] = useState<{ path: string; data: any } | null>(null);
   const [error, setError] = useState('');
 
   const report = REPORTS.find(({ id }) => id === reportId)!;
   const query = report.dates === 'range' ? `?from=${from}&to=${to}` : report.dates === 'single' ? `?as_of=${asOf}` : '';
-  const path = `/api/accounting/reports/${reportId}${query}`;
+  const cashBasis = reportId === 'profit-and-loss' && basis === 'cash';
+  const path = `/api/accounting/reports/${reportId}${query}${cashBasis ? '&basis=cash' : ''}`;
   // Each report has its own shape, so only draw data fetched for the one on screen
   const data = loaded?.path === path ? loaded.data : null;
 
@@ -80,14 +82,23 @@ function ReportsApp() {
           ) : (
             <label>As of<input type="date" value={asOf} onChange={(e) => e.target.value && setAsOf(e.target.value)} /></label>
           )}
+          {reportId === 'profit-and-loss' && (
+            <label>Basis
+              <select value={basis} onChange={(e) => setBasis(e.target.value as 'accrual' | 'cash')}>
+                <option value="accrual">Accrual (when invoiced and billed)</option>
+                <option value="cash">Cash (when paid)</option>
+              </select>
+            </label>
+          )}
         </div>
       )}
 
       {error && <p className="error">{error}</p>}
 
       <div className="card table-wrap">
-        <h2>{company} · {report.name}</h2>
+        <h2>{company} · {report.name}{cashBasis && ' (cash basis)'}</h2>
         <p className="muted">{period}</p>
+        {cashBasis && <p className="muted">Sales and bills count when they are paid, in proportion to what was paid. Write-offs and credit notes move no money, so they are left out. Other entries, such as depreciation, count on their date.</p>}
         {!data ? <p className="empty">Loading…</p> : (
           <>
             {reportId === 'profit-and-loss' && <ProfitAndLoss data={data} />}

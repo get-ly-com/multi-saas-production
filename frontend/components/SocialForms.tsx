@@ -1,4 +1,4 @@
-import { FormEvent, useState } from 'react';
+import { FormEvent, useEffect, useState } from 'react';
 import Modal from '@/components/Modal';
 import { api } from '@/lib/api';
 import { withTracking } from '@/lib/campaign';
@@ -83,6 +83,8 @@ const POST_HINT: Record<string, string> = {
   instagram: 'Instagram opens. Choose Create, add the image (download it below first), and paste the text as the caption.'
 };
 
+const STAT_FIELDS: [string, string][] = [['likes', 'Likes'], ['comments', 'Comments'], ['shares', 'Shares'], ['clicks', 'Clicks'], ['views', 'Views']];
+
 function TextCounter({ platform, body }: { platform: string; body: string }) {
   const limit = PLATFORMS[platform]?.limit || 0;
   const used = charCount(body);
@@ -116,7 +118,21 @@ export function PostForm({ overview, accounts, post, startDate, onClose, onSaved
   const [file, setFile] = useState<File | null>(null);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState('');
+  const [library, setLibrary] = useState<any[]>([]);
   const set = (field: string, value: string) => setForm({ ...form, [field]: value });
+
+  useEffect(() => {
+    api.get('/api/social-media/snippets').then(setLibrary).catch(() => setLibrary([]));
+  }, []);
+
+  // Text goes on a new line at the end; a hashtag set after a space
+  const addSnippet = (accountId: string, snippetId: string) => {
+    const snippet = library.find((row) => row.id === snippetId);
+    if (!snippet) return;
+    const current = bodies[accountId] || '';
+    const joiner = !current ? '' : snippet.kind === 'hashtags' ? (/\s$/.test(current) ? '' : ' ') : '\n\n';
+    setBodies({ ...bodies, [accountId]: `${current}${joiner}${snippet.body}` });
+  };
 
   const toggle = (accountId: string) =>
     setChosen(chosen.includes(accountId) ? chosen.filter((value) => value !== accountId) : [...chosen, accountId]);
@@ -223,6 +239,12 @@ export function PostForm({ overview, accounts, post, startDate, onClose, onSaved
               </label>
               <div className="social-target-foot">
                 <TextCounter platform={account.platform} body={bodies[accountId] || ''} />
+                {library.length > 0 && (
+                  <select aria-label="Add from library" value="" onChange={(e) => addSnippet(accountId, e.target.value)} className="social-library-pick">
+                    <option value="">Add from library…</option>
+                    {library.map((row) => <option key={row.id} value={row.id}>{row.kind === 'hashtags' ? '# ' : ''}{row.name}</option>)}
+                  </select>
+                )}
                 {chosen.length > 1 && <button type="button" className="link" onClick={() => copyToAll(accountId)}>Use this text for all</button>}
               </div>
             </div>
@@ -262,7 +284,46 @@ export function PostView({ post, overview, onClose, onEdit, onChanged }: {
   const [opened, setOpened] = useState<string | null>(null);
   const [error, setError] = useState('');
   const [notice, setNotice] = useState('');
+  const [comments, setComments] = useState<any[]>([]);
+  const [comment, setComment] = useState('');
+  const [repeat, setRepeat] = useState({ open: false, every: 'week', count: '4' });
+  const [stats, setStats] = useState<Record<string, any>>({});
   const approvalOn = overview.require_approval;
+
+  const loadComments = () =>
+    api.get(`/api/social-media/posts/${post.id}/comments`).then(setComments).catch(() => setComments([]));
+
+  useEffect(() => {
+    loadComments();
+  }, [post.id]);
+
+  const addComment = (event: FormEvent) => {
+    event.preventDefault();
+    if (!comment.trim()) return;
+    act(async () => {
+      await api.post(`/api/social-media/posts/${post.id}/comments`, { body: comment.trim() });
+      setComment('');
+      await loadComments();
+    });
+  };
+
+  const removeComment = (commentId: number) => act(async () => {
+    await api.delete(`/api/social-media/comments/${commentId}`);
+    await loadComments();
+  });
+
+  const copy = (every: string | null, count: number) => act(async () => {
+    const result = await api.post(`/api/social-media/posts/${post.id}/copy`, every ? { every, count } : {});
+    setRepeat({ ...repeat, open: false });
+    return result;
+  }, every
+    ? `Made ${count} repeat${count === 1 ? '' : 's'}. ${approvalOn && !overview.is_manager ? 'They are drafts to send for approval.' : ''}`
+    : 'Copied. The copy is a draft with no date, under “No date yet”.');
+
+  const statsFor = (target: any) => stats[target.id] || {
+    likes: target.likes ?? '', comments: target.comments ?? '', shares: target.shares ?? '', clicks: target.clicks ?? '', views: target.views ?? ''
+  };
+  const saveStats = (target: any) => act(() => api.put(`/api/social-media/targets/${target.id}/stats`, statsFor(target)), 'Results saved.');
   const canEdit = overview.can_edit;
   const waiting = approvalOn && ['draft', 'needs_approval'].includes(post.status);
 
@@ -348,10 +409,22 @@ export function PostView({ post, overview, onClose, onEdit, onChanged }: {
             <p className="social-body">{target.body || <span className="muted">No text</span>}</p>
             <TextCounter platform={target.platform} body={target.body} />
             {target.posted_at ? (
-              <div className="row-actions social-left">
-                <a href={target.post_url} target="_blank" rel="noopener noreferrer">View live post</a>
-                {canEdit && <button onClick={() => act(() => api.delete(`/api/social-media/targets/${target.id}/posted`))}>Undo posted</button>}
-              </div>
+              <>
+                <div className="row-actions social-left">
+                  <a href={target.post_url} target="_blank" rel="noopener noreferrer">View live post</a>
+                  {canEdit && <button onClick={() => act(() => api.delete(`/api/social-media/targets/${target.id}/posted`))}>Undo posted</button>}
+                </div>
+                <div className="social-stats">
+                  {STAT_FIELDS.map(([field, label]) => (
+                    <label key={field}>{label}
+                      <input inputMode="numeric" pattern="[0-9]*" maxLength={10} disabled={!canEdit} value={statsFor(target)[field]}
+                        onChange={(e) => setStats({ ...stats, [target.id]: { ...statsFor(target), [field]: e.target.value.replace(/\D/g, '') } })} />
+                    </label>
+                  ))}
+                  {canEdit && <button type="button" onClick={() => saveStats(target)}>Save results</button>}
+                </div>
+                <small className="muted">{target.stats_at ? `Results from the platform, last typed in ${formatWhen(target.stats_at)}` : 'Type in the results from the platform to see your best times under Results.'}</small>
+              </>
             ) : canEdit && !waiting ? (
               <>
                 {opened === target.id && <p className="muted">{POST_HINT[target.platform]}</p>}
@@ -369,6 +442,43 @@ export function PostView({ post, overview, onClose, onEdit, onChanged }: {
           </div>
         ))}
         {post.targets.length === 0 && <p className="muted">No accounts chosen yet.</p>}
+
+        <h3 className="social-heading">Comments</h3>
+        {comments.length === 0 && <p className="muted">No comments yet. Use them to talk the post over before it’s approved.</p>}
+        {comments.map((row) => (
+          <div key={row.id} className="social-comment">
+            <small className="muted">{memberName(overview.members, row.author_id)} · {formatWhen(row.created_at)}</small>
+            <p className="social-body">{row.body}</p>
+            {canEdit && (overview.is_manager || row.author_id === overview.me) && (
+              <button type="button" className="link" onClick={() => removeComment(row.id)}>Remove</button>
+            )}
+          </div>
+        ))}
+        {canEdit && (
+          <form onSubmit={addComment} className="social-comment-form">
+            <textarea rows={2} maxLength={1000} placeholder="Write a comment for the team" value={comment} onChange={(e) => setComment(e.target.value)} aria-label="Comment" />
+            <div><button type="submit" disabled={!comment.trim()}>Add comment</button></div>
+          </form>
+        )}
+
+        {canEdit && repeat.open && (
+          <div className="social-repeat">
+            <label>Repeat
+              <select value={repeat.every} onChange={(e) => setRepeat({ ...repeat, every: e.target.value })}>
+                <option value="day">Every day</option>
+                <option value="week">Every week</option>
+                <option value="month">Every month</option>
+              </select>
+            </label>
+            <label>How many more times (1 to 12)
+              <input type="number" min={1} max={12} value={repeat.count} onChange={(e) => setRepeat({ ...repeat, count: e.target.value })} />
+            </label>
+            <button className="primary" type="button" disabled={!post.scheduled_at}
+              onClick={() => copy(repeat.every, Math.min(12, Math.max(1, Number(repeat.count) || 1)))}>Make repeats</button>
+            <button type="button" onClick={() => setRepeat({ ...repeat, open: false })}>Cancel</button>
+            {!post.scheduled_at && <small className="muted">Give the post a date first.</small>}
+          </div>
+        )}
 
         {error && <p className="error">{error}</p>}
         {notice && <p className="notice">{notice}</p>}
@@ -389,6 +499,8 @@ export function PostView({ post, overview, onClose, onEdit, onChanged }: {
           {canEdit && ['needs_approval', 'approved', 'scheduled'].includes(post.status) && (
             <button onClick={() => act(() => api.post(`/api/social-media/posts/${post.id}/draft`, {}), 'Back in draft.')}>Back to draft</button>
           )}
+          {canEdit && <button onClick={() => copy(null, 1)}>Copy</button>}
+          {canEdit && !repeat.open && <button onClick={() => setRepeat({ ...repeat, open: true })}>Repeat…</button>}
           {canEdit && <button className="danger" onClick={remove}>Delete</button>}
           <button onClick={onClose}>Close</button>
         </div>

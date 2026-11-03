@@ -86,6 +86,14 @@ function PayRunApp() {
           {draft && (
             <>
               <button disabled={busy} onClick={() => act(() => api.post(`/api/hr/pay-runs/${run.id}/recalculate`, {}), 'Work everyone\'s pay out again from their current pay and leave? Your changes to this run will be lost.')}>Recalculate</button>
+              {run.lines.some((line: any) => line.pay_type === 'hourly') && (
+                <button disabled={busy} onClick={() => act(async () => {
+                  const result = await api.post(`/api/hr/pay-runs/${run.id}/attendance-hours`, {});
+                  const kept = result.kept_usual_hours?.length ? ` Kept usual hours for ${result.kept_usual_hours.join(', ')}, who have no approved time.` : '';
+                  const waiting = result.waiting_entries ? ` ${result.waiting_entries} time entries this month still need approving.` : '';
+                  window.alert(`Hours taken from attendance for ${result.updated} ${result.updated === 1 ? 'person' : 'people'}.${kept}${waiting}`);
+                }, 'Set hourly staff\'s hours to their approved attendance this month? Their taxes are worked out again from your rates.')}>Use attendance hours</button>
+              )}
               <button className="danger" disabled={busy} onClick={remove}>Delete</button>
               <button className="primary" disabled={busy || !run.lines.length} onClick={() => act(() => api.post(`/api/hr/pay-runs/${run.id}/approve`, {}), `Approve ${money(run.gross)} of pay? It's booked in Accounting and can't be changed after, only voided.`)}>Approve</button>
             </>

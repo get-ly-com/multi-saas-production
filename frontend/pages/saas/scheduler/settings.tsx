@@ -96,6 +96,8 @@ function SettingsApp() {
         {manager && <p><button type="button" className="link" onClick={newLink}>Make a new link</button> <span className="muted">if the old one was shared by mistake.</span></p>}
       </div>
 
+      <CalendarFeed canEdit={data.can_edit} onNotice={setNotice} onError={setError} />
+
       <form className="card" onSubmit={submit}>
         <h2>Booking rules</h2>
         <fieldset disabled={!manager} style={{ border: 0, padding: 0, margin: 0 }}>
@@ -128,6 +130,75 @@ function SettingsApp() {
         </fieldset>
         {!manager && <p className="muted">Only owners and admins can change these.</p>}
       </form>
+    </div>
+  );
+}
+
+// Each person's own bookings in Google Calendar, Outlook or Apple Calendar. Calendar apps can't
+// sign in, so the private link itself lets them read it. It is read-only.
+function CalendarFeed({ canEdit, onNotice, onError }: {
+  canEdit: boolean; onNotice: (text: string) => void; onError: (text: string) => void;
+}) {
+  const [token, setToken] = useState<string | null | undefined>(undefined);
+
+  useEffect(() => {
+    api.get('/api/scheduler/feed').then((result) => setToken(result.token)).catch((err) => onError(err.message));
+  }, []);
+
+  const url = token ? `${process.env.NEXT_PUBLIC_API_BASE_URL}/api/book/feed/${token}.ics` : '';
+
+  const make = async () => {
+    if (token && !window.confirm('Make a new link? Calendars using the old link will stop updating.')) return;
+    try {
+      const result = await api.post('/api/scheduler/feed', {});
+      setToken(result.token);
+      onNotice(token ? 'New calendar link made' : 'Calendar link made');
+    } catch (err: any) {
+      onError(err.message);
+    }
+  };
+
+  const stop = async () => {
+    if (!window.confirm('Turn off your calendar link? Calendars using it will stop updating.')) return;
+    try {
+      await api.delete('/api/scheduler/feed');
+      setToken(null);
+      onNotice('Calendar link turned off');
+    } catch (err: any) {
+      onError(err.message);
+    }
+  };
+
+  const copy = async () => {
+    try {
+      await navigator.clipboard.writeText(url);
+      onNotice('Calendar link copied');
+    } catch {
+      onNotice('Select the link and copy it');
+    }
+  };
+
+  return (
+    <div className="card">
+      <h2>See your bookings in your own calendar</h2>
+      <p className="muted">Subscribe to this link in Google Calendar ("Other calendars", then "From URL"), Outlook ("Add calendar", then "Subscribe from web") or Apple Calendar. It shows your bookings from the last 60 days and the next year, and your video meetings. Calendar apps check it every few hours. It is read-only: changes are made here.</p>
+      {token === undefined && <p>Loading…</p>}
+      {token === null && (canEdit
+        ? <button type="button" className="primary" onClick={make}>Make my calendar link</button>
+        : <p className="muted">Viewers don't take bookings, so there's no calendar link.</p>)}
+      {token && (
+        <>
+          <div className="booking-link">
+            <input readOnly value={url} onFocus={(e) => e.target.select()} aria-label="Calendar link" />
+            <button type="button" className="always" onClick={copy}>Copy</button>
+          </div>
+          <p className="muted">Anyone with this link can see your bookings, including customer names and phone numbers. Keep it private.</p>
+          <p className="row-actions">
+            {canEdit && <button type="button" onClick={make}>Make a new link</button>}
+            <button type="button" className="danger" onClick={stop}>Turn off</button>
+          </p>
+        </>
+      )}
     </div>
   );
 }

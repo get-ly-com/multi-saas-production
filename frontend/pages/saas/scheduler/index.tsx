@@ -144,7 +144,9 @@ function Bookings() {
                 {itemsOn(day).map((item) => item.kind === 'booking' ? (
                   <tr key={`b-${item.id}`} className={item.status === 'cancelled' ? 'muted' : ''}>
                     <td>{item.start_time}–{item.end_time}</td>
-                    <td>{item.customer_name}{item.status === 'cancelled' && <span className="badge void"> cancelled</span>}</td>
+                    <td>{item.customer_name}{item.status === 'cancelled' && <span className="badge void"> cancelled</span>}
+                      {item.attendance && <span className={`badge ${item.attendance === 'attended' ? 'paid' : 'failed'}`}> {item.attendance === 'attended' ? 'attended' : 'no-show'}</span>}
+                      {item.session_key && <div className="muted">Group: {item.seats_taken} of {item.capacity} places</div>}</td>
                     <td>{item.service_name}</td>
                     <td>{item.staff_name}</td>
                     <td>{LOCATIONS[item.location_type]}</td>
@@ -188,7 +190,8 @@ function Item({ item, onOpen }: { item: any; onOpen: (item: any) => void }) {
   return (
     <a href="#" className={`sched-item ${item.status === 'cancelled' ? 'cancelled' : ''}`} onClick={(e) => { e.preventDefault(); onOpen(item); }}>
       <strong>{item.start_time}</strong> {item.customer_name}
-      <small>{item.service_name} · {item.staff_name}{item.status === 'cancelled' ? ' · cancelled' : ''}</small>
+      <small>{item.service_name} · {item.staff_name}{item.session_key ? ` · group ${item.seats_taken}/${item.capacity}` : ''}
+        {item.attendance === 'no_show' ? ' · no-show' : ''}{item.status === 'cancelled' ? ' · cancelled' : ''}</small>
     </a>
   );
 }

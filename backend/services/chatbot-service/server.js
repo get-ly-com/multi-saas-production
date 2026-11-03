@@ -18,7 +18,15 @@ const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 const STATUSES = ['open', 'waiting', 'closed'];
 // The token column is not readable by staff, so it is never listed here
 const CONVERSATION_FIELDS = 'id, status, visitor_name, visitor_email, started_on, wants_person, assigned_to, lead_id, '
-  + 'contact_id, campaign, staff_unread, visitor_messages, last_message, last_message_at, created_at, closed_at';
+  + 'contact_id, campaign, staff_unread, visitor_messages, last_message, last_message_at, created_at, closed_at, '
+  + 'rating, rating_comment, rated_at, visitor_typing_at';
+const TICKET_STATUSES = ['new', 'in_progress', 'waiting', 'solved'];
+const PRIORITIES = ['low', 'normal', 'high', 'urgent'];
+const TICKET_FIELDS = 'id, number, subject, description, status, priority, assigned_to, conversation_id, contact_id, '
+  + 'customer_name, customer_email, due_at, solved_at, created_by, created_at, updated_at';
+// The visitor counts as typing for a few seconds after the chat page last said so
+const TYPING_MS = 6000;
+const typingNow = (value) => Boolean(value) && Date.now() - Date.parse(value) < TYPING_MS;
 
 const chat = (req) => req.db.schema('chat');
 
@@ -138,8 +146,31 @@ app.get('/conversations/:id', handle(async (req) => {
       .eq('tenant_id', req.tenantId).eq('id', found[0].contact_id));
     contact = linked[0] || null;
   }
-  return { ...found[0], contact, messages: after > 0 ? messages : messages.reverse() };
+  // Unsolved tickets made from this chat
+  const tickets = await rows(chat(req).from('tickets').select('id, number, status')
+    .eq('tenant_id', req.tenantId).eq('conversation_id', conversationId).neq('status', 'solved').limit(5));
+  const { visitor_typing_at: typingAt, ...conversation } = found[0];
+  return {
+    ...conversation, contact, tickets, visitor_typing: typingNow(typingAt),
+    messages: after > 0 ? messages : messages.reverse()
+  };
 }));
+
+// Staff are typing a reply; the visitor sees "typing..."
+app.post('/conversations/:id/typing', async (req, res) => {
+  try {
+    await call(req, 'typing', { p_conversation: id(req.params.id, 'Chat') });
+  } catch {
+    // Not worth an error
+  }
+  res.json({ success: true });
+});
+
+// A chat becomes a ticket, or gives back its unsolved one
+app.post('/conversations/:id/ticket', callChat('ticket_from_chat', (req) => ({
+  p_conversation: id(req.params.id, 'Chat'),
+  p_priority: PRIORITIES.includes(req.body.priority) ? req.body.priority : 'normal'
+}), 201));
 
 // CRM contacts to link a chat to. ?q=name or email
 app.get('/contacts', handle((req) => {
@@ -216,10 +247,21 @@ app.get('/settings', handle(async (req) => {
 
 app.put('/settings', callChat('save_settings', (req) => {
   const data = {};
-  for (const field of ['enabled', 'bot_enabled']) {
+  for (const field of ['enabled', 'bot_enabled', 'hours_enabled', 'ask_rating']) {
     if (req.body[field] !== undefined) data[field] = Boolean(req.body[field]);
   }
-  for (const [field, max] of [['welcome_message', 500], ['handoff_message', 500], ['opening_hours', 200]]) {
+  if (req.body.hours_timezone !== undefined) data.hours_timezone = text(req.body.hours_timezone, 64).trim();
+  // The database checks the times and targets themselves
+  if (req.body.weekly_hours !== undefined) {
+    if (!Array.isArray(req.body.weekly_hours) || req.body.weekly_hours.length !== 7) throw new Error('Give opening hours for each day of the week');
+    data.weekly_hours = req.body.weekly_hours.map((day) => (day && typeof day === 'object'
+      ? { from: text(day.from, 5), to: text(day.to, 5) } : null));
+  }
+  if (req.body.sla_hours !== undefined) {
+    const sla = req.body.sla_hours || {};
+    data.sla_hours = Object.fromEntries(PRIORITIES.map((level) => [level, text(sla[level], 4).trim() || '0']));
+  }
+  for (const [field, max] of [['welcome_message', 500], ['handoff_message', 500], ['offline_message', 500], ['opening_hours', 200]]) {
     if (req.body[field] === undefined) continue;
     const value = text(req.body[field], max + 1).trim();
     if (value.length > max) throw new Error(`That message can be up to ${max} characters`);
@@ -233,5 +275,88 @@ app.put('/settings', callChat('save_settings', (req) => {
 }));
 
 app.post('/settings/key', callChat('new_key', () => ({})));
+
+// Saved replies, typed as /shortcut in the reply box
+app.get('/canned', handle((req) =>
+  rows(chat(req).from('canned_replies').select('id, shortcut, body, created_by, updated_at')
+    .eq('tenant_id', req.tenantId).order('shortcut').limit(200))));
+const cannedFields = (req) => {
+  const shortcut = text(req.body.shortcut, 40).trim().replace(/^\/+/, '').toLowerCase();
+  const body = text(req.body.body, 2001).trim();
+  if (!/^[a-z0-9][a-z0-9_-]{0,29}$/.test(shortcut)) throw new Error('Shortcuts are up to 30 letters, numbers, - or _, with no spaces');
+  if (!body || body.length > 2000) throw new Error('Enter the reply, up to 2000 characters');
+  return { p_shortcut: shortcut, p_body: body };
+};
+app.post('/canned', callChat('save_canned', (req) => ({ p_reply: null, ...cannedFields(req) }), 201));
+app.put('/canned/:id', callChat('save_canned', (req) => ({ p_reply: id(req.params.id, 'Saved reply'), ...cannedFields(req) })));
+app.delete('/canned/:id', callChat('delete_canned', (req) => ({ p_reply: id(req.params.id, 'Saved reply') })));
+
+// Ratings visitors gave. ?days=7..365 (default 30)
+app.get('/ratings', callChat('rating_stats', (req) => {
+  const days = Number(req.query.days);
+  return { p_days: Number.isInteger(days) ? Math.min(Math.max(days, 1), 365) : 30 };
+}));
+
+// Tickets. ?status=open (default: not solved)|new|in_progress|waiting|solved|all, ?mine=1&me=, ?overdue=1, ?q=
+app.get('/tickets', handle((req) => {
+  let query = chat(req).from('tickets').select(TICKET_FIELDS).eq('tenant_id', req.tenantId);
+  if (TICKET_STATUSES.includes(req.query.status)) query = query.eq('status', req.query.status);
+  else if (req.query.status !== 'all') query = query.neq('status', 'solved');
+  if (req.query.mine === '1' && UUID.test(req.query.me || '')) query = query.eq('assigned_to', req.query.me);
+  if (req.query.overdue === '1') query = query.in('status', ['new', 'in_progress']).lt('due_at', new Date().toISOString());
+  if (PRIORITIES.includes(req.query.priority)) query = query.eq('priority', req.query.priority);
+  const search = text(req.query.q, 100).replace(/[%_,()*\\]/g, ' ').trim();
+  if (search) {
+    const number = /^#?\d{1,9}$/.test(search) ? Number(search.replace('#', '')) : null;
+    query = query.or(`subject.ilike.%${search}%,customer_name.ilike.%${search}%,customer_email.ilike.%${search}%`
+      + (number ? `,number.eq.${number}` : ''));
+  }
+  return rows(query.order('due_at', { ascending: true, nullsFirst: false }).order('number', { ascending: false }).limit(300));
+}));
+
+app.get('/tickets/:id', handle(async (req) => {
+  const ticketId = id(req.params.id, 'Ticket');
+  const [found, notes] = await Promise.all([
+    rows(chat(req).from('tickets').select(TICKET_FIELDS).eq('tenant_id', req.tenantId).eq('id', ticketId)),
+    rows(chat(req).from('ticket_notes').select('id, author_id, kind, body, created_at').eq('ticket_id', ticketId).order('id').limit(200))
+  ]);
+  if (!found.length) throw notFound('Ticket not found');
+  let contact = null;
+  if (found[0].contact_id) {
+    const linked = await rows(req.db.schema('crm').from('contacts').select('id, name, email')
+      .eq('tenant_id', req.tenantId).eq('id', found[0].contact_id));
+    contact = linked[0] || null;
+  }
+  return { ...found[0], contact, notes };
+}));
+
+const ticketFields = (body) => {
+  const subject = text(body.subject, 201).trim();
+  if (!subject || subject.length > 200) throw new Error('Enter a subject, up to 200 characters');
+  const description = text(body.description, 4001).trim();
+  if (description.length > 4000) throw new Error('Descriptions can be up to 4000 characters');
+  if (body.priority && !PRIORITIES.includes(body.priority)) throw new Error('Choose a priority');
+  return {
+    subject,
+    description,
+    priority: body.priority || 'normal',
+    assigned_to: body.assigned_to ? id(body.assigned_to, 'Team member') : null,
+    contact_id: body.contact_id ? id(body.contact_id, 'Contact') : null,
+    customer_name: text(body.customer_name, 100).trim(),
+    customer_email: text(body.customer_email, 254).trim()
+  };
+};
+app.post('/tickets', callChat('save_ticket', (req) => ({ p_ticket: null, p_data: ticketFields(req.body) }), 201));
+app.put('/tickets/:id', callChat('save_ticket', (req) => ({ p_ticket: id(req.params.id, 'Ticket'), p_data: ticketFields(req.body) })));
+app.post('/tickets/:id/status', callChat('set_ticket_status', (req) => {
+  if (!TICKET_STATUSES.includes(req.body.status)) throw new Error('Choose a status');
+  return { p_ticket: id(req.params.id, 'Ticket'), p_status: req.body.status };
+}));
+app.post('/tickets/:id/notes', callChat('add_ticket_note', (req) => {
+  const body = text(req.body.body, 2001).trim();
+  if (!body || body.length > 2000) throw new Error('Write a note of up to 2000 characters');
+  return { p_ticket: id(req.params.id, 'Ticket'), p_body: body };
+}, 201));
+app.delete('/tickets/:id', callChat('delete_ticket', (req) => ({ p_ticket: id(req.params.id, 'Ticket') })));
 
 app.listen(PORT, () => console.log(`💬 Chat Service on ${PORT}`));

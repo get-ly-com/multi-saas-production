@@ -23,6 +23,11 @@ const RESOURCES = [
     fields: 'id, sku, name, quantity, price, reorder_level, created_at, updated_at'
   },
   {
+    name: 'leads',
+    label: 'Leads',
+    fields: 'id, name, email, phone, company_name, job_title, source, campaign, status (new, working, disqualified, converted), score, converted_contact_id, converted_at, created_at, updated_at'
+  },
+  {
     name: 'deals',
     label: 'Deals',
     fields: 'id, title, value, stage, status (open, won, lost), contact_id, company_id, expected_close, closed_at, created_at, updated_at'
@@ -53,8 +58,9 @@ function Guide() {
       <IntegrationsNav />
       <h1>API guide</h1>
       <p className="muted">
-        The API lets your own tools read this company's data. It is read-only for now: nothing can be changed through it.
-        Owners and admins make keys on the <Link href="/saas/integrations/keys">API keys</Link> page.
+        The API lets your own tools read this company's data, and add contacts and leads. Nothing else can be changed through it.
+        Owners and admins make keys on the <Link href="/saas/integrations/keys">API keys</Link> page. A key is either read only, or
+        can read and add contacts and leads.
       </p>
 
       <div className="card">
@@ -88,6 +94,25 @@ function Guide() {
         <pre className="code-block">{`curl ${base}/deals/2b1e…-…-…  -H "Authorization: Bearer gk_your_key"`}</pre>
       </div>
 
+      <div className="card">
+        <h2>Adding contacts and leads</h2>
+        <p>
+          <code>POST {base}/contacts</code> or <code>POST {base}/leads</code> with a JSON body. This needs a key that can read and write.
+          A name (or <code>first_name</code> and <code>last_name</code>) is needed; a lead also needs an email or a phone number.
+        </p>
+        <pre className="code-block">{`curl -X POST ${base}/leads   -H "Authorization: Bearer gk_your_key"   -H "Content-Type: application/json"   -d '{"name": "Ada Lovelace", "email": "ada@example.com", "company": "Analytical Engines",
+       "phone": "+44 20 7946 0000", "job_title": "Engineer", "message": "Wants a demo",
+       "source": "Website", "campaign": "autumn"}'
+
+{ "created": true, "data": { "id": "…", "name": "Ada Lovelace", "status": "new", "source": "Website", … } }`}</pre>
+        <p className="muted">
+          The answer is <code>201</code> with <code>created: true</code> for a new record. If a contact with that email already exists, or an
+          open lead does, you get <code>200</code> with <code>created: false</code> and that record, so sending the same person twice is safe
+          (an open lead gets a note with the new message). Without a <code>source</code>, records are marked as coming from the API. Each key
+          can add 20 records a minute, and the company up to 500 a day.
+        </p>
+      </div>
+
       <div className="card table-wrap">
         <h2>Resources</h2>
         <table>
@@ -107,14 +132,20 @@ function Guide() {
 
       <div className="card table-wrap">
         <h2>Limits and errors</h2>
-        <p>Each key can make 60 requests a minute. Errors come back as <code>{'{ "error": "…" }'}</code> with one of these statuses:</p>
+        <p>
+          Each key can make 60 requests a minute. Every request is listed in the key's log on the API keys page (the method, address and
+          result; never what was sent). Errors come back as <code>{'{ "error": "…" }'}</code> with one of these statuses:
+        </p>
         <table>
           <thead><tr><th>Status</th><th>Meaning</th></tr></thead>
           <tbody>
+            <tr><td>400</td><td>The body isn't valid JSON</td></tr>
             <tr><td>401</td><td>The key is missing, wrong or revoked</td></tr>
+            <tr><td>403</td><td>The key can only read</td></tr>
             <tr><td>404</td><td>No such resource or record</td></tr>
-            <tr><td>405</td><td>Only GET is allowed</td></tr>
-            <tr><td>429</td><td>Too many requests. Wait a minute and try again.</td></tr>
+            <tr><td>405</td><td>That resource can't be changed through the API</td></tr>
+            <tr><td>422</td><td>A field is missing or not valid; the message says which</td></tr>
+            <tr><td>429</td><td>Too many requests. Wait a minute (or until tomorrow for the daily limit) and try again.</td></tr>
           </tbody>
         </table>
       </div>
@@ -122,6 +153,7 @@ function Guide() {
       <div className="card table-wrap">
         <h2>Getting told when things change</h2>
         <p>
+          To get leads from a tool that can only send to a web address, use an <Link href="/saas/integrations/inbound">incoming webhook</Link>.
           Instead of asking the API again and again, add a <Link href="/saas/integrations">webhook</Link>. We send a signed message to your
           address when one of these happens. The details are in the message's <code>data</code>.
         </p>

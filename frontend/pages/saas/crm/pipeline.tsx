@@ -1,29 +1,55 @@
 import Link from 'next/link';
 import { useEffect, useState } from 'react';
 import AppShell from '@/components/AppShell';
+import { NextActivity, PlanForm, dueState } from '@/components/ActivityForms';
+import BulkBar, { useSelection } from '@/components/BulkBar';
 import CrmNav from '@/components/CrmNav';
-import { DealForm, LostForm } from '@/components/CrmForms';
+import { DealForm, LostForm, useTeam } from '@/components/CrmForms';
+import { TagChips, TagFilter, tagNames, useTags } from '@/components/Tags';
 import { api, formatDate, money, today } from '@/lib/api';
+import { downloadCsv } from '@/lib/csv';
 
 export default function Pipeline() {
   return <AppShell><PipelineApp /></AppShell>;
 }
 
+const VIEW_KEY = 'crm-pipeline-view';
+
+const savedView = () => {
+  try {
+    return window.localStorage.getItem(VIEW_KEY) === 'list' ? 'list' : 'board';
+  } catch {
+    return 'board';
+  }
+};
+
 function PipelineApp() {
+  const members = useTeam();
+  const tags = useTags();
   const [pipelines, setPipelines] = useState<any[]>([]);
   const [pipelineId, setPipelineId] = useState('');
   const [deals, setDeals] = useState<any[]>([]);
+  const [signals, setSignals] = useState<Record<string, any>>({});
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState('');
+  const [notice, setNotice] = useState('');
   const [adding, setAdding] = useState(false);
   const [losing, setLosing] = useState<any>(null);
+  const [planning, setPlanning] = useState<any>(null);
   const [dragged, setDragged] = useState('');
+  const [view, setView] = useState<'board' | 'list'>('board');
+  const [filters, setFilters] = useState({ search: '', owner: '', tag: '', focus: '', status: 'open' });
 
   const load = async () => {
     try {
-      const [pipelineRows, dealRows] = await Promise.all([api.get('/api/crm/pipelines'), api.get('/api/crm/deals')]);
+      const [pipelineRows, dealRows, signalMap] = await Promise.all([
+        api.get('/api/crm/pipelines'),
+        api.get('/api/crm/deals'),
+        api.get('/api/crm/deal-signals')
+      ]);
       setPipelines(pipelineRows);
       setDeals(dealRows);
+      setSignals(signalMap || {});
       setPipelineId((current) => current || pipelineRows[0]?.id || '');
       setError('');
     } catch (err: any) {
@@ -34,11 +60,42 @@ function PipelineApp() {
   };
 
   useEffect(() => {
+    setView(savedView());
     load();
   }, []);
 
+  const changeView = (next: 'board' | 'list') => {
+    setView(next);
+    try {
+      window.localStorage.setItem(VIEW_KEY, next);
+    } catch {
+      // The choice lasts until the page reloads
+    }
+  };
+
   const pipeline = pipelines.find(({ id }) => id === pipelineId);
   const stages = pipeline ? [...pipeline.stages].sort((a, b) => a.position - b.position) : [];
+  const set = (name: string, value: string) => setFilters({ ...filters, [name]: value });
+
+  const matches = (deal: any) => {
+    const text = filters.search.trim().toLowerCase();
+    if (text && ![deal.title, deal.contact?.name, deal.company?.name].some((value) => (value || '').toLowerCase().includes(text))) return false;
+    if (filters.owner === 'none' && deal.owner_id) return false;
+    if (filters.owner && filters.owner !== 'none' && deal.owner_id !== filters.owner) return false;
+    if (filters.tag && !(deal.tags || []).includes(filters.tag)) return false;
+    const signal = signals[deal.id];
+    if (filters.focus === 'stale' && !signal?.stale) return false;
+    if (filters.focus === 'overdue' && !(signal?.next && dueState(signal.next) === 'overdue')) return false;
+    if (filters.focus === 'nothing' && (!signal || signal.next)) return false;
+    return true;
+  };
+
+  const inPipeline = deals.filter((deal) => stages.some(({ id }) => id === deal.stage_id));
+  const shown = inPipeline.filter(matches);
+  const listed = shown.filter((deal) => filters.status === '' || deal.stage?.kind === filters.status);
+  const selection = useSelection(view === 'list' ? listed.map(({ id }) => id) : []);
+
+  const ownerName = (id: string) => members.find(({ user_id }) => user_id === id)?.email || (id ? 'Former member' : 'Unassigned');
 
   const move = async (deal: any, stageId: string) => {
     if (deal.stage_id === stageId) return;
@@ -51,30 +108,81 @@ function PipelineApp() {
     }
   };
 
+  const exportCsv = () => {
+    const rows = selection.selected.length ? listed.filter(({ id }) => selection.has(id)) : listed;
+    downloadCsv(`deals-${today()}.csv`, [
+      ['Deal', 'Stage', 'Value', 'Contact', 'Company', 'Owner', 'Expected close', 'Next activity', 'Next activity date', 'Days since last touch', 'Tags', 'Lost reason'],
+      ...rows.map((deal) => {
+        const signal = signals[deal.id];
+        return [deal.title, deal.stage?.name, Number(deal.value || 0), deal.contact?.name, deal.company?.name, ownerName(deal.owner_id),
+          deal.expected_close, signal?.next?.subject, signal?.next?.due_on, signal?.idle_days, tagNames(deal.tags, tags), deal.lost_reason];
+      })
+    ]);
+  };
+
+  const staleCount = inPipeline.filter((deal) => signals[deal.id]?.stale).length;
+  const bulkStages = pipelines.flatMap((row) => [...row.stages].sort((a: any, b: any) => a.position - b.position)
+    .map((stage: any) => ({ ...stage, pipeline: pipelines.length > 1 ? row.name : '' })));
+
   return (
     <div className="stack">
       <CrmNav />
       <div className="page-head">
         <h1>Pipeline</h1>
-        <button className="primary" onClick={() => setAdding(true)}>New deal</button>
+        <div className="row-actions">
+          <div className="tabs" role="group" aria-label="Show as">
+            <button type="button" className={view === 'board' ? 'active' : ''} onClick={() => changeView('board')}>Board</button>
+            <button type="button" className={view === 'list' ? 'active' : ''} onClick={() => changeView('list')}>List</button>
+          </div>
+          {view === 'list' && <button disabled={!listed.length} onClick={exportCsv}>{selection.selected.length ? 'Export selected' : 'Export CSV'}</button>}
+          <button className="primary" onClick={() => setAdding(true)}>New deal</button>
+        </div>
       </div>
 
-      {pipelines.length > 1 && (
-        <div className="report-filters">
+      <div className="report-filters">
+        {pipelines.length > 1 && (
           <label>Pipeline
             <select value={pipelineId} onChange={(e) => setPipelineId(e.target.value)}>
               {pipelines.map(({ id, name }) => <option key={id} value={id}>{name}</option>)}
             </select>
           </label>
-        </div>
-      )}
+        )}
+        <label>Search<input placeholder="Deal, contact or company" value={filters.search} onChange={(e) => set('search', e.target.value)} /></label>
+        <label>Owner
+          <select value={filters.owner} onChange={(e) => set('owner', e.target.value)}>
+            <option value="">Anyone</option>
+            <option value="none">Unassigned</option>
+            {members.map((member) => <option key={member.user_id} value={member.user_id}>{member.email}</option>)}
+          </select>
+        </label>
+        <TagFilter value={filters.tag} onChange={(tag) => set('tag', tag)} tags={tags} />
+        <label>Show
+          <select value={filters.focus} onChange={(e) => set('focus', e.target.value)}>
+            <option value="">All deals</option>
+            <option value="stale">Going stale{staleCount ? ` (${staleCount})` : ''}</option>
+            <option value="overdue">Next step overdue</option>
+            <option value="nothing">Nothing planned</option>
+          </select>
+        </label>
+        {view === 'list' && (
+          <label>Status
+            <select value={filters.status} onChange={(e) => set('status', e.target.value)}>
+              <option value="open">Open</option>
+              <option value="won">Won</option>
+              <option value="lost">Lost</option>
+              <option value="">All</option>
+            </select>
+          </label>
+        )}
+      </div>
 
       {error && <p className="error">{error}</p>}
+      {notice && <p className="notice">{notice}</p>}
 
-      {loading ? <p className="empty">Loading…</p> : (
+      {loading ? <p className="empty">Loading…</p> : view === 'board' ? (
         <div className="board" style={{ gridTemplateColumns: `repeat(${stages.length}, minmax(190px, 1fr))` }}>
           {stages.map((stage) => {
-            const stageDeals = deals.filter((deal) => deal.stage_id === stage.id);
+            const stageDeals = shown.filter((deal) => deal.stage_id === stage.id);
             const total = stageDeals.reduce((sum, deal) => sum + Number(deal.value || 0), 0);
             return (
               <div
@@ -88,28 +196,82 @@ function PipelineApp() {
                 }}
               >
                 <div className="column-head"><span>{stage.name}</span><span>{money(total)}</span></div>
-                {stageDeals.map((deal) => (
-                  <div className="deal" key={deal.id} draggable onDragStart={() => setDragged(deal.id)}>
-                    <div className="deal-title"><Link href={`/saas/crm/deal/${deal.id}`}>{deal.title}</Link></div>
-                    <div className="deal-meta">{money(deal.value)}{deal.contact ? ` · ${deal.contact.name}` : ''}</div>
-                    {deal.expected_close && (
-                      <div className="deal-meta">
-                        <span className={deal.expected_close < today() && stage.kind === 'open' ? 'late' : ''}>Close {formatDate(deal.expected_close)}</span>
-                      </div>
-                    )}
-                    <select aria-label={`Stage of ${deal.title}`} value={deal.stage_id} onChange={(e) => move(deal, e.target.value)}>
-                      {stages.map((option) => <option key={option.id} value={option.id}>{option.name}</option>)}
-                    </select>
-                  </div>
-                ))}
+                {stageDeals.map((deal) => {
+                  const signal = signals[deal.id];
+                  return (
+                    <div className={`deal ${signal?.stale ? 'stale' : ''}`} key={deal.id} draggable onDragStart={() => setDragged(deal.id)}>
+                      <div className="deal-title"><Link href={`/saas/crm/deal/${deal.id}`}>{deal.title}</Link></div>
+                      <div className="deal-meta">{money(deal.value)}{deal.contact ? ` · ${deal.contact.name}` : ''}</div>
+                      {deal.expected_close && (
+                        <div className="deal-meta">
+                          <span className={deal.expected_close < today() && stage.kind === 'open' ? 'late' : ''}>Close {formatDate(deal.expected_close)}</span>
+                        </div>
+                      )}
+                      <TagChips ids={deal.tags} tags={tags} />
+                      {stage.kind === 'open' && (
+                        <div className="deal-meta">
+                          {signal?.next
+                            ? <NextActivity activity={signal.next} />
+                            : <button type="button" className="link" onClick={() => setPlanning(deal)}>Plan an activity</button>}
+                        </div>
+                      )}
+                      {signal?.stale && <div className="deal-meta stale-note">No progress for {signal.idle_days} days</div>}
+                      <select aria-label={`Stage of ${deal.title}`} value={deal.stage_id} onChange={(e) => move(deal, e.target.value)}>
+                        {stages.map((option) => <option key={option.id} value={option.id}>{option.name}</option>)}
+                      </select>
+                    </div>
+                  );
+                })}
               </div>
             );
           })}
         </div>
+      ) : (
+        <>
+          <BulkBar entity="deal" selected={selection.selected} onClear={selection.clear} tags={tags} members={members} stages={bulkStages}
+            onDone={async (message) => { setNotice(message); await load(); }} />
+          <div className="card table-wrap">
+            <table>
+              <thead>
+                <tr>
+                  <th className="pick"><input type="checkbox" aria-label="Select all shown" checked={selection.all} onChange={selection.toggleAll} /></th>
+                  <th>Deal</th><th>Stage</th><th className="num">Value</th><th>Contact</th><th>Owner</th><th>Close</th><th>Next activity</th><th>Tags</th>
+                </tr>
+              </thead>
+              <tbody>
+                {listed.length === 0 && <tr><td colSpan={9} className="empty">{inPipeline.length ? 'No matches' : 'No deals yet'}</td></tr>}
+                {listed.map((deal) => {
+                  const signal = signals[deal.id];
+                  return (
+                    <tr key={deal.id} className={`${selection.has(deal.id) ? 'picked' : ''} ${signal?.stale ? 'stale' : ''}`}>
+                      <td className="pick"><input type="checkbox" aria-label={`Select ${deal.title}`} checked={selection.has(deal.id)} onChange={() => selection.toggle(deal.id)} /></td>
+                      <td className="wrap">
+                        <Link href={`/saas/crm/deal/${deal.id}`}>{deal.title}</Link>
+                        {signal?.stale && <div className="stale-note">No progress for {signal.idle_days} days</div>}
+                      </td>
+                      <td>{deal.stage?.name}{deal.stage?.kind === 'lost' && deal.lost_reason ? <div className="muted">{deal.lost_reason}</div> : null}</td>
+                      <td className="num">{money(deal.value)}</td>
+                      <td className="wrap">{deal.contact ? <Link href={`/saas/crm/contact/${deal.contact.id}`}>{deal.contact.name}</Link> : '—'}</td>
+                      <td>{ownerName(deal.owner_id)}</td>
+                      <td><span className={deal.expected_close && deal.expected_close < today() && deal.stage?.kind === 'open' ? 'late' : ''}>{formatDate(deal.expected_close)}</span></td>
+                      <td className="wrap">
+                        {deal.stage?.kind !== 'open' ? '—' : signal?.next
+                          ? <NextActivity activity={signal.next} />
+                          : <button type="button" className="link" onClick={() => setPlanning(deal)}>Plan an activity</button>}
+                      </td>
+                      <td className="wrap"><TagChips ids={deal.tags} tags={tags} /></td>
+                    </tr>
+                  );
+                })}
+              </tbody>
+            </table>
+          </div>
+        </>
       )}
 
       {adding && <DealForm onClose={() => setAdding(false)} onSaved={load} />}
       {losing && <LostForm deal={losing.deal} stageId={losing.stageId} onClose={() => setLosing(null)} onSaved={load} />}
+      {planning && <PlanForm links={{ deal_id: planning.id }} onClose={() => setPlanning(null)} onSaved={load} />}
     </div>
   );
 }

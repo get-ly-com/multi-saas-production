@@ -4,6 +4,7 @@ import { useEffect, useState } from 'react';
 import AppShell from '@/components/AppShell';
 import { EMPLOYMENT_TYPES, EmployeeForm, LeaveForm, employeeForm, fullName, leaveDates } from '@/components/HrForms';
 import HrNav from '@/components/HrNav';
+import { EmployeeChecklists } from '@/components/HrWork';
 import { api, formatDate, money } from '@/lib/api';
 import { getSupabase } from '@/lib/supabase';
 
@@ -19,6 +20,7 @@ function EmployeeApp() {
   const [manager, setManager] = useState(false);
   const [payroll, setPayroll] = useState(false);
   const [isMe, setIsMe] = useState(false);
+  const [myId, setMyId] = useState('');
   const [editing, setEditing] = useState(false);
   const [asking, setAsking] = useState(false);
   const [error, setError] = useState('');
@@ -34,6 +36,7 @@ function EmployeeApp() {
       setManager(summary.is_manager);
       setPayroll(summary.is_payroll);
       setIsMe(mine.employee?.id === row.id);
+      setMyId(mine.employee?.id || '');
       setError('');
     } catch (err: any) {
       setError(err.message);
@@ -55,6 +58,28 @@ function EmployeeApp() {
   };
 
   if (!person) return <div className="stack"><HrNav />{error ? <p className="error">{error}</p> : <p className="empty">Loading…</p>}</div>;
+
+  const setProbation = async () => {
+    const value = window.prompt('Probation ends on (YYYY-MM-DD). Leave empty for no probation.', person.terms?.probation_end_date || '');
+    if (value === null) return;
+    try {
+      await api.put(`/api/hr/employees/${person.id}/probation`, { probation_end_date: value.trim() || null });
+      await load();
+    } catch (err: any) {
+      setError(err.message);
+    }
+  };
+
+  const setPin = async () => {
+    const value = window.prompt(`New kiosk PIN for ${fullName(person)} (4 to 8 numbers). Tell them in person.`, '');
+    if (!value) return;
+    try {
+      await api.post('/api/hr/attendance/pin', { employee_id: person.id, pin: value.trim() });
+      window.alert('Kiosk PIN saved.');
+    } catch (err: any) {
+      setError(err.message);
+    }
+  };
 
   const pay = person.pay;
   const reports = people.filter((row) => row.manager_id === person.id);
@@ -87,6 +112,11 @@ function EmployeeApp() {
           <div>{EMPLOYMENT_TYPES[person.employment_type]}</div>
           <div>Started {formatDate(person.start_date)}</div>
           {person.end_date && <div>Leaves {formatDate(person.end_date)}</div>}
+          {person.terms?.probation_end_date && <div>Probation ends {formatDate(person.terms.probation_end_date)}</div>}
+          {manager && <div className="row-actions" style={{ justifyContent: 'flex-start' }}>
+            <button onClick={setProbation}>{person.terms?.probation_end_date ? 'Change probation' : 'Set probation'}</button>
+            <button onClick={setPin}>Set kiosk PIN</button>
+          </div>}
         </div>
         <div className="card">
           <div className="stat-label">Reports to</div>
@@ -157,6 +187,8 @@ function EmployeeApp() {
           </table>
         </div>
       )}
+
+      <EmployeeChecklists employee={person} manager={manager} isMe={isMe} isTheirManager={Boolean(myId) && person.manager_id === myId} />
 
       {(manager || isMe) && <EmployeeDocuments employee={person} manager={manager} />}
 

@@ -3,6 +3,7 @@ import { useRouter } from 'next/router';
 import { useEffect, useState } from 'react';
 import AppShell from '@/components/AppShell';
 import CrmNav from '@/components/CrmNav';
+import { TagChips, useTags } from '@/components/Tags';
 import { useTeam } from '@/components/CrmForms';
 import { CustomValues } from '@/components/CustomFields';
 import { ConvertForm, DisqualifyForm, LeadForm, scoreBadge, scoreLabel, statusBadge, statusLabel } from '@/components/LeadForms';
@@ -20,6 +21,7 @@ function LeadApp() {
   const [lead, setLead] = useState<any>(null);
   const [matches, setMatches] = useState<any>({ contacts: [], leads: [] });
   const [error, setError] = useState('');
+  const tags = useTags();
   const [form, setForm] = useState('');
 
   const load = async () => {
@@ -76,6 +78,7 @@ function LeadApp() {
           <div className="page-head">
             <div>
               <h1>{lead.name} <span className={`badge ${statusBadge[lead.status]}`}>{statusLabel[lead.status]}</span></h1>
+              <TagChips ids={lead.tags} tags={tags} />
               <p className="muted">{[lead.job_title, lead.company_name, lead.email, lead.phone, lead.source, owner].filter(Boolean).join(' · ')}</p>
               {lead.campaign && <p className="muted">Campaign: {lead.campaign}</p>}
             </div>

@@ -11,7 +11,7 @@ const SECTIONS = [
   { name: 'Contacts', path: '/saas/crm/contacts' },
   { name: 'Companies', path: '/saas/crm/companies' },
   { name: 'Quotes', path: '/saas/crm/quotes' },
-  { name: 'Tasks', path: '/saas/crm/tasks' },
+  { name: 'Activities', path: '/saas/crm/tasks' },
   { name: 'Reports', path: '/saas/crm/reports' },
   { name: 'Duplicates', path: '/saas/crm/duplicates' },
   { name: 'Automation', path: '/saas/crm/automation' },

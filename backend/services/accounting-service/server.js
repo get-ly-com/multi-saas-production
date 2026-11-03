@@ -727,7 +727,8 @@ const parseDate = (value, label) => {
 
 app.get('/reports/profit-and-loss', async (req, res) => {
   try {
-    const { data, error } = await ledger(req).rpc('profit_and_loss', {
+    // Cash basis counts sales and bills when they are paid
+    const { data, error } = await ledger(req).rpc(req.query.basis === 'cash' ? 'profit_and_loss_cash' : 'profit_and_loss', {
       p_tenant: req.tenantId,
       p_from: parseDate(req.query.from, 'a start date'),
       p_to: parseDate(req.query.to, 'an end date')
@@ -1521,6 +1522,154 @@ app.get('/audit', async (req, res) => {
     sendError(res, error);
   }
 });
+
+const requireId = (value, label) => {
+  if (!UUID.test(value || '')) throw new Error(`Choose ${label}`);
+  return value;
+};
+
+const optionalAmount = (value) => (value === '' || value === null || value === undefined ? null : parseAmount(value));
+
+// Customer statements
+app.get('/customers/:id/statement', (req, res) => callLedger(req, res, 'customer_statement', () => ({
+  p_customer: requireId(req.params.id, 'a customer'),
+  p_from: parseDate(req.query.from, 'a start date'),
+  p_to: parseDate(req.query.to, 'an end date')
+})));
+
+// Writing off what a customer will never pay
+app.post('/invoices/:id/write-off', async (req, res) => {
+  try {
+    const { write_off_date, account_id, reason } = req.body;
+    if (!String(reason || '').trim()) throw new Error('A reason is required');
+
+    const { data, error } = await ledger(req).rpc('write_off_invoice', {
+      p_tenant: req.tenantId,
+      p_invoice: requireId(req.params.id, 'an invoice'),
+      p_date: parseDate(write_off_date, 'a date'),
+      p_account: requireId(account_id, 'an expense account'),
+      p_reason: String(reason).slice(0, 200)
+    });
+
+    if (error) throw error;
+    res.status(201).json({ id: data });
+  } catch (error) {
+    sendError(res, error);
+  }
+});
+
+// Follow-ups: who to chase for overdue invoices
+app.get('/follow-ups', (req, res) => callLedger(req, res, 'followup_list', () => ({})));
+
+app.get('/follow-ups/:customerId/history', (req, res) => callLedger(req, res, 'followup_history', () => ({
+  p_customer: requireId(req.params.customerId, 'a customer')
+})));
+
+app.post('/follow-ups', async (req, res) => {
+  try {
+    const { customer_id, level_name, note, next_date } = req.body;
+    if (next_date && !DATE.test(next_date)) throw new Error('Choose a valid next follow-up date');
+
+    const { data, error } = await ledger(req).rpc('log_followup', {
+      p_tenant: req.tenantId,
+      p_customer: requireId(customer_id, 'a customer'),
+      p_level: level_name || null,
+      p_note: note ? String(note) : null,
+      p_next: next_date || null
+    });
+
+    if (error) throw error;
+    res.status(201).json({ id: data });
+  } catch (error) {
+    sendError(res, error);
+  }
+});
+
+app.put('/follow-ups/levels', (req, res) => callLedger(req, res, 'save_followup_levels', () => {
+  const { levels } = req.body;
+  if (!Array.isArray(levels) || levels.length === 0 || levels.length > 10) throw new Error('Add between one and ten steps');
+
+  return {
+    p_levels: levels.map(({ days_overdue, name, message }) => {
+      const days = Number(days_overdue);
+      if (!Number.isInteger(days) || days < 1 || days > 3650) throw new Error('Days overdue must be a whole number from 1 to 3650');
+      if (!String(name || '').trim() || !String(message || '').trim()) throw new Error('Each step needs a name and a message');
+      return { days_overdue: days, name: String(name).trim(), message: String(message) };
+    })
+  };
+}));
+
+// Bank rules post routine statement lines, such as bank fees, in one go
+app.get('/bank/rules', async (req, res) => {
+  try {
+    const { data, error } = await ledger(req).from('bank_rules')
+      .select('*, account:accounts!bank_rules_account_id_fkey(id, code, name), bank_account:accounts!bank_rules_bank_account_id_fkey(id, code, name)')
+      .eq('tenant_id', req.tenantId)
+      .order('position')
+      .order('created_at');
+
+    if (error) throw error;
+    res.json(data || []);
+  } catch (error) {
+    sendError(res, error);
+  }
+});
+
+app.get('/bank/rules/matches', async (req, res) => {
+  try {
+    const { data, error } = await ledger(req).rpc('bank_rule_matches', {
+      p_tenant: req.tenantId,
+      p_account: requireId(req.query.account_id, 'a bank account')
+    });
+
+    if (error) throw error;
+    res.json(data || []);
+  } catch (error) {
+    sendError(res, error);
+  }
+});
+
+app.post('/bank/rules/apply', (req, res) => callLedger(req, res, 'apply_bank_rules', () => {
+  const { account_id, line_ids } = req.body;
+  if (line_ids !== undefined && (!Array.isArray(line_ids) || !line_ids.every((id) => UUID.test(id || '')))) {
+    throw new Error('Choose the lines to post');
+  }
+  return { p_account: requireId(account_id, 'a bank account'), p_lines: line_ids || null };
+}));
+
+app.post('/bank/rules', async (req, res) => {
+  try {
+    const { id, name, match_text, direction, min_amount, max_amount, bank_account_id, account_id, memo, position, is_active } = req.body;
+    if (id) requireId(id, 'a rule');
+    if (bank_account_id) requireId(bank_account_id, 'a bank account');
+    const order = position === '' || position === undefined || position === null ? null : Number(position);
+    if (order !== null && (!Number.isInteger(order) || order < 0 || order > 9999)) throw new Error('Order must be a whole number from 0 to 9999');
+
+    const { data, error } = await ledger(req).rpc('save_bank_rule', {
+      p_tenant: req.tenantId,
+      p_id: id || null,
+      p_name: String(name || '').slice(0, 80),
+      p_text: String(match_text || '').slice(0, 120),
+      p_direction: direction || 'any',
+      p_min: optionalAmount(min_amount),
+      p_max: optionalAmount(max_amount),
+      p_bank_account: bank_account_id || null,
+      p_account: requireId(account_id, 'an account'),
+      p_memo: memo ? String(memo).slice(0, 200) : null,
+      p_position: order,
+      p_active: is_active === undefined ? true : Boolean(is_active)
+    });
+
+    if (error) throw error;
+    res.status(id ? 200 : 201).json({ id: data });
+  } catch (error) {
+    sendError(res, error);
+  }
+});
+
+app.delete('/bank/rules/:id', (req, res) => callLedger(req, res, 'delete_bank_rule', () => ({
+  p_id: requireId(req.params.id, 'a rule')
+})));
 
 // Error handler
 app.use((err, req, res, next) => {

@@ -4,6 +4,7 @@ import { useEffect, useState } from 'react';
 import AppShell from '@/components/AppShell';
 import Billing from '@/components/Billing';
 import CrmNav from '@/components/CrmNav';
+import { TagChips, useTags } from '@/components/Tags';
 import { ContactForm, DealForm } from '@/components/CrmForms';
 import { CustomValues } from '@/components/CustomFields';
 import Timeline from '@/components/Timeline';
@@ -19,6 +20,7 @@ function ContactApp() {
   const [contact, setContact] = useState<any>(null);
   const [deals, setDeals] = useState<any[]>([]);
   const [error, setError] = useState('');
+  const tags = useTags();
   const [editing, setEditing] = useState(false);
   const [adding, setAdding] = useState(false);
 
@@ -56,6 +58,7 @@ function ContactApp() {
           <div className="page-head">
             <div>
               <h1>{contact.name}</h1>
+              <TagChips ids={contact.tags} tags={tags} />
               <p className="muted">
                 {[contact.job_title, contact.email, contact.phone, contact.source].filter(Boolean).join(' · ')}
                 {contact.company && <> · <Link href={`/saas/crm/company/${contact.company.id}`}>{contact.company.name}</Link></>}

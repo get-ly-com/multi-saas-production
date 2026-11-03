@@ -1,6 +1,7 @@
 require('dotenv').config();
 const express = require('express');
 const { createClient } = require('@supabase/supabase-js');
+const holidays = require('./holidays');
 
 const app = express();
 const PORT = process.env.PORT || 3007;
@@ -161,9 +162,13 @@ app.get('/employees/:id', handle(async (req) => {
     .catch(() => null);
   // Private notes come only to owners and admins, even when accountants can see pay
   const notes = pay[0] ? await call(req, 'employee_notes', { p_employee: employeeId }).catch(() => null) : null;
+  // Probation is only for the person, their manager, owners and admins
+  const terms = await rows(hr(req).from('employment_terms').select('probation_end_date').eq('employee_id', employeeId))
+    .catch(() => []);
   return {
     ...withManagers([found], people)[0],
     pay: pay[0] ? { ...pay[0], notes: typeof notes === 'string' ? notes : null } : null,
+    terms: terms[0] || null,
     leave,
     balances,
     payslips: payslips.sort((a, b) => String(b.run?.period_start).localeCompare(String(a.run?.period_start)))
@@ -396,5 +401,211 @@ app.post('/employees/:id/documents', callHr('add_document', (req) => {
 }, 201));
 
 app.delete('/documents/:id', callHr('delete_document', (req) => ({ p_document: id(req.params.id, 'Document') })));
+
+// Probation end date, and who else may run the shared clock-in kiosk. Owners and admins only.
+app.put('/employees/:id/probation', callHr('set_probation', (req) => ({
+  p_employee: id(req.params.id, 'Employee'),
+  p_date: optionalDate(req.body.probation_end_date, 'Enter a valid probation end date')
+})));
+
+app.put('/settings/kiosk', callHr('set_kiosk_user', (req) => ({ p_user: optionalId(req.body.user_id, 'Team member') })));
+
+// Attendance. Everyone linked to an employee clocks their own time; their manager, owners and admins
+// approve it, and approved hours can go onto hourly pay.
+const timeZone = (value) => (typeof value === 'string' && /^[A-Za-z_+\-/0-9]{1,64}$/.test(value) ? value : 'UTC');
+const STAMP = /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}(:\d{2}(\.\d+)?)?(Z|[+-]\d{2}:\d{2})$/;
+const stamp = (value, message) => {
+  if (typeof value !== 'string' || !STAMP.test(value) || Number.isNaN(Date.parse(value))) throw new Error(message);
+  return value;
+};
+const range = (req, maxDays = 62) => {
+  const from = date(req.query.from, 'Choose a start and end date');
+  const to = date(req.query.to, 'Choose a start and end date');
+  if (to < from || (Date.parse(to) - Date.parse(from)) / 86400000 > maxDays) throw new Error('Choose up to two months');
+  return { from, to };
+};
+
+app.get('/attendance/me', callHr('my_attendance', (req) => ({ p_tz: timeZone(req.query.tz) })));
+app.post('/attendance/clock', callHr('clock', (req) => ({ p_tz: timeZone(req.body.tz) })));
+
+// The shared kiosk answers with an error message instead of failing, so wrong PINs are counted
+app.post('/attendance/kiosk', handle(async (req) => {
+  const number = Number(req.body.employee_number);
+  if (!Number.isInteger(number) || number < 1 || number > 1e9) throw new Error('Enter your employee number');
+  const pin = String(req.body.pin ?? '');
+  if (!/^\d{4,8}$/.test(pin)) throw new Error('Enter your 4 to 8 number PIN');
+  const result = await call(req, 'kiosk_clock', { p_number: number, p_pin: pin, p_tz: timeZone(req.body.tz) });
+  if (result?.error) throw new Error(result.error);
+  return result;
+}));
+
+app.post('/attendance/pin', callHr('set_kiosk_pin', (req) => {
+  const pin = String(req.body.pin ?? '');
+  if (!/^\d{4,8}$/.test(pin)) throw new Error('A PIN is 4 to 8 numbers');
+  return { p_employee: id(req.body.employee_id, 'Employee'), p_pin: pin };
+}));
+
+app.get('/attendance/summary', callHr('attendance_summary', (req) => {
+  const { from, to } = range(req);
+  return { p_from: from, p_to: to };
+}));
+
+app.get('/attendance', handle((req) => {
+  const { from, to } = range(req);
+  let query = hr(req).from('attendance').select('*, employee:employees(id, employee_number, first_name, last_name)')
+    .eq('tenant_id', req.tenantId).gte('work_date', from).lte('work_date', to);
+  if (req.query.employee_id) query = query.eq('employee_id', id(req.query.employee_id, 'Employee'));
+  return rows(query.order('check_in', { ascending: false }).limit(500));
+}));
+
+const attendanceFields = (body) => ({
+  employee_id: optionalId(body.employee_id, 'Employee'),
+  check_in: stamp(body.check_in, 'Enter the time in'),
+  check_out: body.check_out ? stamp(body.check_out, 'Enter a valid time out') : null,
+  break_minutes: Math.round(amount(body.break_minutes, 'break', 601) ?? 0),
+  work_date: optionalDate(body.work_date, 'Choose a valid day'),
+  note: text(body.note, 300).trim(),
+  tz: timeZone(body.tz)
+});
+
+app.post('/attendance', callHr('save_attendance', (req) => ({ p_entry: null, p_data: attendanceFields(req.body) }), 201));
+app.put('/attendance/:id', callHr('save_attendance', (req) => ({
+  p_entry: id(req.params.id, 'Time entry'),
+  p_data: attendanceFields(req.body)
+})));
+app.delete('/attendance/:id', callHr('delete_attendance', (req) => ({ p_entry: id(req.params.id, 'Time entry') })));
+
+app.post('/attendance/approve', callHr('approve_attendance', (req) => ({
+  p_employee: id(req.body.employee_id, 'Employee'),
+  p_from: date(req.body.from, 'Choose a start and end date'),
+  p_to: date(req.body.to, 'Choose a start and end date')
+})));
+
+// Puts approved attendance hours on a draft pay run's hourly lines
+app.post('/pay-runs/:id/attendance-hours', callHr('use_attendance_hours', (req) => ({ p_run: id(req.params.id, 'Pay run') })));
+
+// Expense claims. Staff claim their own with a receipt in the private 'hr-receipts' bucket; their manager,
+// an owner or an admin approves, which books the cost; owners, admins and accountants pay them.
+const CLAIM_STATUSES = ['submitted', 'approved', 'rejected', 'cancelled', 'paid', 'void'];
+
+app.get('/expense-categories', simpleList('expense_categories', '*', 'name'));
+const categoryCall = (req) => ({
+  p_category: req.params.id ? id(req.params.id, 'Category') : null,
+  p_name: text(req.body.name, 60).trim(),
+  p_account: optionalId(req.body.account_id, 'Account'),
+  p_active: req.body.is_active === undefined ? null : Boolean(req.body.is_active)
+});
+app.post('/expense-categories', callHr('save_expense_category', categoryCall, 201));
+app.put('/expense-categories/:id', callHr('save_expense_category', categoryCall));
+
+app.get('/expenses', handle((req) => {
+  let query = hr(req).from('expense_claims')
+    .select('*, employee:employees(id, employee_number, first_name, last_name, manager_id, user_id), category:expense_categories(id, name)')
+    .eq('tenant_id', req.tenantId);
+  if (req.query.status) {
+    if (!CLAIM_STATUSES.includes(req.query.status)) throw new Error('Choose a status');
+    query = query.eq('status', req.query.status);
+  }
+  if (req.query.employee_id) query = query.eq('employee_id', id(req.query.employee_id, 'Employee'));
+  return rows(query.order('created_at', { ascending: false }).limit(500));
+}));
+
+app.post('/expenses', callHr('submit_expense', (req) => {
+  const value = amount(req.body.amount, 'amount', 1e8);
+  if (!value) throw new Error('Enter an amount more than zero');
+  const description = text(req.body.description, 300).trim();
+  if (!description) throw new Error('Say what it was for');
+  return {
+    p_data: {
+      employee_id: id(req.body.employee_id, 'Employee'),
+      expense_date: date(req.body.expense_date, 'Choose the date you spent it'),
+      category_id: id(req.body.category_id, 'Category'),
+      description,
+      amount: value,
+      receipt_path: req.body.receipt_path ? text(req.body.receipt_path, 500) : null
+    }
+  };
+}, 201));
+
+app.post('/expenses/:id/decide', callHr('decide_expense', (req) => {
+  if (!['approved', 'rejected'].includes(req.body.status)) throw new Error('Approve or reject the claim');
+  return { p_claim: id(req.params.id, 'Claim'), p_status: req.body.status, p_note: text(req.body.note, 500).trim() || null };
+}));
+app.post('/expenses/:id/cancel', callHr('cancel_expense', (req) => ({ p_claim: id(req.params.id, 'Claim') })));
+app.post('/expenses/:id/void', callHr('void_expense', (req) => ({ p_claim: id(req.params.id, 'Claim') })));
+app.post('/expenses/pay', callHr('pay_expenses', (req) => {
+  const ids = Array.isArray(req.body.claim_ids) ? [...new Set(req.body.claim_ids)] : [];
+  if (!ids.length || ids.length > 100) throw new Error('Choose up to 100 claims to pay');
+  return {
+    p_claims: ids.map((value) => id(value, 'Claim')),
+    p_account: id(req.body.account_id, 'Bank or cash account'),
+    p_date: date(req.body.date, 'Choose the date it was paid')
+  };
+}));
+
+// Onboarding and offboarding checklists
+const CHECKLIST_KINDS = ['onboarding', 'offboarding'];
+const TASK_OWNERS = ['hr', 'manager', 'employee'];
+
+app.get('/checklists', simpleList('checklist_templates', '*', 'name'));
+const checklistCall = (req) => {
+  if (!CHECKLIST_KINDS.includes(req.body.kind)) throw new Error('Choose onboarding or offboarding');
+  const items = Array.isArray(req.body.items) ? req.body.items.slice(0, 50).map((item) => ({
+    title: text(item?.title, 200).trim(),
+    days: Number.isInteger(Number(item?.days)) ? Number(item.days) : 0,
+    who: TASK_OWNERS.includes(item?.who) ? item.who : 'hr'
+  })) : [];
+  return {
+    p_template: req.params.id ? id(req.params.id, 'Checklist') : null,
+    p_kind: req.body.kind,
+    p_name: text(req.body.name, 100).trim(),
+    p_items: items
+  };
+};
+app.post('/checklists', callHr('save_checklist_template', checklistCall, 201));
+app.put('/checklists/:id', callHr('save_checklist_template', checklistCall));
+app.delete('/checklists/:id', callHr('delete_checklist_template', (req) => ({ p_template: id(req.params.id, 'Checklist') })));
+
+app.get('/employees/:id/tasks', handle((req) =>
+  rows(hr(req).from('employee_tasks').select('*').eq('tenant_id', req.tenantId).eq('employee_id', id(req.params.id, 'Employee'))
+    .order('position').limit(300))));
+app.post('/employees/:id/checklists', callHr('start_checklist', (req) => ({
+  p_employee: id(req.params.id, 'Employee'),
+  p_template: id(req.body.template_id, 'Checklist')
+}), 201));
+app.post('/employees/:id/tasks', callHr('add_task', (req) => {
+  if (!CHECKLIST_KINDS.includes(req.body.kind)) throw new Error('Choose onboarding or offboarding');
+  if (req.body.who && !TASK_OWNERS.includes(req.body.who)) throw new Error('Choose who does this step');
+  return {
+    p_employee: id(req.params.id, 'Employee'),
+    p_kind: req.body.kind,
+    p_title: text(req.body.title, 200).trim(),
+    p_due: optionalDate(req.body.due_date, 'Choose a valid due date'),
+    p_who: req.body.who || 'hr'
+  };
+}, 201));
+app.put('/tasks/:id', callHr('set_task_done', (req) => ({ p_task: id(req.params.id, 'Step'), p_done: Boolean(req.body.done) })));
+app.delete('/tasks/:id', callHr('delete_task', (req) => ({ p_task: id(req.params.id, 'Step') })));
+
+// Starts, last days, probation ends and checklist steps coming up
+app.get('/upcoming', callHr('upcoming_dates', (req) => ({
+  p_days: Math.min(Math.max(parseInt(req.query.days, 10) || 60, 1), 180)
+})));
+
+// Public holidays worked out from each country's rules, added to the company's holidays
+app.get('/public-holidays/countries', (req, res) => res.json(holidays.countries()));
+app.get('/public-holidays', handle(async (req) => {
+  const list = holidays.holidaysFor(String(req.query.country || ''), Number(req.query.year));
+  if (!list) throw new Error('Choose a country and a year between 2000 and 2100');
+  return list;
+}));
+app.post('/public-holidays/import', callHr('import_holidays', (req) => {
+  const list = holidays.holidaysFor(String(req.body.country || ''), Number(req.body.year));
+  if (!list) throw new Error('Choose a country and a year between 2000 and 2100');
+  const skip = new Set(Array.isArray(req.body.skip) ? req.body.skip.map(String) : []);
+  const chosen = list.filter((day) => !skip.has(day.date));
+  if (!chosen.length) throw new Error('Choose at least one holiday');
+  return { p_days: chosen };
+}, 201));
 
 app.listen(PORT, () => console.log(`👔 HR Service on ${PORT}`));

@@ -2,7 +2,8 @@ import Head from 'next/head';
 import Link from 'next/link';
 import { useRouter } from 'next/router';
 import { FormEvent, useEffect, useState } from 'react';
-import { LOCATIONS, addDays, dayLabel } from '@/components/SchedulerNav';
+import { AddToCalendar, Answers } from '@/components/SchedulerForms';
+import { LOCATIONS, addDays, dayLabel, placesText } from '@/components/SchedulerNav';
 import { money } from '@/lib/api';
 
 const BASE_URL = process.env.NEXT_PUBLIC_API_BASE_URL;
@@ -30,6 +31,7 @@ export default function BookingPage() {
   const [slots, setSlots] = useState<any[] | null>(null);
   const [slot, setSlot] = useState<any>(null);
   const [form, setForm] = useState({ name: '', email: '', phone: '', notes: '', website: '' });
+  const [answers, setAnswers] = useState<Record<string, string>>({});
   const [done, setDone] = useState<any>(null);
   const [error, setError] = useState('');
   const [sending, setSending] = useState(false);
@@ -65,6 +67,7 @@ export default function BookingPage() {
 
   const chooseService = (id: string) => {
     setServiceId(id);
+    setAnswers({});
     setStaffId('');
     setSlot(null);
     setError('');
@@ -78,13 +81,13 @@ export default function BookingPage() {
       const result = await getJson(`/api/book/${encodeURIComponent(key as string)}`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ ...form, service_id: service.id, staff_id: staffId || null, start: slot.start, campaign })
+        body: JSON.stringify({ ...form, answers, service_id: service.id, staff_id: staffId || null, start: slot.start, campaign })
       });
       setDone(result);
     } catch (err: any) {
       setError(err.message);
       // The time may have just gone, so show fresh times
-      if (/no longer free|already booked|away on leave|closed that day/i.test(err.message)) {
+      if (/no longer free|already booked|session is full|away on leave|closed that day/i.test(err.message)) {
         setSlot(null);
         setSlots(null);
         const params = new URLSearchParams({ service: service.id, from, days: String(WINDOW) });
@@ -113,13 +116,14 @@ export default function BookingPage() {
                 <p><strong>{done.service}</strong> with {done.with}</p>
                 <p>{dayLabel(done.local_date, true)}, {done.start_time} to {done.end_time} ({done.time_zone})</p>
                 <p>{LOCATIONS[done.location_type]}{done.location_detail ? `: ${done.location_detail}` : ''}</p>
+                <AddToCalendar booking={done} token={done.token} />
                 {done.room_url && (
                   <p>Video link: <a href={done.room_url} target="_blank" rel="noopener noreferrer">{done.room_url}</a><br />
                     <span className="muted">Calls run on Jitsi Meet, a free video service. Open the link at the time of your booking.</span></p>
                 )}
               </div>
               <div className="card">
-                <p><strong>Save this page's link.</strong> We don't send emails, so this is how you get back to your booking or cancel it:</p>
+                <p><strong>Save this page's link.</strong> We don't send emails, so this is how you get back to your booking to change the time or cancel it:</p>
                 <p><Link href={`/book/cancel/${done.token}`}>{cancelLink || 'Manage your booking'}</Link></p>
               </div>
             </>
@@ -139,7 +143,7 @@ export default function BookingPage() {
               {info.services.map((row: any) => (
                 <button key={row.id} type="button" className={`service-choice ${row.id === serviceId ? 'chosen' : ''}`} onClick={() => chooseService(row.id)}>
                   <strong>{row.name}</strong>
-                  <span>{row.duration_minutes} min · {LOCATIONS[row.location_type]}{row.price !== null ? ` · ${money(row.price, info.currency || 'USD')}` : ''}</span>
+                  <span>{row.duration_minutes} min · {LOCATIONS[row.location_type]}{row.capacity > 1 ? ' · group session' : ''}{row.price !== null ? ` · ${money(row.price, info.currency || 'USD')}` : ''}</span>
                   {row.description && <small>{row.description}</small>}
                 </button>
               ))}
@@ -176,7 +180,11 @@ export default function BookingPage() {
                 <div key={date}>
                   <div className="stat-label">{dayLabel(date, true)}</div>
                   <div className="slot-list">
-                    {times.map((row) => <button type="button" key={row.start} onClick={() => setSlot(row)}>{row.time}</button>)}
+                    {times.map((row) => (
+                      <button type="button" key={row.start} onClick={() => setSlot(row)}>
+                        {row.time}{row.seats_left ? <small className="slot-places"> {placesText(row.seats_left)}</small> : null}
+                      </button>
+                    ))}
                   </div>
                 </div>
               ))}
@@ -187,6 +195,7 @@ export default function BookingPage() {
             <form onSubmit={submit} className="stack">
               <div className="card">
                 <strong>{service.name}</strong>, {dayLabel(slot.date, true)} at {slot.time} ({info.time_zone})
+                {slot.seats_left ? <div className="muted">Group session, {placesText(slot.seats_left)}</div> : null}
                 <div><button type="button" className="link" onClick={() => setSlot(null)}>Choose another time</button></div>
               </div>
               <label>Your name<input required maxLength={200} value={form.name} onChange={(e) => setForm({ ...form, name: e.target.value })} /></label>
@@ -194,7 +203,8 @@ export default function BookingPage() {
               <label>Phone{service.location_type === 'phone' ? '' : ' (optional)'}
                 <input required={service.location_type === 'phone'} maxLength={40} value={form.phone} onChange={(e) => setForm({ ...form, phone: e.target.value })} />
               </label>
-              <label>Anything we should know? (optional)<textarea rows={3} maxLength={2000} value={form.notes} onChange={(e) => setForm({ ...form, notes: e.target.value })} /></label>
+              <Answers online questions={service.questions || []} value={answers} onChange={setAnswers} />
+              <label>Anything else we should know? (optional)<textarea rows={3} maxLength={2000} value={form.notes} onChange={(e) => setForm({ ...form, notes: e.target.value })} /></label>
               <label className="trap" aria-hidden="true">Website<input tabIndex={-1} autoComplete="off" value={form.website} onChange={(e) => setForm({ ...form, website: e.target.value })} /></label>
               {service.location_type === 'video' && <p className="muted">You'll get a video link after booking. Calls run on Jitsi Meet, a free video service.</p>}
               {error && <p className="error">{error}</p>}

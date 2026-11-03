@@ -7,6 +7,8 @@ const GROUPS = [
     sections: [
       { name: 'Invoices and expenses', path: '/saas/accounting' },
       { name: 'Customers', path: '/saas/accounting/customers' },
+      { name: 'Follow-ups', path: '/saas/accounting/follow-ups' },
+      { name: 'Statements', path: '/saas/accounting/statements' },
       { name: 'Recurring invoices', path: '/saas/accounting/recurring' },
       { name: 'Revenue schedules', path: '/saas/accounting/revenue' }
     ]

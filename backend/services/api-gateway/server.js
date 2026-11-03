@@ -22,12 +22,16 @@ app.set('trust proxy', 1);
 // Middleware
 app.use(helmet());
 app.use(cors({ origin: allowedOrigins, allowedHeaders: ['Authorization', 'Content-Type', 'X-Company'] }));
-app.use(morgan('combined'));
+// Secret links (incoming webhooks, calendar feeds, visitors' booking links) must never reach the logs
+const SECRET_PATHS = /^(\/api\/hooks\/in\/|\/api\/book\/feed\/|\/api\/book\/cancel\/)[^/?]+/;
+const safePath = (path) => path.replace(SECRET_PATHS, '$1[hidden]');
+morgan.token('safe-url', (req) => safePath(req.originalUrl || req.url));
+app.use(morgan(':remote-addr - :remote-user [:date[clf]] ":method :safe-url HTTP/:http-version" :status :res[content-length] ":referrer" ":user-agent"'));
 app.use(rateLimit({ windowMs: 60 * 1000, limit: 300, standardHeaders: true, legacyHeaders: false }));
 
 // Request logging
 app.use((req, res, next) => {
-  console.log(`[${new Date().toISOString()}] ${req.method} ${req.path}`);
+  console.log(`[${new Date().toISOString()}] ${req.method} ${safePath(req.path)}`);
   next();
 });
 
@@ -256,14 +260,20 @@ app.post('/api/forms/:key', formLimit, express.json({ limit: '16kb' }), async (r
 });
 
 // ---- Public API (Integrations) ----
-// Read-only. Authenticates with a company API key (Authorization: Bearer gk_...), not a
-// signed-in user. The database checks the key's hash, picks the company and counts requests;
-// these limits stop floods before they reach it. Documented at /saas/integrations/api.
+// Authenticates with a company API key (Authorization: Bearer gk_...), not a signed-in user.
+// Every key can read; a key made to "read and write" can also add contacts and leads. The
+// database checks the key's hash, picks the company and counts requests; these limits stop
+// floods before they reach it. Each request is logged against its key (method, path, status and
+// time, never the body). Documented at /saas/integrations/api.
+// Incoming webhooks (POST /api/hooks/in/<token>) add leads from other tools; the token decides
+// the company.
 {
   const crypto = require('crypto');
-  const API_RESOURCES = ['contacts', 'invoices', 'items', 'deals'];
+  const API_RESOURCES = ['contacts', 'invoices', 'items', 'deals', 'leads'];
+  const API_WRITABLE = ['contacts', 'leads'];
   const API_KEY = /^gk_[0-9a-f]{48}$/;
   const API_ID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+  const INBOUND_TOKEN = /^ih_[0-9a-f]{48}$/;
 
   const apiKeyOf = (req) => {
     const [scheme, key] = (req.headers.authorization || '').split(' ');
@@ -275,14 +285,50 @@ app.post('/api/forms/:key', formLimit, express.json({ limit: '16kb' }), async (r
   const perKey = rateLimit({ windowMs: 60 * 1000, limit: 60, standardHeaders: true, legacyHeaders: false,
     keyGenerator: (req) => crypto.createHash('sha256').update(req.apiKey).digest('hex'),
     message: { error: 'Too many requests for this API key. Wait a minute and try again.' } });
+  const writesPerKey = rateLimit({ windowMs: 60 * 1000, limit: 20, standardHeaders: true, legacyHeaders: false,
+    keyGenerator: (req) => crypto.createHash('sha256').update(req.apiKey).digest('hex'),
+    message: { error: 'Too many new records for this API key. Wait a minute and try again.' } });
+
+  // After the answer is sent, the request goes into the key's log. A logging problem never
+  // changes the answer.
+  const logRequest = (req, res) => {
+    const started = Date.now();
+    res.on('finish', () => {
+      try {
+        publicDb().schema('integrations').rpc('api_log', {
+          p_key: req.apiKey,
+          p_method: req.method,
+          p_path: req.originalUrl.split('?')[0].slice(0, 200),
+          p_status: res.statusCode,
+          p_ms: Date.now() - started
+        }).then(({ error }) => error && console.error('[public api log]', error.message), () => {});
+      } catch (error) {
+        console.error('[public api log]', error.message);
+      }
+    });
+  };
 
   const requireApiKey = (req, res, next) => {
     req.apiKey = apiKeyOf(req);
     if (!req.apiKey) return res.status(401).json({ error: 'Send your API key as: Authorization: Bearer gk_...' });
+    logRequest(req, res);
     if (!API_RESOURCES.includes(req.params.resource)) {
       return res.status(404).json({ error: `Unknown resource. Use ${API_RESOURCES.join(', ')}.` });
     }
     next();
+  };
+
+  // A body that isn't valid JSON gets a plain answer instead of the general error page
+  const readBody = (parser, message) => (req, res, next) =>
+    parser(req, res, (error) => (error ? res.status(400).json({ error: message }) : next()));
+  const jsonBody = readBody(express.json({ limit: '16kb' }), 'Send the fields as JSON, up to 16 KB');
+
+  // Database errors named PTxxx carry their own HTTP status and a message meant for the caller
+  const sendWrite = (res, { data, error, status }, created) => {
+    if (!error) return res.status(created(data) ? 201 : 200).json(data);
+    if ([401, 403, 404, 405, 422, 429].includes(status)) return res.status(status).json({ error: error.message });
+    console.error('[public api]', error.message);
+    res.status(400).json({ error: 'The request could not be completed' });
   };
 
   const sendApi = (res, { data, error, status }) => {
@@ -312,7 +358,49 @@ app.post('/api/forms/:key', formLimit, express.json({ limit: '16kb' }), async (r
     }));
   });
 
-  app.all('/api/v1/*', perAddress, (req, res) => res.status(405).json({ error: 'The API is read-only. Use GET.' }));
+  // Adds a contact or a lead. 201 when it is new; 200 with the existing record when the email
+  // was already there (an open lead gets a note instead of a duplicate).
+  app.post('/api/v1/:resource', perAddress, requireApiKey, perKey, writesPerKey, jsonBody, async (req, res) => {
+    if (!API_WRITABLE.includes(req.params.resource)) {
+      return res.status(405).json({ error: 'You can add contacts and leads. Everything else is read-only.' });
+    }
+    const body = req.body && typeof req.body === 'object' && !Array.isArray(req.body) ? req.body : null;
+    if (!body) return res.status(422).json({ error: 'Send the fields as a JSON object' });
+    sendWrite(res, await publicDb().schema('integrations').rpc('api_create', {
+      p_key: req.apiKey,
+      p_resource: req.params.resource,
+      p_data: body
+    }), (data) => data?.created);
+  });
+
+  app.all('/api/v1/*', perAddress, (req, res) =>
+    res.status(405).json({ error: 'Use GET to read, or POST to /contacts or /leads to add one.' }));
+
+  // Incoming webhooks. Form posts and JSON are both accepted. Only the database's own messages
+  // go back to the sender; an unknown or turned-off address is a plain 404.
+  const inboundLimit = rateLimit({ windowMs: 60 * 1000, limit: 30, standardHeaders: true, legacyHeaders: false,
+    message: { error: 'Too many requests. Wait a minute and try again.' } });
+  const inboundBody = [
+    readBody(express.json({ limit: '16kb' }), 'Send the fields as JSON or a form, up to 16 KB'),
+    readBody(express.urlencoded({ extended: false, limit: '16kb' }), 'Send the fields as JSON or a form, up to 16 KB')
+  ];
+
+  app.post('/api/hooks/in/:token', inboundLimit, ...inboundBody, async (req, res) => {
+    if (!INBOUND_TOKEN.test(req.params.token)) return res.status(404).json({ error: 'Not found' });
+    const { data, error, status } = await publicDb().schema('integrations').rpc('receive_inbound', {
+      p_token: req.params.token,
+      p_body: req.body && typeof req.body === 'object' ? req.body : {}
+    });
+    if (error) {
+      if (status === 404) return res.status(404).json({ error: 'Not found' });
+      console.error('[incoming webhook]', error.message);
+      return res.status(400).json({ error: 'The request could not be completed' });
+    }
+    const { status: answer = 200, ...rest } = data || {};
+    res.status([200, 201, 422, 429].includes(answer) ? answer : 200).json(rest);
+  });
+
+  app.all('/api/hooks/in/:token', inboundLimit, (req, res) => res.status(405).json({ error: 'Send leads with POST' }));
 }
 // ---- End of public API ----
 
@@ -344,6 +432,51 @@ app.post('/api/book/cancel/:token', bookingLimit, express.json({ limit: '4kb' })
   });
   if (error) return bookingReply(res, error, 'Could not cancel. Please try again.');
   res.json(data);
+});
+
+// The visitor's booking as a calendar file (.ics) for any calendar app
+app.get('/api/book/cancel/:token/ics', bookingReadLimit, async (req, res) => {
+  if (!BOOKING_TOKEN.test(req.params.token)) return res.status(404).json({ error: 'Booking not found' });
+  const { data, error } = await publicDb().rpc('booking_ics', { p_token: req.params.token });
+  if (error || !data) return res.status(404).json({ error: 'Booking not found' });
+  res.set({ 'Content-Type': 'text/calendar; charset=utf-8', 'Content-Disposition': 'attachment; filename="booking.ics"', 'Cache-Control': 'no-store' });
+  res.send(data);
+});
+
+// Free times the visitor can move their booking to (same service, same person)
+app.get('/api/book/cancel/:token/slots', bookingReadLimit, async (req, res) => {
+  const { from } = req.query;
+  const days = Number(req.query.days || 7);
+  if (!BOOKING_TOKEN.test(req.params.token) || !/^\d{4}-\d{2}-\d{2}$/.test(from || '')
+      || !Number.isInteger(days) || days < 1 || days > 14) {
+    return res.status(400).json({ error: 'Choose a date' });
+  }
+  const { data, error } = await publicDb().rpc('booking_slots_by_token', { p_token: req.params.token, p_from: from, p_days: days });
+  if (error) return bookingReply(res, error, 'Could not load times. Please try again.');
+  res.json(data);
+});
+
+// The visitor moves their booking to another free time
+app.post('/api/book/cancel/:token/move', bookingLimit, express.json({ limit: '4kb' }), async (req, res) => {
+  const start = req.body?.start;
+  if (!BOOKING_TOKEN.test(req.params.token) || typeof start !== 'string' || Number.isNaN(Date.parse(start))) {
+    return res.status(400).json({ error: 'Choose a time' });
+  }
+  const { data, error } = await publicDb().rpc('reschedule_booking_by_token', {
+    p_token: req.params.token, p_start: new Date(start).toISOString()
+  });
+  if (error) return bookingReply(res, error, 'Could not move the booking. Please try again.');
+  res.json(data);
+});
+
+// A team member's private, read-only calendar feed. Calendar apps can't sign in; the link is the key.
+app.get('/api/book/feed/:file', bookingReadLimit, async (req, res) => {
+  const token = req.params.file.replace(/\.ics$/, '');
+  if (!BOOKING_TOKEN.test(token)) return res.status(404).json({ error: 'Calendar not found' });
+  const { data, error } = await publicDb().rpc('staff_feed_ics', { p_token: token });
+  if (error || !data) return res.status(404).json({ error: 'Calendar not found' });
+  res.set({ 'Content-Type': 'text/calendar; charset=utf-8', 'Cache-Control': 'private, max-age=300' });
+  res.send(data);
 });
 
 app.get('/api/book/:key', bookingReadLimit, async (req, res) => {
@@ -380,12 +513,19 @@ app.post('/api/book/:key', bookingLimit, express.json({ limit: '16kb' }), async 
   // The campaign from the page's own link (utm_campaign or ?campaign=). A long one is cut, not refused.
   const campaign = typeof req.body.campaign === 'string'
     ? req.body.campaign.replace(/[\u0000-\u001f\u007f]/g, '').trim().slice(0, 100).trim() : '';
+  // Answers to the service's own questions, { question id: answer }. The database checks them.
+  const answers = {};
+  if (req.body.answers && typeof req.body.answers === 'object' && !Array.isArray(req.body.answers)) {
+    for (const [question, answer] of Object.entries(req.body.answers).slice(0, 10)) {
+      if (/^[a-z0-9]{6,16}$/.test(question) && typeof answer === 'string') answers[question] = answer.slice(0, 2000);
+    }
+  }
   const { data, error } = await publicDb().rpc('book_slot', {
     p_key: req.params.key,
     p_service: service,
     p_staff: staff || null,
     p_start: new Date(start).toISOString(),
-    p_visitor: { name: field('name', 200), email: field('email', 254), phone: field('phone', 40), notes: field('notes', 2000), campaign }
+    p_visitor: { name: field('name', 200), email: field('email', 254), phone: field('phone', 40), notes: field('notes', 2000), campaign, answers }
   });
   if (error) return bookingReply(res, error, 'Could not book. Please try again.');
   res.status(201).json(data);
@@ -473,6 +613,28 @@ app.post('/api/book/:key', bookingLimit, express.json({ limit: '16kb' }), async 
     });
     if (error) return chatReply(res, error, 'Could not save. Please try again.');
     res.json(data);
+  });
+
+  // Rating a closed chat, 1 to 5 with an optional comment
+  app.post('/api/chat/:key/rate', chatSendLimit, chatKey, express.json({ limit: '4kb' }), chatToken, async (req, res) => {
+    const rating = Number(req.body.rating);
+    if (!Number.isInteger(rating) || rating < 1 || rating > 5) return res.status(400).json({ error: 'Choose a rating from 1 to 5' });
+    const { data, error } = await publicDb().rpc('chat_rate', {
+      p_key: req.params.key, p_token: req.body.token, p_rating: rating, p_comment: field(req, 'comment', 500), p_after: after(req)
+    });
+    if (error) return chatReply(res, error, 'Could not save your rating. Please try again.');
+    res.json(data);
+  });
+
+  // "Typing..." The page sends this at most every few seconds while the visitor types.
+  const chatTypingLimit = limitOf(30);
+  app.post('/api/chat/:key/typing', chatTypingLimit, chatKey, express.json({ limit: '2kb' }), chatToken, async (req, res) => {
+    try {
+      await publicDb().rpc('chat_typing', { p_key: req.params.key, p_token: req.body.token });
+    } catch {
+      // Typing is a nicety; never an error for the visitor
+    }
+    res.json({ success: true });
   });
 }
 // ---- End of public customer chat ----

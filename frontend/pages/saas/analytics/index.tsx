@@ -1,31 +1,9 @@
 import Link from 'next/link';
 import { useEffect, useState } from 'react';
+import AnalyticsNav, { PERIODS, periodDates, yearBefore } from '@/components/AnalyticsNav';
 import AppShell from '@/components/AppShell';
 import { api, money } from '@/lib/api';
 import { downloadCsv } from '@/lib/csv';
-
-// Whole calendar periods, so each one is compared with the same stretch just before it
-const PERIODS = [
-  { id: 'month', name: 'This month', compare: 'last month' },
-  { id: 'last_month', name: 'Last month', compare: 'the month before' },
-  { id: 'quarter', name: 'This quarter', compare: 'last quarter' },
-  { id: 'year', name: 'This year', compare: 'last year' },
-  { id: '12', name: 'Last 12 months', compare: 'the 12 months before' }
-];
-
-const day = (date: Date) => new Date(date.getTime() - date.getTimezoneOffset() * 60000).toISOString().slice(0, 10);
-
-const periodDates = (period: string): [string, string] => {
-  const now = new Date();
-  const year = now.getFullYear();
-  const month = now.getMonth();
-  const quarter = month - (month % 3);
-  if (period === 'last_month') return [day(new Date(year, month - 1, 1)), day(new Date(year, month, 0))];
-  if (period === 'quarter') return [day(new Date(year, quarter, 1)), day(new Date(year, quarter + 3, 0))];
-  if (period === 'year') return [day(new Date(year, 0, 1)), day(new Date(year, 11, 31))];
-  if (period === '12') return [day(new Date(year, month - 11, 1)), day(new Date(year, month + 1, 0))];
-  return [day(new Date(year, month, 1)), day(new Date(year, month + 1, 0))];
-};
 
 const monthName = (value: string) =>
   new Date(`${value}T00:00:00`).toLocaleDateString(undefined, { month: 'short', year: '2-digit' });
@@ -43,23 +21,57 @@ export default function Analytics() {
 
 function Dashboard() {
   const [period, setPeriod] = useState('month');
+  const [range, setRange] = useState<[string, string]>(() => periodDates('month'));
+  const [compareTo, setCompareTo] = useState<'before' | 'last_year'>('before');
   const [data, setData] = useState<any>(null);
+  const [goals, setGoals] = useState<any>(null);
   const [error, setError] = useState('');
   const [loading, setLoading] = useState(true);
 
+  const [from, to] = period === 'custom' ? range : periodDates(period);
+
   useEffect(() => {
-    const [from, to] = periodDates(period);
+    if (!from || !to || from > to) {
+      setError('Choose a start date before the end date');
+      return;
+    }
+    let current = true;
     setLoading(true);
-    api.get(`/api/analytics/dashboard?from=${from}&to=${to}`)
-      .then((result) => {
-        setData(result);
+    // The dashboard always compares with the stretch just before; for last year its
+    // comparison numbers are swapped for the same dates a year earlier.
+    Promise.all([
+      api.get(`/api/analytics/dashboard?from=${from}&to=${to}`),
+      compareTo === 'last_year' ? api.get(`/api/analytics/compare?from=${yearBefore(from)}&to=${yearBefore(to)}`) : null
+    ])
+      .then(([result, earlier]) => {
+        if (!current) return;
+        setData(earlier ? {
+          ...result,
+          previous: earlier.totals,
+          marketing: result.marketing && { ...result.marketing, previous: earlier.marketing }
+        } : result);
         setError('');
       })
-      .catch((err) => setError(err.message))
-      .finally(() => setLoading(false));
-  }, [period]);
+      .catch((err) => current && setError(err.message))
+      .finally(() => current && setLoading(false));
+    return () => {
+      current = false;
+    };
+  }, [from, to, compareTo]);
 
-  const compare = PERIODS.find(({ id }) => id === period)?.compare;
+  // This month's goals, if any are set
+  useEffect(() => {
+    api.get('/api/analytics/goals').then(setGoals).catch(() => setGoals(null));
+  }, []);
+
+  const choosePeriod = (value: string) => {
+    if (value === 'custom') setRange(periodDates(period));
+    setPeriod(value);
+  };
+
+  const compare = compareTo === 'last_year'
+    ? 'the same dates last year'
+    : PERIODS.find(({ id }) => id === period)?.compare;
   const cash = (value: number | string) => money(value, data?.currency);
 
   const download = () => downloadCsv(`business-trend-${data.trend[data.trend.length - 1].month.slice(0, 7)}.csv`, [
@@ -83,6 +95,7 @@ function Dashboard() {
 
   return (
     <div className="stack">
+      <AnalyticsNav />
       <div className="page-head">
         <div>
           <h1>Business dashboard</h1>
@@ -90,12 +103,41 @@ function Dashboard() {
         </div>
         <div className="report-filters">
           <label>Period
-            <select value={period} onChange={(e) => setPeriod(e.target.value)}>
+            <select value={period} onChange={(e) => choosePeriod(e.target.value)}>
               {PERIODS.map(({ id, name }) => <option key={id} value={id}>{name}</option>)}
+            </select>
+          </label>
+          {period === 'custom' && (
+            <>
+              <label>From<input type="date" value={range[0]} max={range[1]} onChange={(e) => setRange([e.target.value, range[1]])} /></label>
+              <label>To<input type="date" value={range[1]} min={range[0]} onChange={(e) => setRange([range[0], e.target.value])} /></label>
+            </>
+          )}
+          <label>Compare with
+            <select value={compareTo} onChange={(e) => setCompareTo(e.target.value as 'before' | 'last_year')}>
+              <option value="before">The period before</option>
+              <option value="last_year">The same dates last year</option>
             </select>
           </label>
         </div>
       </div>
+
+      {goals?.goals?.length > 0 && (
+        <Link href="/saas/analytics/goals" className="card stat-link goal-strip">
+          <div className="stat-label">This month's goals</div>
+          <div className="goal-strip-items">
+            {goals.goals.map((goal: any) => {
+              const metric = goals.metrics.find((item: any) => item.key === goal.metric);
+              return (
+                <div key={goal.metric}>
+                  <div className="muted">{metric?.label || goal.metric} · {Math.round(Number(goal.percent))}%</div>
+                  <div className="goal-meter"><span style={{ width: `${Math.min(100, Number(goal.percent))}%` }} /></div>
+                </div>
+              );
+            })}
+          </div>
+        </Link>
+      )}
 
       {error && <p className="error">{error}</p>}
       {loading && !data && <p className="empty">Loading…</p>}
@@ -143,7 +185,8 @@ function Dashboard() {
           <div className="stats">
             <Stat label="Stock value" value={cash(data.stock.value)} href="/saas/inventory" note={`${data.stock.items} ${data.stock.items === 1 ? 'item' : 'items'}`} />
             <Stat label="Low or out of stock" value={data.stock.low} href="/saas/inventory" note={data.stock.low ? 'Time to reorder' : 'All stocked up'} />
-            <Stat label="People employed" value={data.people.headcount} now={data.people.headcount} before={data.people.previous} compare={compare} href="/saas/hr"
+            <Stat label="People employed" value={data.people.headcount} now={data.people.headcount} before={data.people.previous}
+              compare={compareTo === 'last_year' ? 'the end of the period before' : compare} href="/saas/hr"
               note={`${data.people.joined} joined, ${data.people.left} left`} />
             {data.sees_payroll && (
               <Stat label="Payroll cost" value={cash(data.current.payroll)} now={data.current.payroll} before={data.previous.payroll} compare={compare} href="/saas/hr/payroll"
