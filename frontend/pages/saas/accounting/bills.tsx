@@ -5,6 +5,7 @@ import AppShell from '@/components/AppShell';
 import CurrencyFields from '@/components/CurrencyFields';
 import Modal from '@/components/Modal';
 import PaymentForm from '@/components/PaymentForm';
+import ReceiptReader, { ReceiptFields } from '@/components/ReceiptReader';
 import { api, formatDate, money, today } from '@/lib/api';
 import useSubmit from '@/lib/useSubmit';
 
@@ -274,6 +275,21 @@ function BillForm({ initial, vendors, accounts, items, taxRates, costCenters, on
       return { ...line, item_id: '', quantity: '', account_id: value };
     }));
 
+  // A read receipt fills the date, a vendor with the same name, and a single empty line before tax
+  const fromReceipt = (read: ReceiptFields) =>
+    setForm((current: any) => {
+      const name = (read.vendor || '').toLowerCase();
+      const vendor = name && vendors.find((row) => row.is_active && row.name.length >= 3 && (row.name.toLowerCase().includes(name) || name.includes(row.name.toLowerCase())));
+      const [line, ...rest] = current.line_items;
+      const net = read.total !== null ? Math.max(0, Math.round((read.total - (read.tax || 0)) * 100) / 100) : null;
+      return {
+        ...current,
+        bill_date: read.date || current.bill_date,
+        vendor_id: current.vendor_id || vendor?.id || '',
+        line_items: !rest.length && !line.amount && net ? [{ ...line, amount: String(net), description: line.description || read.vendor || '' }] : current.line_items
+      };
+    });
+
   const subtotal = form.line_items.reduce((sum: number, line: any) => sum + Number(line.amount || 0), 0);
   const tax = form.line_items.reduce((sum: number, line: any) => {
     const rate = taxRates.find(({ id }) => id === line.tax_rate_id);
@@ -300,6 +316,7 @@ function BillForm({ initial, vendors, accounts, items, taxRates, costCenters, on
   return (
     <Modal title={form.id ? `Edit ${form.bill_number}` : 'New bill'} onClose={onClose}>
       <form onSubmit={submit}>
+        {!form.id && <ReceiptReader onRead={fromReceipt} />}
         <div className="form-grid">
           <label>Vendor
             <select required disabled={posted} value={form.vendor_id} onChange={(e) => set('vendor_id', e.target.value)}>

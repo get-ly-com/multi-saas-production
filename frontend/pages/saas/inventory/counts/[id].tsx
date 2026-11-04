@@ -1,6 +1,7 @@
 import { useRouter } from 'next/router';
 import { FormEvent, useEffect, useState } from 'react';
 import AppShell from '@/components/AppShell';
+import { ScanWithCamera } from '@/components/BarcodeScanner';
 import InventoryNav from '@/components/InventoryNav';
 import { api, formatDate, money, queryId } from '@/lib/api';
 import { downloadCsv } from '@/lib/csv';
@@ -54,7 +55,15 @@ function CountSheetApp() {
   // Each scan adds one of that item to the count
   const scanned = (event: FormEvent) => {
     event.preventDefault();
-    const code = scan.trim();
+    addOne(scan);
+  };
+  // The camera fills the box and adds the item at once
+  const scannedWithCamera = (code: string) => {
+    setScan(code);
+    addOne(code);
+  };
+  const addOne = (typed: string) => {
+    const code = typed.trim();
     if (!code) return;
     const line = sheet.lines.find((row: any) => row.barcode === code || row.sku === code);
     if (!line) {
@@ -157,7 +166,10 @@ function CountSheetApp() {
         {open && (
           <form onSubmit={scanned}>
             <label>Scan to add one
-              <input aria-label="Scan barcode" placeholder="Barcode or SKU, then Enter" value={scan} onChange={(e) => setScan(e.target.value)} />
+              <span className="scan-box">
+                <input aria-label="Scan barcode" placeholder="Barcode or SKU, then Enter" value={scan} onChange={(e) => setScan(e.target.value)} />
+                <ScanWithCamera onCode={scannedWithCamera} label="Camera" />
+              </span>
             </label>
           </form>
         )}

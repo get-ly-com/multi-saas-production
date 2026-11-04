@@ -36,7 +36,13 @@ export default function ChatNav() {
   );
 }
 
-export type ChatMessage = { id: number; sender?: string; from?: string; body: string; created_at?: string; at?: string; author_id?: string | null };
+export type ChatMessage = {
+  id: number; sender?: string; from?: string; body: string; created_at?: string; at?: string; author_id?: string | null;
+  // Replies on WhatsApp chats: sent, delivered, read or failed (with why)
+  wa_status?: string | null; send_error?: string | null;
+};
+
+export const WA_STATUS: Record<string, string> = { sent: 'Sent', delivered: 'Delivered', read: 'Read', failed: 'Not delivered' };
 
 export const timeText = (value: string | undefined) => {
   if (!value) return '';

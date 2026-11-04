@@ -1,4 +1,5 @@
 require('dotenv').config();
+const crypto = require('crypto');
 const express = require('express');
 const { createClient } = require('@supabase/supabase-js');
 
@@ -19,7 +20,7 @@ const STATUSES = ['open', 'waiting', 'closed'];
 // The token column is not readable by staff, so it is never listed here
 const CONVERSATION_FIELDS = 'id, status, visitor_name, visitor_email, started_on, wants_person, assigned_to, lead_id, '
   + 'contact_id, campaign, staff_unread, visitor_messages, last_message, last_message_at, created_at, closed_at, '
-  + 'rating, rating_comment, rated_at, visitor_typing_at';
+  + 'rating, rating_comment, rated_at, visitor_typing_at, channel, visitor_phone, last_visitor_at';
 const TICKET_STATUSES = ['new', 'in_progress', 'waiting', 'solved'];
 const PRIORITIES = ['low', 'normal', 'high', 'urgent'];
 const TICKET_FIELDS = 'id, number, subject, description, status, priority, assigned_to, conversation_id, contact_id, '
@@ -108,6 +109,79 @@ const answerFields = (body) => {
   return data;
 };
 
+// ---- WhatsApp (Business Cloud API) ----
+// Switched on by WHATSAPP_TOKEN (sending) and WHATSAPP_APP_SECRET (checking Meta's signature).
+// WHATSAPP_PHONE_NUMBER_ID is the number used when a company hasn't saved its own.
+// Which company a number belongs to is saved in each company's chat settings.
+const GRAPH_URL = 'https://graph.facebook.com/v21.0';
+const WINDOW_MS = 24 * 60 * 60 * 1000;
+const WINDOW_CLOSED = 'It has been more than 24 hours since this customer last wrote. WhatsApp only allows a '
+  + 'pre-approved template message now, so this reply was not sent. Ask them to message you again, or contact them another way.';
+
+const whatsappReady = () => Boolean(process.env.WHATSAPP_TOKEN);
+
+// The same check the gateway makes: HMAC SHA-256 of the raw body with the app secret
+const signatureMatches = (raw, header) => {
+  const secret = process.env.WHATSAPP_APP_SECRET;
+  if (!secret) return true; // the database checks it again with its own copy
+  const expected = Buffer.from(`sha256=${crypto.createHmac('sha256', secret).update(raw).digest('hex')}`);
+  const given = Buffer.from(String(header || ''));
+  return given.length === expected.length && crypto.timingSafeEqual(given, expected);
+};
+
+const publicDb = () => createClient(process.env.SUPABASE_URL, process.env.SUPABASE_ANON_KEY, {
+  auth: { persistSession: false, autoRefreshToken: false }
+});
+
+// Meta's message, in words for the team. The access token never goes in a message or the logs.
+const graphError = (payload, status) => {
+  const error = payload?.error || {};
+  if (error.code === 131047) return WINDOW_CLOSED;
+  if (error.code === 190 || status === 401) return 'The WhatsApp access token has expired or is wrong. Ask whoever set up WhatsApp to renew it.';
+  if (error.code === 131026) return 'This number can’t receive WhatsApp messages.';
+  if (error.code === 100 && /phone number/i.test(error.message || '')) return 'WhatsApp doesn’t recognise the phone number ID in chat settings.';
+  const detail = error.error_data?.details || error.message;
+  return detail ? `WhatsApp didn’t send it: ${String(detail).slice(0, 200)}` : 'WhatsApp didn’t send it. Please try again.';
+};
+
+const sendWhatsApp = async (phoneNumberId, to, body) => {
+  let response;
+  try {
+    response = await fetch(`${GRAPH_URL}/${encodeURIComponent(phoneNumberId)}/messages`, {
+      method: 'POST',
+      headers: { Authorization: `Bearer ${process.env.WHATSAPP_TOKEN}`, 'Content-Type': 'application/json' },
+      body: JSON.stringify({ messaging_product: 'whatsapp', recipient_type: 'individual', to, type: 'text', text: { preview_url: true, body } }),
+      signal: AbortSignal.timeout(10000)
+    });
+  } catch {
+    return { error: 'WhatsApp could not be reached. Please try again.' };
+  }
+  const payload = await response.json().catch(() => null);
+  if (!response.ok) {
+    console.error('WhatsApp send failed:', response.status, payload?.error?.code, payload?.error?.message);
+    return { error: graphError(payload, response.status) };
+  }
+  return { id: payload?.messages?.[0]?.id || null };
+};
+
+// Meta's webhook, forwarded by the gateway with the raw body and signature. Before the JSON
+// parser and the tenant check: there is no signed-in user, and the database finds the company
+// from the phone number id and checks the signature again.
+app.post('/whatsapp/webhook', express.raw({ type: '*/*', limit: '1mb' }), async (req, res) => {
+  const raw = Buffer.isBuffer(req.body) ? req.body : Buffer.alloc(0);
+  const signature = req.headers['x-hub-signature-256'];
+  if (!raw.length || !signatureMatches(raw, signature)) return res.status(401).json({ error: 'The signature does not match' });
+  const { data, error } = await publicDb().rpc('whatsapp_receive', { p_body: raw.toString('utf8'), p_signature: String(signature || '') });
+  if (error) {
+    if (error.code === 'P0001' && /signature/i.test(error.message)) return res.status(401).json({ error: error.message });
+    console.error('WhatsApp webhook error:', error.code, error.message);
+    // Anything else is worth Meta trying again
+    return res.status(error.code === 'P0001' ? 400 : 500).json({ error: error.code === 'P0001' ? error.message : 'Could not save the message' });
+  }
+  res.json(data);
+});
+// ---- End of WhatsApp webhook ----
+
 app.use(express.json({ limit: '64kb' }));
 app.get('/health', (req, res) => res.json({ status: 'ok', service: 'chatbot-service' }));
 
@@ -136,7 +210,11 @@ app.get('/conversations', handle((req) => {
   }
   if (req.query.mine === '1' && UUID.test(req.query.me || '')) query = query.eq('assigned_to', req.query.me);
   const search = searchText(req.query.q);
-  if (search) query = query.or(`visitor_name.ilike.%${search}%,visitor_email.ilike.%${search}%,last_message.ilike.%${search}%`);
+  if (search) {
+    const digits = search.replace(/\D/g, '');
+    query = query.or(`visitor_name.ilike.%${search}%,visitor_email.ilike.%${search}%,last_message.ilike.%${search}%`
+      + (digits.length >= 4 ? `,visitor_phone.like.%${digits}%` : ''));
+  }
   return rows(query.order('last_message_at', { ascending: false }).limit(200));
 }));
 
@@ -144,7 +222,7 @@ app.get('/conversations', handle((req) => {
 app.get('/conversations/:id', handle(async (req) => {
   const conversationId = id(req.params.id, 'Chat');
   const after = Number.isSafeInteger(Number(req.query.after)) ? Number(req.query.after) : 0;
-  const messageQuery = chat(req).from('messages').select('id, sender, author_id, answer_id, body, created_at')
+  const messageQuery = chat(req).from('messages').select('id, sender, author_id, answer_id, body, created_at, wa_status, send_error')
     .eq('tenant_id', req.tenantId).eq('conversation_id', conversationId);
   const [found, messages] = await Promise.all([
     rows(chat(req).from('conversations').select(CONVERSATION_FIELDS).eq('tenant_id', req.tenantId).eq('id', conversationId)),
@@ -210,12 +288,42 @@ app.post('/conversations/:id/read', async (req, res) => {
   res.json({ success: true });
 });
 
-app.post('/conversations/:id/reply', callChat('reply', (req) => {
-  const body = text(req.body.body, 2001).trim();
-  if (!body) throw new Error('Type a reply');
-  if (body.length > 2000) throw new Error('Replies can be up to 2000 characters');
-  return { p_conversation: id(req.params.id, 'Chat'), p_body: body };
-}, 201));
+// A reply on a WhatsApp chat is also sent through WhatsApp, inside its 24-hour window
+app.post('/conversations/:id/reply', async (req, res) => {
+  try {
+    const conversationId = id(req.params.id, 'Chat');
+    const body = text(req.body.body, 2001).trim();
+    if (!body) throw new Error('Type a reply');
+    if (body.length > 2000) throw new Error('Replies can be up to 2000 characters');
+
+    const found = await rows(chat(req).from('conversations').select('id, channel, visitor_phone, last_visitor_at')
+      .eq('tenant_id', req.tenantId).eq('id', conversationId));
+    if (!found.length) throw notFound('Chat not found');
+    const convo = found[0];
+    if (convo.channel !== 'whatsapp') {
+      return res.status(201).json(await call(req, 'reply', { p_conversation: conversationId, p_body: body }));
+    }
+
+    if (!whatsappReady()) throw new Error('WhatsApp isn’t switched on for this app yet, so this reply was not sent.');
+    if (!convo.visitor_phone) throw new Error('This WhatsApp chat has no phone number, so the reply was not sent.');
+    if (!convo.last_visitor_at || Date.now() - Date.parse(convo.last_visitor_at) > WINDOW_MS) throw new Error(WINDOW_CLOSED);
+    const settings = await rows(chat(req).from('settings').select('whatsapp_phone_number_id').eq('tenant_id', req.tenantId));
+    const phoneNumberId = settings[0]?.whatsapp_phone_number_id || process.env.WHATSAPP_PHONE_NUMBER_ID;
+    if (!phoneNumberId) throw new Error('Add your WhatsApp phone number ID in chat settings first, so the reply was not sent.');
+
+    // Saved first (this checks the person may reply), then sent, then marked sent or failed
+    const saved = await call(req, 'reply', { p_conversation: conversationId, p_body: body });
+    const sent = await sendWhatsApp(phoneNumberId, convo.visitor_phone, body);
+    try {
+      await call(req, 'whatsapp_sent', { p_message: saved.id, p_wamid: sent.id || null, p_error: sent.error || null });
+    } catch (error) {
+      console.error('WhatsApp status not saved:', error.code, error.message);
+    }
+    res.status(201).json({ ...saved, wa_status: sent.error ? 'failed' : 'sent', whatsapp_error: sent.error || null });
+  } catch (error) {
+    sendError(res, error);
+  }
+});
 
 app.post('/conversations/:id/assign', callChat('assign', (req) => ({
   p_conversation: id(req.params.id, 'Chat'),
@@ -256,8 +364,21 @@ app.delete('/unanswered/:id', callChat('dismiss_unanswered', (req) => ({ p_quest
 app.get('/settings', handle(async (req) => {
   const data = await rows(chat(req).from('settings').select('*').eq('tenant_id', req.tenantId));
   if (!data.length) throw notFound('Chat settings not found');
-  return data[0];
+  const status = await call(req, 'whatsapp_status', {}).catch(() => ({}));
+  return {
+    ...data[0],
+    whatsapp: {
+      // This app can send (access token) and check Meta's signature (app secret, here and in the database)
+      app_ready: whatsappReady() && Boolean(process.env.WHATSAPP_APP_SECRET) && Boolean(status.secret_saved),
+      can_send: whatsappReady(),
+      secret_saved: Boolean(status.secret_saved),
+      last_received_at: status.last_received_at || null
+    }
+  };
 }));
+
+// The customer's own reschedule/cancel link for a booking, to send them in a WhatsApp reminder
+app.get('/whatsapp/booking-link/:id', callChat('booking_link_token', (req) => ({ p_booking: id(req.params.id, 'Booking') })));
 
 app.put('/settings', callChat('save_settings', (req) => {
   const data = {};
@@ -284,6 +405,10 @@ app.put('/settings', callChat('save_settings', (req) => {
   if (req.body.colour !== undefined) {
     if (!/^#[0-9a-f]{6}$/i.test(req.body.colour)) throw new Error('Choose a colour');
     data.colour = req.body.colour;
+  }
+  // Empty disconnects WhatsApp; the database checks the digits and that no other company has it
+  if (req.body.whatsapp_phone_number_id !== undefined) {
+    data.whatsapp_phone_number_id = text(req.body.whatsapp_phone_number_id, 40).replace(/\s/g, '');
   }
   return { p_data: data };
 }));

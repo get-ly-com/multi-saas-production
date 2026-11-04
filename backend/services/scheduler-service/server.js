@@ -1,6 +1,8 @@
 require('dotenv').config();
+const crypto = require('crypto');
 const express = require('express');
 const { createClient } = require('@supabase/supabase-js');
+const busy = require('./busy-sync');
 
 const app = express();
 const PORT = process.env.PORT || 3006;
@@ -158,6 +160,23 @@ const serviceFields = (body) => {
 
 app.use(express.json({ limit: '128kb' }));
 app.get('/health', (req, res) => res.json({ status: 'ok', service: 'scheduler-service' }));
+
+// The worker asks for the 15-minute check of everyone's own calendars here. It calls this service
+// directly with a shared secret; requests through the gateway (which sets a tenant) are refused.
+const digest = (value) => crypto.createHash('sha256').update(String(value)).digest();
+app.post('/internal/busy-sync', async (req, res) => {
+  const secret = process.env.CALENDAR_SYNC_SECRET || '';
+  const given = req.headers['x-sync-secret'] || '';
+  if (secret.length < 16 || req.headers['x-tenant-id'] || !crypto.timingSafeEqual(digest(secret), digest(given))) {
+    return res.status(404).json({ error: 'Not found' });
+  }
+  if (!busy.configured()) return res.status(503).json({ error: 'Calendar checks aren’t set up on this server' });
+  try {
+    res.json(await busy.syncDue());
+  } catch (error) {
+    sendError(res, error);
+  }
+});
 
 // Only the gateway reaches this service, and it sets the tenant
 app.use((req, res, next) => {
@@ -332,6 +351,34 @@ app.get('/stats', callScheduler('stats', (req) => ({
 app.get('/feed', callScheduler('feed_link', () => ({})));
 app.post('/feed', callScheduler('new_feed_link', () => ({})));
 app.delete('/feed', callScheduler('stop_feed_link', () => ({})));
+
+// Busy times from the signed-in person's own calendar (a private iCal address). The address is
+// never sent back; only a short hint, when it was last checked and any problem.
+const busyStatus = async (req) => ({ ...(await call(req, 'busy_feed', {})), checks_on: busy.configured() });
+
+// Download it now. Problems with the calendar are saved and shown; ours are only logged.
+const checkBusyNow = async (req) => {
+  if (!busy.configured()) return busyStatus(req);
+  const { feed_id: feedId } = await call(req, 'busy_check_start', {});
+  try {
+    await busy.syncOne(feedId);
+  } catch (error) {
+    console.error('Busy times check failed:', error?.message || error);
+  }
+  return busyStatus(req);
+};
+
+app.get('/busy-feed', handle(busyStatus));
+app.put('/busy-feed', handle(async (req) => {
+  const url = busy.checkUrl(req.body.url);
+  await call(req, 'save_busy_feed', { p_url: url.href });
+  return checkBusyNow(req);
+}));
+app.post('/busy-feed/check', handle(checkBusyNow));
+app.delete('/busy-feed', handle(async (req) => {
+  await call(req, 'remove_busy_feed', {});
+  return busyStatus(req);
+}));
 
 app.use((err, req, res, next) => {
   if (res.headersSent) return next(err);

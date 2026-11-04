@@ -1,3 +1,4 @@
+import Link from 'next/link';
 import { FormEvent, useEffect, useState } from 'react';
 import AppShell from '@/components/AppShell';
 import { api, formatDate } from '@/lib/api';
@@ -66,7 +67,7 @@ function TeamApp() {
 
   return (
     <div className="stack">
-      <div className="page-head"><h1>Team</h1></div>
+      <div className="page-head"><h1>Team</h1><Link className="button" href="/saas/import">Move your data in</Link></div>
 
       {error && <p className="error">{error}</p>}
       {notice && <p className="notice">{notice}</p>}

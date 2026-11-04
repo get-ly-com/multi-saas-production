@@ -1,5 +1,6 @@
 import { FormEvent, useEffect, useState } from 'react';
 import AppShell from '@/components/AppShell';
+import { ScanWithCamera } from '@/components/BarcodeScanner';
 import InventoryNav from '@/components/InventoryNav';
 import Modal from '@/components/Modal';
 import { api, formatDate, money } from '@/lib/api';
@@ -87,8 +88,16 @@ function InventoryApp() {
   const { busy, run } = useSubmit();
   const lookUp = async (event: FormEvent) => {
     event.preventDefault();
+    return findCode(scan);
+  };
+  // The camera fills the box and looks the code up at once
+  const scannedWithCamera = (code: string) => {
+    setScan(code);
+    findCode(code);
+  };
+  const findCode = (typed: string) => {
     return run(async () => {
-      const code = scan.trim();
+      const code = typed.trim();
       if (!code) return;
       try {
         setFound(await api.get(`/api/inventory/items/lookup?code=${encodeURIComponent(code)}`));
@@ -149,7 +158,10 @@ function InventoryApp() {
 
       <form className="report-filters" onSubmit={lookUp}>
         <label>Scan or type a barcode
-          <input aria-label="Barcode or SKU" placeholder="Barcode or SKU, then Enter" value={scan} onChange={(e) => setScan(e.target.value)} />
+          <span className="scan-box">
+            <input aria-label="Barcode or SKU" placeholder="Barcode or SKU, then Enter" value={scan} onChange={(e) => setScan(e.target.value)} />
+            <ScanWithCamera onCode={scannedWithCamera} label="Camera" />
+          </span>
         </label>
         <label>Search
           <input aria-label="Search items" placeholder="Name, SKU or barcode" value={search} onChange={(e) => setSearch(e.target.value)} />

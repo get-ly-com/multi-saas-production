@@ -1,6 +1,7 @@
 require('dotenv').config();
 const express = require('express');
 const { createClient } = require('@supabase/supabase-js');
+const stripe = require('./stripe');
 
 const app = express();
 const PORT = process.env.PORT || 3001;
@@ -156,6 +157,137 @@ const parseBillLines = (lineItems) => {
   });
 };
 
+// ---- Online payments (Stripe Checkout), public part ----
+// The gateway forwards the customer's pay page and Stripe's webhook here with no signed-in user.
+// A payment link is found by its secret token. These steps use the service role key, which only
+// this service holds, so the public anon key can never mark an invoice paid. Stripe's webhook is
+// trusted only after its signature checks out against STRIPE_WEBHOOK_SECRET.
+const PAY_TOKEN = /^[0-9a-f]{64}$/;
+const PAYMENTS_NOT_READY = 'Online payments aren’t set up yet';
+
+let payDb = null;
+const servicePayDb = () => {
+  if (!process.env.SUPABASE_SERVICE_ROLE_KEY) return null;
+  if (!payDb) {
+    payDb = createClient(process.env.SUPABASE_URL, process.env.SUPABASE_SERVICE_ROLE_KEY, {
+      auth: { persistSession: false, autoRefreshToken: false }
+    }).schema('accounting');
+  }
+  return payDb;
+};
+const onlinePaymentsReady = () => Boolean(process.env.STRIPE_SECRET_KEY && process.env.SUPABASE_SERVICE_ROLE_KEY);
+
+// Only our own messages reach the customer, never database details
+const payReply = (res, error, fallback) => {
+  if (error instanceof stripe.PayError) return res.status(error.status).json({ error: error.message });
+  if (error?.code === 'P0001') return res.status(400).json({ error: error.message });
+  console.error('Online payment error:', error);
+  res.status(400).json({ error: fallback });
+};
+
+app.post('/public/pay/webhook', express.raw({ type: '*/*', limit: '1mb' }), async (req, res) => {
+  const db = servicePayDb();
+  if (!process.env.STRIPE_WEBHOOK_SECRET || !db) return res.status(503).json({ error: PAYMENTS_NOT_READY });
+  if (!stripe.verifySignature(req.body, req.headers['stripe-signature'], process.env.STRIPE_WEBHOOK_SECRET)) {
+    return res.status(400).json({ error: 'The signature does not match' });
+  }
+
+  let event;
+  try {
+    event = JSON.parse(req.body.toString('utf8'));
+  } catch {
+    return res.status(400).json({ error: 'That request could not be read' });
+  }
+
+  // Card payments are paid when the session completes; slower methods say so a little later
+  const session = event?.data?.object;
+  if (!['checkout.session.completed', 'checkout.session.async_payment_succeeded'].includes(event?.type)
+      || typeof session?.id !== 'string' || session.payment_status !== 'paid') {
+    return res.json({ received: true });
+  }
+
+  const currency = String(session.currency || '').toUpperCase();
+  const { data, error } = await db.rpc('pay_checkout_paid', {
+    p_session: session.id,
+    p_amount: stripe.fromMinor(session.amount_total, currency),
+    p_currency: currency,
+    p_reference: typeof session.payment_intent === 'string' ? session.payment_intent : session.id
+  });
+  // Stripe tries again later when this is not a 2xx, and recording is safe to repeat
+  if (error) {
+    console.error('Online payment webhook error:', error);
+    return res.status(500).json({ error: 'Could not record the payment' });
+  }
+  if (data?.status === 'review') console.error('Online payment needs review:', session.id);
+  res.json({ received: true });
+});
+
+app.get('/public/pay/:token', async (req, res) => {
+  if (!PAY_TOKEN.test(req.params.token)) return res.status(404).json({ error: 'This payment link is not available' });
+  const db = servicePayDb();
+  if (!db) return res.status(503).json({ error: PAYMENTS_NOT_READY });
+  try {
+    const { data, error } = await db.rpc('pay_link_info', { p_token: req.params.token });
+    if (error) throw error;
+    if (!data) return res.status(404).json({ error: 'This payment link is not available' });
+    const { account_ready: accountReady, ...info } = data;
+    res.set('Cache-Control', 'no-store');
+    res.json({ ...info, ready: onlinePaymentsReady() && accountReady });
+  } catch (error) {
+    payReply(res, error, 'This payment link is not available');
+  }
+});
+
+// Starts a Stripe Checkout session for what is owed right now. The gateway passes the pay page's
+// own address (one of its allowed origins), so Stripe sends the customer back there.
+app.post('/public/pay/:token', async (req, res) => {
+  if (!PAY_TOKEN.test(req.params.token)) return res.status(404).json({ error: 'This payment link is not available' });
+  const db = servicePayDb();
+  const origin = req.headers['x-pay-origin'];
+  if (!onlinePaymentsReady() || !db) return res.status(503).json({ error: PAYMENTS_NOT_READY });
+  if (typeof origin !== 'string' || !/^https?:\/\/[^/?#\s]+$/.test(origin)) {
+    return res.status(400).json({ error: 'Open the payment link again and try once more' });
+  }
+
+  try {
+    const { data: invoice, error } = await db.rpc('pay_checkout_start', { p_token: req.params.token });
+    if (error) throw error;
+
+    const currency = String(invoice.currency).toUpperCase();
+    const amount = Math.round(Number(invoice.balance) * 100) / 100;
+    const page = `${origin}/pay/${req.params.token}`;
+    const email = typeof invoice.customer_email === 'string' && /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(invoice.customer_email)
+      ? invoice.customer_email : undefined;
+
+    const session = await stripe.createCheckoutSession({
+      mode: 'payment',
+      success_url: `${page}?paid=1`,
+      cancel_url: `${page}?cancelled=1`,
+      client_reference_id: invoice.link_id,
+      customer_email: email,
+      line_items: [{
+        quantity: 1,
+        price_data: {
+          currency: currency.toLowerCase(),
+          unit_amount: stripe.toMinor(amount, currency),
+          product_data: { name: `Invoice ${invoice.invoice_number}`.slice(0, 250), description: String(invoice.company || '').slice(0, 250) || undefined }
+        }
+      }],
+      metadata: { invoice_number: invoice.invoice_number },
+      payment_intent_data: { description: `Invoice ${invoice.invoice_number}`.slice(0, 250) }
+    });
+
+    const { error: saveError } = await db.rpc('pay_checkout_saved', {
+      p_token: req.params.token, p_session: session.id, p_amount: amount, p_currency: currency
+    });
+    if (saveError) throw saveError;
+    res.status(201).json({ url: session.url });
+  } catch (error) {
+    payReply(res, error, 'The card payment could not be started. Please try again later.');
+  }
+});
+// ---- End of online payments, public part ----
+
 // Bank statement imports can be a few thousand lines
 app.use(express.json({ limit: '2mb' }));
 
@@ -199,7 +331,7 @@ app.get('/invoices', async (req, res) => {
 app.get('/invoices/:id', async (req, res) => {
   try {
     const { data, error } = await invoices(req)
-      .select('*, payments(*, account:accounts(code, name)), credit_notes(*)')
+      .select('*, payments!payments_invoice_id_fkey(*, account:accounts(code, name)), credit_notes(*), payment_links!payment_links_invoice_id_fkey(token), online_payments!online_payments_invoice_id_fkey(id, status, amount, currency, reference, note, created_at, paid_at)')
       .eq('id', req.params.id)
       .eq('tenant_id', req.tenantId)
       .maybeSingle();
@@ -498,6 +630,53 @@ app.post('/payments', async (req, res) => {
 
     if (error) throw error;
     res.status(201).json({ id: data });
+  } catch (error) {
+    sendError(res, error);
+  }
+});
+
+// Online payments: whether card payments can be taken, and the account they land in
+app.get('/online-payments', async (req, res) => {
+  try {
+    const { data, error } = await ledger(req).from('settings')
+      .select('online_payment_account_id')
+      .eq('tenant_id', req.tenantId)
+      .maybeSingle();
+
+    if (error) throw error;
+    res.json({ ready: onlinePaymentsReady(), account_id: data?.online_payment_account_id || null });
+  } catch (error) {
+    sendError(res, error);
+  }
+});
+
+app.put('/online-payments', async (req, res) => {
+  try {
+    const { account_id } = req.body;
+    if (account_id && !UUID.test(account_id)) throw new Error('Choose a cash or bank account');
+    const { error } = await ledger(req).rpc('set_online_payment_account', {
+      p_tenant: req.tenantId,
+      p_account: account_id || null
+    });
+
+    if (error) throw error;
+    res.json({ success: true });
+  } catch (error) {
+    sendError(res, error);
+  }
+});
+
+// The invoice's payment link. The same link is given each time.
+app.post('/invoices/:id/payment-link', async (req, res) => {
+  try {
+    if (!onlinePaymentsReady()) throw new Error(PAYMENTS_NOT_READY);
+    const { data, error } = await ledger(req).rpc('payment_link_for', {
+      p_tenant: req.tenantId,
+      p_invoice: req.params.id
+    });
+
+    if (error) throw error;
+    res.json({ token: data });
   } catch (error) {
     sendError(res, error);
   }

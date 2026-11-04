@@ -10,6 +10,7 @@ import { CustomValues } from '@/components/CustomFields';
 import Timeline from '@/components/Timeline';
 import { api, money, queryId } from '@/lib/api';
 import useSubmit from '@/lib/useSubmit';
+import { whatsappLink } from '@/lib/whatsapp';
 
 export default function Contact() {
   return <AppShell><ContactApp /></AppShell>;
@@ -68,6 +69,10 @@ function ContactApp() {
               {contact.campaign && <p className="muted">Campaign: {contact.campaign}</p>}
             </div>
             <div className="row-actions">
+              {contact.phone && (
+                <a className="button" href={whatsappLink(contact.phone)} target="_blank" rel="noopener noreferrer"
+                  title="Opens a WhatsApp chat with this number">Send on WhatsApp</a>
+              )}
               <button onClick={() => setAdding(true)}>New deal</button>
               <button onClick={() => setEditing(true)}>Edit</button>
               <button disabled={busy} className="danger" onClick={remove}>Delete</button>

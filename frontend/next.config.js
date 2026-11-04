@@ -13,7 +13,15 @@ const nextConfig = {
         headers: [
           { key: 'X-Content-Type-Options', value: 'nosniff' },
           { key: 'Referrer-Policy', value: 'strict-origin-when-cross-origin' },
-          { key: 'Permissions-Policy', value: 'camera=(), microphone=(), geolocation=()' }
+          { key: 'Permissions-Policy', value: 'camera=(self), microphone=(), geolocation=()' }
+        ]
+      },
+      {
+        // The service worker must always be fresh so a new release reaches installed apps
+        source: '/sw.js',
+        headers: [
+          { key: 'Cache-Control', value: 'no-cache' },
+          { key: 'Service-Worker-Allowed', value: '/' }
         ]
       },
       {

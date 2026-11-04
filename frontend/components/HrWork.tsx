@@ -1,6 +1,7 @@
 import { FormEvent, useEffect, useState } from 'react';
 import Modal from '@/components/Modal';
 import { fullName } from '@/components/HrForms';
+import ReceiptReader, { ReceiptFields } from '@/components/ReceiptReader';
 import { api, formatDate, today } from '@/lib/api';
 import { getSupabase } from '@/lib/supabase';
 import useSubmit from '@/lib/useSubmit';
@@ -148,6 +149,17 @@ export function ExpenseForm({ people, me, categories, tenantId, onClose, onSaved
     setFile(chosen);
   };
 
+  // A read receipt fills in what it can and is attached, unless a file was already chosen
+  const fromReceipt = (read: ReceiptFields, photo: File) => {
+    setForm((current) => ({
+      ...current,
+      expense_date: read.date && read.date <= today() ? read.date : current.expense_date,
+      amount: read.total ? String(read.total) : current.amount,
+      description: current.description || (read.vendor || '').slice(0, 300)
+    }));
+    if (!file) choose(photo);
+  };
+
   const submit = async (event: FormEvent) => {
     event.preventDefault();
     setBusy(true);
@@ -178,6 +190,7 @@ export function ExpenseForm({ people, me, categories, tenantId, onClose, onSaved
   return (
     <Modal title="New expense claim" onClose={onClose}>
       <form onSubmit={submit}>
+        <ReceiptReader onRead={fromReceipt} />
         <div className="form-grid">
           {people.length > 1 && (
             <label>Person

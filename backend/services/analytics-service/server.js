@@ -57,7 +57,10 @@ const callAnalytics = (name, params) => async (req, res) => {
   }
 };
 
-app.use(express.json({ limit: '16kb' }));
+// Receipt pictures are the one large body; everything else stays small
+const smallJson = express.json({ limit: '16kb' });
+const receiptJson = express.json({ limit: '6mb' });
+app.use((req, res, next) => (req.path === '/assistant/receipt' ? receiptJson : smallJson)(req, res, next));
 app.get('/health', (req, res) => res.json({ status: 'ok', service: 'analytics-service' }));
 
 // Only the gateway reaches this service, and it sets the tenant
@@ -151,6 +154,9 @@ app.post('/goals', callAnalytics('set_goal', (req) => {
 app.get('/history', callAnalytics('snapshot_history', (req) => ({
   p_days: Math.min(Math.max(Number.parseInt(req.query.days, 10) || 90, 7), 400)
 })));
+
+// To do list, questions about the numbers and reading receipts
+require('./assistant')(app, { sendError, call });
 
 app.use((err, req, res, next) => {
   if (res.headersSent) return next(err);

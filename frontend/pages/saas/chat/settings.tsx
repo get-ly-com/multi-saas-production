@@ -75,7 +75,7 @@ function ChatSettings() {
           ask_rating: form.ask_rating,
           sla_hours: form.sla_hours
         });
-        setForm(saved);
+        setForm({ ...saved, whatsapp: form.whatsapp });
         setNotice('Saved');
       } catch (err: any) {
         setError(err.message);
@@ -194,6 +194,73 @@ function ChatSettings() {
         <p className="muted">Anyone with this address can chat with you. If it is being misused, get a new address.</p>
         {manager && <div><button disabled={busy} type="button" className="danger" onClick={newKey}>Get a new address</button></div>}
       </div>
+
+      <WhatsAppSettings form={form} manager={manager} onSaved={(saved) => setForm({ ...form, ...saved, whatsapp: form.whatsapp })} />
     </div>
+  );
+}
+
+const WHATSAPP_WEBHOOK = 'https://api-gateway-production-7b38.up.railway.app/api/whatsapp/webhook';
+
+// WhatsApp messages in the chat inbox, through Meta's WhatsApp Business Platform
+function WhatsAppSettings({ form, manager, onSaved }: { form: any; manager: boolean; onSaved: (saved: any) => void }) {
+  const [phoneId, setPhoneId] = useState(form.whatsapp_phone_number_id || '');
+  const [error, setError] = useState('');
+  const [notice, setNotice] = useState('');
+  const { busy, run } = useSubmit();
+  const status = form.whatsapp || {};
+  const connected = Boolean(status.app_ready && form.whatsapp_phone_number_id);
+
+  const save = (event: FormEvent) => {
+    event.preventDefault();
+    return run(async () => {
+      setError('');
+      setNotice('');
+      try {
+        const saved = await api.put('/api/chatbot/settings', { whatsapp_phone_number_id: phoneId.trim() });
+        onSaved(saved);
+        setNotice(saved.whatsapp_phone_number_id ? 'Saved' : 'WhatsApp is disconnected from this company');
+      } catch (err: any) {
+        setError(err.message);
+      }
+    });
+  };
+
+  return (
+    <form className="card stack" onSubmit={save}>
+      <h2>WhatsApp</h2>
+      <p>
+        <span className={`badge ${connected ? 'paid' : ''}`}>{connected ? 'Connected' : 'Not connected'}</span>
+        {status.last_received_at && <span className="muted"> Last message received {new Date(status.last_received_at).toLocaleString()}</span>}
+      </p>
+      <p className="muted">Messages to your WhatsApp Business number show up in the inbox with a WhatsApp label, and your
+        team's replies go back on WhatsApp. WhatsApp only allows free replies for 24 hours after the customer's last message.</p>
+      {!status.app_ready && (
+        <p className="notice">WhatsApp isn't switched on for this app yet. Whoever runs the app needs to add the WhatsApp
+          keys on the server (step 4 below){status.secret_saved ? '' : ' and save the app secret in the database'}.</p>
+      )}
+      <fieldset disabled={!manager} className="chat-fieldset stack">
+        <label>Phone number ID
+          <input inputMode="numeric" maxLength={30} placeholder="For example 106540352242922" value={phoneId}
+            onChange={(e) => setPhoneId(e.target.value)} />
+        </label>
+        <p className="muted">Not your phone number: the long ID Meta shows next to it. Leave empty to disconnect.</p>
+      </fieldset>
+      {error && <p className="error">{error}</p>}
+      {notice && <p className="notice">{notice}</p>}
+      {manager && <div className="form-actions"><button className="primary" disabled={busy}>Save WhatsApp number</button></div>}
+
+      <h3>How to set it up</h3>
+      <ol className="stack">
+        <li>Go to developers.facebook.com, create an app of the Business type, and add the WhatsApp product to it.</li>
+        <li>In WhatsApp, API Setup, add your business phone number. Copy the Phone number ID shown with it, paste it above and save.</li>
+        <li>In WhatsApp, Configuration, edit the webhook. Callback URL:
+          <div className="chat-try"><input readOnly value={WHATSAPP_WEBHOOK} onFocus={(e) => e.target.select()} /></div>
+          For the Verify token, use the one set on the server. Then subscribe to the "messages" field.</li>
+        <li>Whoever runs the app adds, on the server: a permanent access token (from a System User with the
+          whatsapp_business_messaging permission), the app secret (App settings, Basic), and the verify token.</li>
+        <li>Send a WhatsApp message to your business number. It should appear in the inbox within a few seconds.</li>
+      </ol>
+    </form>
   );
 }

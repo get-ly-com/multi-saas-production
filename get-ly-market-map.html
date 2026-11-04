@@ -1,0 +1,275 @@
+<title>Get-ly Market Map</title>
+<meta name="claude:viewport-fit-sides" content="cover">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Bricolage+Grotesque:opsz,wght@12..96,500;12..96,700&family=Instrument+Sans:wght@400;500;600&family=JetBrains+Mono:wght@400;500&display=swap">
+<style>
+/* Layout: a single reading column with wide comparison tables; product sections are a ledger of rows, gaps ranked by severity */
+:root {
+  --bg: #f6f7f9; --surface: #ffffff; --fg: #17202b; --muted: #5a6573; --line: #dde2e8;
+  --accent: #0f6c74; --accent-soft: #e2f1f1;
+  --yes: #1d7a46; --yes-bg: #e3f3e8; --part: #9a6400; --part-bg: #fbf0d9; --no: #b3261e; --no-bg: #fbe5e3;
+  --display: "Bricolage Grotesque", "Segoe UI", system-ui, sans-serif;
+  --body: "Instrument Sans", "Segoe UI", system-ui, sans-serif;
+  --mono: "JetBrains Mono", ui-monospace, Consolas, monospace;
+}
+@media (prefers-color-scheme: dark) { :root:not([data-theme="light"]) {
+  --bg: #0f141a; --surface: #161d25; --fg: #e6ebf0; --muted: #9aa6b3; --line: #2a333d;
+  --accent: #5cc3c9; --accent-soft: #15313a;
+  --yes: #6fd39a; --yes-bg: #133222; --part: #f0c05a; --part-bg: #3a2c0e; --no: #ff8a80; --no-bg: #3d1715; color-scheme: dark; } }
+:root[data-theme="dark"] {
+  --bg: #0f141a; --surface: #161d25; --fg: #e6ebf0; --muted: #9aa6b3; --line: #2a333d;
+  --accent: #5cc3c9; --accent-soft: #15313a;
+  --yes: #6fd39a; --yes-bg: #133222; --part: #f0c05a; --part-bg: #3a2c0e; --no: #ff8a80; --no-bg: #3d1715; color-scheme: dark; }
+body { background: var(--bg); color: var(--fg); font: 15px/1.6 var(--body); }
+.wrap { max-width: 1060px; margin: 0 auto; padding-block: 40px 80px; padding-left: max(16px, env(safe-area-inset-left, 0px)); padding-right: max(16px, env(safe-area-inset-right, 0px)); display: grid; gap: 56px; }
+h1, h2, h3 { font-family: var(--display); text-wrap: balance; margin: 0; line-height: 1.15; }
+h1 { font-size: clamp(30px, 5vw, 46px); }
+h2 { font-size: clamp(22px, 3vw, 28px); }
+h3 { font-size: 17px; }
+p { margin: 0; max-width: 68ch; }
+.eyebrow { font: 500 12px var(--mono); letter-spacing: .08em; text-transform: uppercase; color: var(--accent); }
+.stack { display: grid; gap: 14px; }
+.lead { font-size: 17px; color: var(--muted); }
+.note { font-size: 13px; color: var(--muted); }
+nav.toc { display: flex; flex-wrap: wrap; gap: 8px; }
+nav.toc a { font: 500 13px var(--body); color: var(--fg); text-decoration: none; border: 1px solid var(--line); background: var(--surface); padding: 5px 11px; border-radius: 999px; }
+nav.toc a:hover, nav.toc a:focus-visible { border-color: var(--accent); outline: none; }
+.verdict { display: grid; grid-template-columns: repeat(auto-fit, minmax(230px, 1fr)); gap: 12px; }
+.verdict > div { background: var(--surface); border: 1px solid var(--line); border-radius: 10px; padding: 16px; display: grid; gap: 6px; align-content: start; min-width: 0; }
+.verdict strong { font-family: var(--display); font-size: 16px; }
+.scroll { overflow-x: auto; border: 1px solid var(--line); border-radius: 10px; background: var(--surface); }
+table { border-collapse: collapse; width: 100%; min-width: 640px; font-size: 14px; }
+th, td { text-align: left; padding: 9px 12px; border-bottom: 1px solid var(--line); vertical-align: top; }
+thead th { font: 500 12px var(--mono); letter-spacing: .04em; color: var(--muted); background: var(--bg); }
+thead th.us { color: var(--accent); }
+tbody tr:last-child td { border-bottom: 0; }
+td.cap { width: 38%; }
+td.us { background: var(--accent-soft); }
+.pill { display: inline-block; font: 500 12px var(--mono); padding: 1px 8px; border-radius: 999px; white-space: nowrap; }
+.y { color: var(--yes); background: var(--yes-bg); } .p { color: var(--part); background: var(--part-bg); } .n { color: var(--no); background: var(--no-bg); }
+section.product { display: grid; gap: 16px; scroll-margin-top: 16px; }
+.phead { display: flex; flex-wrap: wrap; justify-content: space-between; align-items: baseline; gap: 8px 16px; }
+.rivals { font: 13px var(--mono); color: var(--muted); }
+.two { display: grid; grid-template-columns: repeat(auto-fit, minmax(280px, 1fr)); gap: 16px; }
+.two > div { min-width: 0; display: grid; gap: 8px; align-content: start; }
+ul { margin: 0; padding-left: 20px; display: grid; gap: 6px; }
+.gap-list li::marker { color: var(--no); }
+.win-list li::marker { color: var(--yes); }
+.rank { counter-reset: r; list-style: none; padding: 0; gap: 0; border: 1px solid var(--line); border-radius: 10px; background: var(--surface); }
+.rank li { counter-increment: r; display: grid; grid-template-columns: 34px 1fr auto; gap: 4px 12px; padding: 12px 14px; border-bottom: 1px solid var(--line); align-items: start; }
+.rank li:last-child { border-bottom: 0; }
+.rank li::before { content: counter(r); font: 500 13px var(--mono); color: var(--muted); padding-top: 2px; }
+.rank b { font-weight: 600; }
+.rank span.why { grid-column: 2 / 3; color: var(--muted); font-size: 14px; }
+.rank .size { grid-row: 1; grid-column: 3; }
+.plan { display: grid; grid-template-columns: repeat(auto-fit, minmax(260px, 1fr)); gap: 12px; }
+.plan > div { background: var(--surface); border: 1px solid var(--line); border-radius: 10px; padding: 16px; display: grid; gap: 10px; align-content: start; }
+.plan .when { font: 500 12px var(--mono); color: var(--accent); letter-spacing: .06em; text-transform: uppercase; }
+.moves { display: grid; gap: 12px; }
+.move { display: grid; grid-template-columns: minmax(0, 1fr); gap: 6px; padding: 16px; border-left: 3px solid var(--accent); background: var(--surface); border-radius: 0 10px 10px 0; }
+.legend { display: flex; flex-wrap: wrap; gap: 10px; align-items: center; font-size: 13px; color: var(--muted); }
+@media (max-width: 520px) { .rank li { grid-template-columns: 26px 1fr; } .rank .size { grid-column: 2; grid-row: auto; justify-self: start; } }
+</style>
+
+<div class="wrap">
+  <header class="stack">
+    <span class="eyebrow">Get-ly · competitive review · November 2026</span>
+    <h1>Where get-ly stands against the market leaders, and how it can win</h1>
+    <p class="lead">Each of the 10 products is compared with the top three tools people buy instead. Rows show what a buyer expects; red rows are gaps. The last part is a plan to break into the market.</p>
+    <p class="note">Get-ly features come from the live code. Rival features are from public product information as of mid-2026 and weren't checked again today; plans and tiers vary, so treat "Yes" as "available on some plan".</p>
+    <div class="legend"><span class="pill y">Yes</span> has it <span class="pill p">Partial</span> basic or limited <span class="pill n">No</span> missing</div>
+    <nav class="toc" aria-label="Sections">
+      <a href="#verdict">Verdict</a><a href="#accounting">Accounting</a><a href="#crm">CRM</a><a href="#inventory">Inventory</a><a href="#hr">HR &amp; payroll</a><a href="#analytics">Analytics</a><a href="#scheduler">Scheduler</a><a href="#meetings">Meetings</a><a href="#chat">Chat</a><a href="#social">Social</a><a href="#integrations">Integrations</a><a href="#top-gaps">Top 12 gaps</a><a href="#disrupt">How to disrupt</a><a href="#plan">90-day plan</a>
+    </nav>
+  </header>
+
+  <section id="verdict" class="stack">
+    <span class="eyebrow">The short answer</span>
+    <h2>Strong core and connected data, but missing the outside connections buyers expect</h2>
+    <div class="verdict">
+      <div><strong>Where get-ly is already ahead</strong><p>Every product writes to one shared set of books. A booking becomes a contact, a meeting and an invoice, and payroll and stock post real ledger entries. Standalone tools need paid connectors to do this, and they often go out of sync.</p></div>
+      <div><strong>Where it matches</strong><p>The core of each app: ledger and reports, pipeline, stock and counts, leave and payroll maths, booking pages, chat inbox and tickets, a post planner, and webhooks.</p></div>
+      <div><strong>Where it falls behind</strong><p>Connections to the outside world: sending email, taking payments, bank feeds, WhatsApp, calendar sync, direct social posting, AI and mobile. These are the reasons a buyer would say no today.</p></div>
+      <div><strong>The real competitor</strong><p>The real competition is the other all-in-one suites, Odoo and Zoho One, more than any single app. Both already sell dozens of apps cheaply, so being all-in-one won't win buyers by itself. The plan at the end is about where to be different.</p></div>
+    </div>
+  </section>
+
+  <div id="products" class="stack" style="gap:56px"></div>
+
+  <section id="top-gaps" class="stack">
+    <span class="eyebrow">Across all products</span>
+    <h2>The 12 gaps that matter most, in order</h2>
+    <p>Ranked by how often each one would lose a sale, against the effort. S is days, M is one to three weeks, L is a month or more.</p>
+    <ol class="rank">
+      <li><b>Email that actually sends</b><span class="pill y size">S</span><span class="why">Invites, invoices, reminders, payslips and booking confirmations all depend on it. This is the Resend setup still waiting on you.</span></li>
+      <li><b>Take payments online</b><span class="pill p size">M</span><span class="why">A "Pay now" link on invoices, plus deposits on bookings. Use Stripe, plus local gateways wherever you sell. All three accounting rivals have it.</span></li>
+      <li><b>Paid hosting, backups and monitoring</b><span class="pill y size">S</span><span class="why">Free tiers sleep, cap usage and have no backups you can rely on. Paying customers need daily backups, uptime alerts and a status page.</span></li>
+      <li><b>AI assistant across all the data</b><span class="pill p size">M</span><span class="why">Every rival now has one. Get-ly's version can do more because it sees sales, stock, staff and chats in one place (see "How to disrupt").</span></li>
+      <li><b>WhatsApp channel</b><span class="pill p size">M</span><span class="why">Chat inbox, booking reminders and sending invoices by WhatsApp. In many markets this matters more than email.</span></li>
+      <li><b>Two-way Google and Outlook calendar sync</b><span class="pill p size">M</span><span class="why">Scheduler only sends a feed out today, so busy times in a personal calendar can be double-booked. Calendly, Acuity and Cal.com all sync both ways.</span></li>
+      <li><b>Phone-friendly app</b><span class="pill p size">M</span><span class="why">An installable web app first: clock-in, approvals, scanning stock with the camera, the chat inbox, receipts.</span></li>
+      <li><b>Bank feeds</b><span class="pill n size">L</span><span class="why">Today bank lines come from CSV import. Feeds need a provider (Plaid, GoCardless, Salt Edge or local banks) and their approval.</span></li>
+      <li><b>Importers from rivals</b><span class="pill y size">S</span><span class="why">One-step import of QuickBooks, Xero, HubSpot and Odoo exports. Switching cost is the biggest blocker for a buyer who already uses something.</span></li>
+      <li><b>Receipt and bill capture</b><span class="pill p size">M</span><span class="why">Snap a receipt and the amount, date and vendor fill themselves in. Use it for HR expenses and accounting bills.</span></li>
+      <li><b>Listed on Zapier and Make</b><span class="pill p size">M</span><span class="why">Get-ly won't out-build their thousands of connectors. Being listed as an app on them gives that reach for free.</span></li>
+      <li><b>Direct social publishing</b><span class="pill n size">L</span><span class="why">This needs each network's app review: Meta, LinkedIn, X and TikTok. It's slow, so start the applications early.</span></li>
+    </ol>
+  </section>
+
+  <section id="disrupt" class="stack">
+    <span class="eyebrow">Strategy</span>
+    <h2>How to disrupt the market</h2>
+    <p>Get-ly won't win by having more features than Odoo and Zoho. They have years of head start and hundreds of developers. It can win by picking a fight they can't easily fight back. These six moves build on what get-ly already has.</p>
+    <div class="moves">
+      <div class="move"><h3>1. Sell an AI back office that does the work, with the software included</h3><p>Rivals add AI to each app separately. Get-ly has every product in one database, so one assistant can do jobs that span apps:</p><ul><li>match the bank statement against invoices;</li><li>chase overdue invoices;</li><li>draft chat replies from past answers;</li><li>flag stock that will run out before the next order;</li><li>explain why profit fell this month, using sales, wages and stock costs together.</li></ul><p>The message to buyers: "your bookkeeper, receptionist and analyst, for the price of one app." Have it suggest each action and wait for a click to approve, so trust is built step by step.</p></div>
+      <div class="move"><h3>2. Price per company, never per seat</h3><p>Most rivals charge per user, per app. Charge one flat price per company with every app included and unlimited staff, and keep a real free plan. That makes adding a fifth employee or a second app free, which is exactly where rivals' bills jump. The prices themselves are your call.</p></div>
+      <div class="move"><h3>3. Win one type of customer completely before going wide</h3><p>Service businesses with 5 to 50 people already use almost every get-ly app in a chain: booking → meeting → invoice → payment → payroll. Examples are clinics, salons, agencies, consultancies, tutors and repair shops. Build a ready-made setup for one of them, with its services, invoice template, chat answers and reports. "Get-ly for clinics" is easier to sell than "an all-in-one suite".</p></div>
+      <div class="move"><h3>4. Go deep on a local market the giants serve badly</h3><p>Global tools treat many regions as an afterthought. Pick your home market and own it:</p><ul><li>local tax rules on invoices;</li><li>local payroll deductions;</li><li>local payment methods and instant bank transfers;</li><li>local languages;</li><li>WhatsApp first.</li></ul><p>In Pakistan, for example, that means FBR sales tax, EOBI and provincial social security, and Raast and mobile wallets. Local depth like this is what makes Zoho or Odoo look generic.</p></div>
+      <div class="move"><h3>5. Use accountants as your sales team</h3><p>The group and consolidation features already let one login manage many companies. Turn that into a free accountant view: every client's books, payroll and deadlines in one screen. One accountant can bring 20 to 50 small businesses, which is how Xero grew.</p></div>
+      <div class="move"><h3>6. Make switching take one afternoon</h3><p>Offer importers for the common rivals, a free "we move your data" service for the first customers, and a side-by-side check that the old and new trial balances match. Fear of losing data is why people stay with tools they don't like.</p></div>
+    </div>
+  </section>
+
+  <section id="plan" class="stack">
+    <span class="eyebrow">Sequence</span>
+    <h2>A 90-day plan</h2>
+    <div class="plan">
+      <div><span class="when">Days 1–30 · ready to charge money</span><ul><li>Email sending (Resend) and your domain on get-ly.com</li><li>Paid hosting, daily backups, uptime alerts</li><li>Stripe payments on invoices and bookings</li><li>Installable phone app</li><li>Terms, privacy policy, a data processing agreement, a pricing page</li></ul></div>
+      <div><span class="when">Days 31–60 · the edge</span><ul><li>AI assistant v1: chasing invoices, matching bank lines, drafting chat replies, "explain my month"</li><li>WhatsApp in chat and reminders</li><li>Two-way calendar sync</li><li>Importers for QuickBooks, Xero, HubSpot and Odoo</li><li>Start the social network and bank-feed applications, which take time</li></ul></div>
+      <div><span class="when">Days 61–90 · first customers</span><ul><li>Pick one type of business and one country</li><li>10 pilot customers, set up for free by hand</li><li>Accountant program with the multi-client view</li><li>Zapier and Make listing</li><li>Measure: setup time, weekly use, invoices paid through get-ly</li></ul></div>
+    </div>
+    <p class="note">Effort sizes and the order are estimates from the current code. Market facts about rivals should be checked against their current pricing pages before you use them in sales material.</p>
+  </section>
+</div>
+
+<script>
+const P = [
+ { id:'accounting', name:'Accounting', rivals:['QuickBooks Online','Xero','Zoho Books'],
+   rows:[
+    ['Ledger, invoices, bills, reports, trial balance','y','y','y','y'],
+    ['Multi-currency and group consolidation with intercompany','y','p','p','p'],
+    ['Revenue schedules, budgets, cost centres, fixed assets','y','p','p','p'],
+    ['Live bank feeds','n','y','y','y'],
+    ['Customers pay invoices online','n','y','y','y'],
+    ['Receipt and bill capture from a photo','n','y','y','y'],
+    ['Tax returns prepared and filed','p','y','y','y'],
+    ['Accountant tools for many clients','p','y','y','y'],
+    ['Phone app','n','y','y','y']],
+   wins:['Depth that rivals put on their top plans comes standard: consolidation, revenue schedules, budgets, cost centres, lock dates','Payroll, stock and sales post to the same books automatically'],
+   gaps:['Online payments on invoices','Bank feeds instead of CSV import','Receipt capture','Tax return reports for your country','An accountant multi-client view'] },
+ { id:'crm', name:'CRM', rivals:['Salesforce','HubSpot','Pipedrive'],
+   rows:[
+    ['Leads, deals, pipeline, quotes, forecast, duplicates','y','y','y','y'],
+    ['Automation rules and tasks','y','y','y','y'],
+    ['Deal profit from the real books','y','p','p','p'],
+    ['Two-way Gmail and Outlook sync with open tracking','n','y','y','y'],
+    ['Email sequences and newsletters','n','y','y','p'],
+    ['Built-in calling','n','y','y','y'],
+    ['AI: lead scoring, summaries, drafting','n','y','y','y'],
+    ['Phone app','n','y','y','y']],
+   wins:['Profit per deal uses actual invoice and stock costs, which rivals can only estimate','Chat, form and booking leads arrive in the CRM with no connector'],
+   gaps:['Email sending (Resend), then two-way inbox sync','Sequences for follow-ups','AI scoring and summaries','Phone app'] },
+ { id:'inventory', name:'Inventory', rivals:['Odoo Inventory','Zoho Inventory','Cin7 Core'],
+   rows:[
+    ['Items, warehouses, transfers, stock counts','y','y','y','y'],
+    ['Stock value tied to the ledger, profit by product','y','y','y','y'],
+    ['Reorder suggestions','y','y','y','y'],
+    ['Barcode scanning','p','y','y','y'],
+    ['Lots, serial numbers, expiry dates','n','y','y','y'],
+    ['Variants (size, colour) and units of measure','n','y','y','y'],
+    ['Shipping carriers and labels','n','y','y','y'],
+    ['Shopify and Amazon sync','n','y','y','y'],
+    ['Manufacturing and bills of materials','n','y','p','y']],
+   wins:['Stock value always matches the Inventory account','Costs flow from bills into profit by product'],
+   gaps:['Variants and units of measure','Lots, serials and expiry for food, pharmacy and electronics','Camera barcode scanning on phones','Shopify sync'] },
+ { id:'hr', name:'HR & payroll', rivals:['BambooHR','Gusto','Rippling'],
+   rows:[
+    ['People, org chart, leave, attendance, kiosk clock-in','y','y','p','y'],
+    ['Expense claims with approvals','y','p','p','y'],
+    ['Payroll maths and payslips','y','y','y','y'],
+    ['Payroll books itself into accounting','y','p','p','p'],
+    ['Tax filing, direct deposit, year-end forms','n','y','y','y'],
+    ['Benefits and insurance','n','p','y','y'],
+    ['Recruiting and job posts','n','y','p','y'],
+    ['Onboarding documents with e-signature','p','y','y','y'],
+    ['Performance reviews','n','y','p','y']],
+   wins:['Pay runs, liabilities and expense payouts land in the books with no export','Works for any country because tax is set as rates'],
+   gaps:['Pay-out file for your banks and tax reports for your country','Performance reviews','Hiring pipeline that can feed CRM-style stages','Document e-sign'] },
+ { id:'analytics', name:'Analytics', rivals:['Power BI','Tableau','Looker Studio'],
+   rows:[
+    ['Business dashboard across every app, no setup','y','p','p','p'],
+    ['Period comparison, goals, history','y','y','y','p'],
+    ['Custom report builder','p','y','y','y'],
+    ['Outside data sources','n','y','y','y'],
+    ['Scheduled email reports and sharing','n','y','y','y'],
+    ['Ask questions in plain language','n','y','y','p']],
+   wins:['Works the moment a company signs up; BI tools need a data person to model it first'],
+   gaps:['Weekly email digest','Ask-a-question AI over all data','Share a read-only link with an investor or accountant'] },
+ { id:'scheduler', name:'Scheduler', rivals:['Calendly','Acuity Scheduling','Cal.com'],
+   rows:[
+    ['Public booking page, services, staff, hours, days off','y','y','y','y'],
+    ['Reschedule and cancel links, repeats, no-shows, follow-up','y','y','y','y'],
+    ['Booking creates a CRM contact and a meeting link','y','p','p','p'],
+    ['Two-way Google and Outlook calendar sync','p','y','y','y'],
+    ['Take payment or deposit when booking','n','y','y','y'],
+    ['Email and SMS reminders','n','y','y','y'],
+    ['Routing forms and round-robin','p','y','p','y']],
+   wins:['Booking, contact, video call and invoice in one chain'],
+   gaps:['Email reminders (Resend), then WhatsApp and SMS','Two-way calendar sync','Deposits at booking'] },
+ { id:'meetings', name:'Meetings', rivals:['Zoom','Google Meet','Microsoft Teams'],
+   rows:[
+    ['Instant and scheduled meetings with links','y','y','y','y'],
+    ['Linked to CRM contacts and bookings','y','p','p','p'],
+    ['Host controls, waiting room, own video network','n','y','y','y'],
+    ['Recording and transcripts','n','y','y','y'],
+    ['AI meeting notes saved to the deal','n','y','y','y'],
+    ['Webinars and large events','n','y','y','y']],
+   wins:['Meetings attach to the contact, deal and booking automatically'],
+   gaps:["Don't build video: keep using Jitsi or another provider and compete on what happens after the call","AI notes and next steps saved to the CRM","Optional Zoom and Google Meet links for clients who need them"] },
+ { id:'chat', name:'Chat & help desk', rivals:['Intercom','Zendesk','Tidio'],
+   rows:[
+    ['Website chat, inbox, assign, saved replies, ratings, tickets','y','y','y','y'],
+    ['Chat turns into a CRM lead automatically','y','p','p','p'],
+    ['Bot answers questions','p','y','y','y'],
+    ['WhatsApp, email, Instagram, Messenger in one inbox','n','y','y','y'],
+    ['Help centre articles','n','y','y','p'],
+    ['Proactive messages to visitors','n','y','y','y'],
+    ['Phone app for agents','n','y','y','y']],
+   wins:["Agents see the visitor's invoices, bookings and deals next to the chat"],
+   gaps:['AI answers written from your answers library and past chats','WhatsApp channel','Help centre that also feeds the bot'] },
+ { id:'social', name:'Social', rivals:['Hootsuite','Buffer','Sprout Social'],
+   rows:[
+    ['Planner, approvals, library, many accounts, best times','y','y','y','y'],
+    ['Campaign results tied to leads and sales','y','p','n','p'],
+    ['Publishes to the networks directly','n','y','y','y'],
+    ['Results pulled in automatically','n','y','y','y'],
+    ['One inbox for comments and DMs','n','y','p','y'],
+    ['AI captions and ideas','n','y','y','y'],
+    ['Social listening','n','y','n','y']],
+   wins:['Shows which posts brought paying customers, not just likes'],
+   gaps:['Direct publishing (start network app reviews now)','Automatic results','AI captions'] },
+ { id:'integrations', name:'Integrations', rivals:['Zapier','Make','n8n'],
+   rows:[
+    ['Signed outgoing webhooks with retries and a delivery log','y','y','y','y'],
+    ['Incoming webhooks','y','y','y','y'],
+    ['Scoped API keys with request log and guide','y','y','y','y'],
+    ['Ready-made connectors to other apps','n','y','y','y'],
+    ['Visual multi-step workflows','n','y','y','y']],
+   wins:['A clean, signed API is the base needed to get listed on these platforms'],
+   gaps:["Don't compete with them; get listed as an app on Zapier and Make","Ready-made Google Sheets and Slack links for the most common needs"] }
+];
+const L = { y:'Yes', p:'Partial', n:'No' };
+const esc = s => s.replace(/[&<>]/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;'}[c]));
+document.getElementById('products').innerHTML = P.map(p => `
+ <section class="product" id="${p.id}">
+  <div class="phead"><h2>${esc(p.name)}</h2><span class="rivals">vs ${p.rivals.map(esc).join(' · ')}</span></div>
+  <div class="scroll"><table>
+   <thead><tr><th>What buyers expect</th><th class="us">Get-ly</th>${p.rivals.map(r=>`<th>${esc(r)}</th>`).join('')}</tr></thead>
+   <tbody>${p.rows.map(r=>`<tr><td class="cap">${esc(r[0])}</td><td class="us"><span class="pill ${r[1]}">${L[r[1]]}</span></td>${r.slice(2).map(v=>`<td><span class="pill ${v}">${L[v]}</span></td>`).join('')}</tr>`).join('')}</tbody>
+  </table></div>
+  <div class="two">
+   <div><h3>Where get-ly wins</h3><ul class="win-list">${p.wins.map(w=>`<li>${esc(w)}</li>`).join('')}</ul></div>
+   <div><h3>Gaps to close first</h3><ul class="gap-list">${p.gaps.map(g=>`<li>${esc(g)}</li>`).join('')}</ul></div>
+  </div>
+ </section>`).join('');
+</script>

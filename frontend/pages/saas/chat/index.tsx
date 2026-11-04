@@ -2,7 +2,7 @@ import Link from 'next/link';
 import { useRouter } from 'next/router';
 import { FormEvent, KeyboardEvent, useCallback, useEffect, useRef, useState } from 'react';
 import AppShell from '@/components/AppShell';
-import ChatNav, { ChatMessage, STATUS_LABELS, STATUS_STYLES, stars, timeText } from '@/components/ChatNav';
+import ChatNav, { ChatMessage, STATUS_LABELS, STATUS_STYLES, WA_STATUS, stars, timeText } from '@/components/ChatNav';
 import { api, isUuid } from '@/lib/api';
 
 export default function ChatInbox() {
@@ -23,7 +23,14 @@ type Conversation = {
   last_message: string | null;
   last_message_at: string;
   created_at: string;
+  channel?: string;
+  visitor_phone?: string | null;
 };
+
+// WhatsApp lets a business write freely for 24 hours after the customer's last message
+const WINDOW_MS = 24 * 60 * 60 * 1000;
+const windowOpen = (chat: any) => Boolean(chat?.last_visitor_at) && Date.now() - Date.parse(chat.last_visitor_at) < WINDOW_MS;
+const WhatsAppBadge = () => <span className="badge paid" title="This chat is on WhatsApp">WhatsApp</span>;
 
 const TABS = [
   { key: 'waiting', label: 'Waiting' },
@@ -31,7 +38,7 @@ const TABS = [
   { key: 'closed', label: 'Closed' }
 ];
 
-const visitorName = (chat: Conversation) => chat.visitor_name || chat.visitor_email || 'Visitor';
+const visitorName = (chat: Conversation) => chat.visitor_name || chat.visitor_email || (chat.visitor_phone ? `+${chat.visitor_phone}` : 'Visitor');
 
 // Polling pauses while the tab is hidden
 const useVisible = () => {
@@ -147,7 +154,7 @@ function Inbox() {
           {list.map((chat) => (
             <button key={chat.id} className={`chat-item ${chat.id === selected ? 'active' : ''}`} onClick={() => open(chat.id)}>
               <span className="chat-item-head">
-                <strong>{visitorName(chat)}</strong>
+                <strong>{visitorName(chat)}{chat.channel === 'whatsapp' && <> <WhatsAppBadge /></>}</strong>
                 <small>{timeText(chat.last_message_at)}</small>
               </span>
               <span className="chat-item-text">{chat.last_message || 'No messages yet'}</span>
@@ -313,10 +320,13 @@ function Thread({ id, team, canned, overview, visible, onChanged }: {
     event?.preventDefault();
     const body = reply.trim();
     if (!body || busy) return;
+    let notSent = '';
     act(async () => {
-      await api.post(`/api/chatbot/conversations/${id}/reply`, { body });
+      const sent = await api.post(`/api/chatbot/conversations/${id}/reply`, { body });
       setReply('');
-    });
+      // Saved in the chat, but WhatsApp didn't take it
+      notSent = sent?.whatsapp_error || '';
+    }).then(() => notSent && setError(notSent));
   };
 
   const onKey = (event: KeyboardEvent<HTMLTextAreaElement>) => {
@@ -343,6 +353,9 @@ function Thread({ id, team, canned, overview, visible, onChanged }: {
 
   if (!chat) return <div className="card chat-thread">{error ? <p className="error">{error}</p> : <p className="empty">Loading…</p>}</div>;
 
+  const onWhatsApp = chat.channel === 'whatsapp';
+  const whatsAppClosed = onWhatsApp && !windowOpen(chat);
+
   const authorName = (message: ChatMessage) => {
     if (message.sender === 'bot') return 'Bot';
     if (message.sender === 'visitor') return chat.visitor_name || 'Visitor';
@@ -354,9 +367,11 @@ function Thread({ id, team, canned, overview, visible, onChanged }: {
     <div className="card chat-thread">
       <div className="chat-thread-head">
         <div>
-          <h2>{chat.visitor_name || 'Visitor'} <span className={`badge ${STATUS_STYLES[chat.status]}`}>{STATUS_LABELS[chat.status]}</span></h2>
+          <h2>{chat.visitor_name || (chat.visitor_phone ? `+${chat.visitor_phone}` : 'Visitor')} <span className={`badge ${STATUS_STYLES[chat.status]}`}>{STATUS_LABELS[chat.status]}</span>
+            {onWhatsApp && <> <WhatsAppBadge /></>}</h2>
           <div className="muted">
-            {chat.visitor_email || 'No email yet'}
+            {onWhatsApp ? `+${chat.visitor_phone || ''}` : chat.visitor_email || 'No email yet'}
+            {onWhatsApp && chat.visitor_email && <> · {chat.visitor_email}</>}
             {chat.started_on && <> · started on {chat.started_on}</>}
             {chat.wants_person && chat.status !== 'closed' && <> · asked for a person</>}
             {chat.campaign && <> · campaign {chat.campaign}</>}
@@ -395,8 +410,11 @@ function Thread({ id, team, canned, overview, visible, onChanged }: {
             ? <p key={message.id} className="chat-system">{message.body}</p>
             : (
               <div key={message.id} className={`chat-bubble ${message.sender === 'visitor' ? 'them' : 'us'} ${message.sender}`}>
-                <small>{authorName(message)} · {timeText(message.created_at)}</small>
+                <small>{authorName(message)} · {timeText(message.created_at)}
+                  {message.wa_status && <> · <span className={message.wa_status === 'failed' ? 'error' : ''}
+                    title={message.send_error || ''}>{WA_STATUS[message.wa_status] || message.wa_status}</span></>}</small>
                 <div className="chat-body">{message.body}</div>
+                {message.wa_status === 'failed' && message.send_error && <small className="error">{message.send_error}</small>}
               </div>
             )
         ))}
@@ -406,6 +424,10 @@ function Thread({ id, team, canned, overview, visible, onChanged }: {
 
       {error && <p className="error">{error}</p>}
       {notice && <p className="notice">{notice}</p>}
+      {canReply && whatsAppClosed && (
+        <p className="notice">It has been more than 24 hours since this customer last wrote. WhatsApp only allows a
+          pre-approved template message now, so replies here won't be sent. When they message you again, you can reply for 24 hours.</p>
+      )}
       {canReply ? (
         <form className="chat-reply" onSubmit={send}>
           <textarea rows={3} maxLength={2000} placeholder="Type a reply, or / and a shortcut for a saved reply. Enter sends, Shift+Enter adds a line."
@@ -424,8 +446,10 @@ function Thread({ id, team, canned, overview, visible, onChanged }: {
             <small className="muted">No saved reply starts with /{shortcut}. <Link href="/saas/chat/replies">Add saved replies</Link></small>
           )}
           <div className="form-actions">
-            <button className="primary always" disabled={busy || !reply.trim()}>Send</button>
-            <span className="muted">The visitor sees replies within a few seconds while their chat page is open.</span>
+            <button className="primary always" disabled={busy || !reply.trim() || whatsAppClosed}>Send</button>
+            <span className="muted">{onWhatsApp
+              ? 'Replies go to the customer on WhatsApp.'
+              : 'The visitor sees replies within a few seconds while their chat page is open.'}</span>
           </div>
         </form>
       ) : <p className="muted">Your role can read chats but not reply.</p>}

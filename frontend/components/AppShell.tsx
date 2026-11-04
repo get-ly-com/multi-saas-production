@@ -1,6 +1,7 @@
 import Link from 'next/link';
 import { useRouter } from 'next/router';
 import { ReactNode, useEffect, useState } from 'react';
+import InstallAppButton from '@/components/InstallAppButton';
 import NotificationBell from '@/components/NotificationBell';
 import { api, openCompany, rememberCompany, savedCompanyId, setBaseCurrency } from '@/lib/api';
 import { PRODUCTS } from '@/lib/products';
@@ -94,6 +95,7 @@ export default function AppShell({ children }: { children: ReactNode }) {
             <option value="new">Add a company…</option>
           </select>
           <NotificationBell />
+          <InstallAppButton />
           <span>{me.user.email}</span>
           <button className="link" onClick={signOut}>Sign out</button>
         </div>

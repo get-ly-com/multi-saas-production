@@ -4,9 +4,10 @@ import Modal from '@/components/Modal';
 import { LOCATIONS, dayLabel, googleCalendarLink, placesText } from '@/components/SchedulerNav';
 import { api, money } from '@/lib/api';
 import useSubmit from '@/lib/useSubmit';
+import { bookingReminderText, whatsappLink } from '@/lib/whatsapp';
 
 // Leave (from HR) and company holidays block a day. Staff can still book after this warning.
-const AWAY = /away on leave|closed that day/i;
+const AWAY = /away on leave|closed that day|busy then in their own calendar/i;
 
 function AwayWarning({ message, action, onConfirm, onBack }: {
   message: string; action: string; onConfirm: () => void; onBack: () => void;
@@ -316,6 +317,26 @@ export function BookingDetails({ booking, data, onClose, onSaved }: {
     act(() => api.post(`/api/scheduler/bookings/${booking.id}/cancel-repeats`, { reason }));
   };
 
+  // A WhatsApp reminder with the time and the customer's own reschedule/cancel link. The window opens
+  // straight away (so it isn't blocked), then gets its address once the link is known.
+  const sendWhatsApp = async () => {
+    const opened = window.open('about:blank', '_blank');
+    if (opened) opened.opener = null;
+    let link = '';
+    try {
+      const { token } = await api.get(`/api/chatbot/whatsapp/booking-link/${booking.id}`);
+      if (token) link = `${window.location.origin}/book/cancel/${token}`;
+    } catch {
+      // Without the link the reminder still has the time
+    }
+    const url = whatsappLink(booking.customer_phone, bookingReminderText({
+      name: booking.customer_name, service: booking.service_name, staff: booking.staff_name,
+      when: `${dayLabel(booking.local_date, true)} at ${booking.start_time}`, link
+    }));
+    if (opened) opened.location.href = url;
+    else window.location.href = url;
+  };
+
   const mark = (value: string) => act(() => api.post(`/api/scheduler/bookings/${booking.id}/attendance`, { value }));
   const remind = (done: boolean) => act(() => api.post(`/api/scheduler/bookings/${booking.id}/reminded`, { done }));
 
@@ -397,6 +418,12 @@ export function BookingDetails({ booking, data, onClose, onSaved }: {
       {error && <p className="error">{error}</p>}
       <div className="form-actions">
         {live && data.can_edit && !moving && <button className="primary" onClick={() => setMoving(true)}>Reschedule</button>}
+        {live && !booking.has_started && (
+          <button type="button" onClick={sendWhatsApp}
+            title={booking.customer_phone ? 'Opens WhatsApp with a reminder ready to send' : 'No phone number on this booking: WhatsApp will ask who to send it to'}>
+            Send on WhatsApp
+          </button>
+        )}
         {live && data.can_edit && <button className="danger" disabled={busy} onClick={cancel}>Cancel booking</button>}
         {live && data.can_edit && booking.repeat_group && <button className="danger" disabled={busy} onClick={cancelRepeats}>Cancel this and later repeats</button>}
         <button type="button" onClick={onClose}>Close</button>

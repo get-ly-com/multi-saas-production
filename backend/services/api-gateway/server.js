@@ -23,8 +23,9 @@ app.set('trust proxy', 1);
 app.use(helmet());
 app.use(cors({ origin: allowedOrigins, allowedHeaders: ['Authorization', 'Content-Type', 'X-Company'] }));
 // Secret links (incoming webhooks, calendar feeds, visitors' booking links) must never reach the logs
-const SECRET_PATHS = /^(\/api\/hooks\/in\/|\/api\/book\/feed\/|\/api\/book\/cancel\/)[^/?]+/;
-const safePath = (path) => path.replace(SECRET_PATHS, '$1[hidden]');
+const SECRET_PATHS = /^(\/api\/hooks\/in\/|\/api\/book\/feed\/|\/api\/book\/cancel\/|\/api\/pay\/)[^/?]+/;
+// WhatsApp's verify handshake carries the verify token in the query, so the whole address is hidden
+const safePath = (path) => path.replace(SECRET_PATHS, '$1[hidden]').replace(/^\/api\/whatsapp\/.*/, '/api/whatsapp/[hidden]');
 morgan.token('safe-url', (req) => safePath(req.originalUrl || req.url));
 app.use(morgan(':remote-addr - :remote-user [:date[clf]] ":method :safe-url HTTP/:http-version" :status :res[content-length] ":referrer" ":user-agent"'));
 // Per address. A whole office shares one address, and the inbox and alerts check in every few seconds,
@@ -647,6 +648,113 @@ app.post('/api/book/:key', bookingLimit, express.json({ limit: '16kb' }), async 
   });
 }
 // ---- End of public customer chat ----
+
+// ---- WhatsApp webhook (Chat) ----
+// Meta calls this for the WhatsApp Business Cloud API. No signed-in user.
+// GET is Meta's one-time check: it sends hub.verify_token, which must equal WHATSAPP_VERIFY_TOKEN,
+// and we answer with hub.challenge. POST carries messages; X-Hub-Signature-256 is an HMAC SHA-256 of
+// the raw body with WHATSAPP_APP_SECRET. Signed bodies go on untouched to chatbot-service, which
+// (with the database) finds the company by its phone number id. Without the env vars this is off.
+{
+  const crypto = require('crypto');
+  const whatsappUrl = () =>
+    `http://${process.env.NODE_ENV === 'production' ? 'chatbot-service.railway.internal' : 'localhost'}:3004/whatsapp/webhook`;
+  // Meta sends from many addresses and retries, so this is roomy
+  const whatsappLimit = rateLimit({ windowMs: 60 * 1000, limit: 600, standardHeaders: true, legacyHeaders: false,
+    message: { error: 'Too many requests' } });
+  const sameText = (a, b) => {
+    const left = Buffer.from(String(a || ''));
+    const right = Buffer.from(String(b || ''));
+    return left.length === right.length && crypto.timingSafeEqual(left, right);
+  };
+
+  app.get('/api/whatsapp/webhook', whatsappLimit, (req, res) => {
+    const query = new URLSearchParams((req.originalUrl.split('?')[1] || ''));
+    const expected = process.env.WHATSAPP_VERIFY_TOKEN;
+    if (!expected || query.get('hub.mode') !== 'subscribe' || !sameText(query.get('hub.verify_token'), expected)) {
+      return res.status(403).json({ error: 'Not allowed' });
+    }
+    res.type('text/plain').send(String(query.get('hub.challenge') || '').slice(0, 200));
+  });
+
+  app.post('/api/whatsapp/webhook', whatsappLimit, express.raw({ type: '*/*', limit: '1mb' }), async (req, res) => {
+    const secret = process.env.WHATSAPP_APP_SECRET;
+    if (!secret) return res.status(503).json({ error: 'WhatsApp is not set up' });
+    const raw = Buffer.isBuffer(req.body) ? req.body : Buffer.alloc(0);
+    const signature = String(req.headers['x-hub-signature-256'] || '');
+    const expected = `sha256=${crypto.createHmac('sha256', secret).update(raw).digest('hex')}`;
+    if (!raw.length || !sameText(signature, expected)) return res.status(401).json({ error: 'The signature does not match' });
+    try {
+      const response = await fetch(whatsappUrl(), {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', 'X-Hub-Signature-256': signature },
+        body: raw,
+        signal: AbortSignal.timeout(15000)
+      });
+      const body = await response.json().catch(() => null);
+      // A failure here makes Meta send the message again later
+      res.status(response.ok ? 200 : response.status === 401 ? 401 : 502).json(response.ok ? { success: true } : { error: body?.error || 'Not saved' });
+    } catch (error) {
+      console.error('[ERROR] chatbot-service (whatsapp):', error.message);
+      res.status(503).json({ error: 'Not saved' });
+    }
+  });
+}
+// ---- End of WhatsApp webhook ----
+
+// ---- Public invoice payments (Accounting) ----
+// No signed-in user. The customer's pay page finds its invoice by the secret token in the link,
+// and Stripe's webhook is checked by its signature in the accounting service, which holds the
+// Stripe keys. The webhook's body is passed on untouched, because the signature covers the raw bytes.
+{
+  const PAY_TOKEN = /^[0-9a-f]{64}$/;
+  const payUrl = (path) =>
+    `http://${process.env.NODE_ENV === 'production' ? 'accounting-service.railway.internal' : 'localhost'}:3001/public/pay/${path}`;
+  const limitOf = (limit) => rateLimit({ windowMs: 60 * 1000, limit, standardHeaders: true, legacyHeaders: false,
+    message: { error: 'Too many tries. Please wait a minute and try again.' } });
+  const payReadLimit = limitOf(60);
+  const payStartLimit = limitOf(10);
+  // Stripe sends from a few addresses and retries, so this is roomier
+  const payHookLimit = limitOf(300);
+
+  const forward = async (res, path, options) => {
+    try {
+      const response = await fetch(payUrl(path), { ...options, signal: AbortSignal.timeout(20000) });
+      const body = await response.json().catch(() => null);
+      res.set('Cache-Control', 'no-store');
+      res.status(response.status).json(body || { error: 'Something went wrong. Please try again.' });
+    } catch (error) {
+      console.error('[ERROR] accounting-service (pay):', error.message);
+      res.status(503).json({ error: 'Online payments are not available right now. Please try again later.' });
+    }
+  };
+
+  app.post('/api/pay/webhook', payHookLimit, express.raw({ type: '*/*', limit: '1mb' }), (req, res) =>
+    forward(res, 'webhook', {
+      method: 'POST',
+      headers: {
+        'Content-Type': req.headers['content-type'] || 'application/json',
+        'Stripe-Signature': String(req.headers['stripe-signature'] || '')
+      },
+      body: Buffer.isBuffer(req.body) ? req.body : Buffer.alloc(0)
+    }));
+
+  app.get('/api/pay/:token', payReadLimit, (req, res) => {
+    if (!PAY_TOKEN.test(req.params.token)) return res.status(404).json({ error: 'This payment link is not available' });
+    forward(res, req.params.token, { method: 'GET' });
+  });
+
+  // Stripe sends the customer back to the pay page, so only one of our own sites may ask
+  app.post('/api/pay/:token', payStartLimit, (req, res) => {
+    if (!PAY_TOKEN.test(req.params.token)) return res.status(404).json({ error: 'This payment link is not available' });
+    const origin = req.headers.origin;
+    if (!origin || !allowedOrigins.includes(origin)) {
+      return res.status(400).json({ error: 'Open the payment link again and try once more' });
+    }
+    forward(res, req.params.token, { method: 'POST', headers: { 'X-Pay-Origin': origin } });
+  });
+}
+// ---- End of public invoice payments ----
 
 // Service routing - internal services
 const serviceRoutes = [

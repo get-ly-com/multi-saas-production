@@ -5,6 +5,8 @@ import AppShell from '@/components/AppShell';
 import CurrencyFields from '@/components/CurrencyFields';
 import Modal from '@/components/Modal';
 import PaymentForm from '@/components/PaymentForm';
+import PaymentLinkModal from '@/components/PaymentLinkModal';
+import ReceiptReader from '@/components/ReceiptReader';
 import WriteOffForm from '@/components/WriteOffForm';
 import { api, formatDate, money, today } from '@/lib/api';
 import useSubmit from '@/lib/useSubmit';
@@ -38,6 +40,7 @@ function AccountingApp() {
   const [paying, setPaying] = useState<any>(null);
   const [crediting, setCrediting] = useState<any>(null);
   const [writingOff, setWritingOff] = useState<any>(null);
+  const [linking, setLinking] = useState<any>(null);
 
   const load = async () => {
     try {
@@ -144,6 +147,7 @@ function AccountingApp() {
                       {(invoice.status === 'sent' || invoice.status === 'partial') && (
                         <>
                           <button onClick={() => setPaying(invoice)}>Record payment</button>
+                          {invoiceBalance(invoice) > 0 && <button onClick={() => setLinking(invoice)}>Get payment link</button>}
                           <button onClick={() => setCrediting(invoice)}>Credit note</button>
                           <button onClick={() => setWritingOff(invoice)}>Write off</button>
                         </>
@@ -203,6 +207,7 @@ function AccountingApp() {
       )}
       {crediting && <CreditForm invoice={crediting} onClose={() => setCrediting(null)} onSaved={load} />}
       {writingOff && <WriteOffForm invoice={writingOff} onClose={() => setWritingOff(null)} onSaved={load} />}
+      {linking && <PaymentLinkModal invoice={linking} onClose={() => setLinking(null)} />}
       {expenseForm && <ExpenseForm initial={expenseForm} accounts={accounts} costCenters={costCenters} onClose={() => setExpenseForm(null)} onSaved={load} />}
     </div>
   );
@@ -377,6 +382,14 @@ function ExpenseForm({ initial, accounts, costCenters, onClose, onSaved }: { ini
   return (
     <Modal title={form.id ? 'Edit expense' : 'New expense'} onClose={onClose}>
       <form onSubmit={submit}>
+        {!form.id && (
+          <ReceiptReader onRead={(read) => setForm((current: any) => ({
+            ...current,
+            amount: read.total !== null ? String(read.total) : current.amount,
+            expense_date: read.date || current.expense_date,
+            description: current.description || (read.vendor ? `${read.vendor}${read.tax ? ` (includes ${read.tax} tax)` : ''}` : '')
+          }))} />
+        )}
         <div className="form-grid">
           <label>Amount<input required type="number" min="0" step="0.01" value={form.amount} onChange={(e) => set('amount', e.target.value)} /></label>
           <label>Date<input type="date" value={form.expense_date} onChange={(e) => set('expense_date', e.target.value)} /></label>

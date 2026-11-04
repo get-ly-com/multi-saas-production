@@ -3,6 +3,7 @@ import { useRouter } from 'next/router';
 import { FormEvent, useEffect, useState } from 'react';
 import AppShell from '@/components/AppShell';
 import Modal from '@/components/Modal';
+import PaymentLinkModal, { payLinkUrl } from '@/components/PaymentLinkModal';
 import WriteOffForm from '@/components/WriteOffForm';
 import { api, formatDate, money, today, queryId } from '@/lib/api';
 import useSubmit from '@/lib/useSubmit';
@@ -19,6 +20,7 @@ function InvoiceDocument() {
   const [error, setError] = useState('');
   const [refunding, setRefunding] = useState(false);
   const [writingOff, setWritingOff] = useState(false);
+  const [linking, setLinking] = useState(false);
 
   const load = async () => {
     try {
@@ -52,6 +54,12 @@ function InvoiceDocument() {
 
   const balance = Number(invoice.amount) - Number(invoice.amount_paid) - Number(invoice.amount_credited);
   const sales = Math.round(Number(invoice.subtotal) * Number(invoice.exchange_rate) * 100) / 100;
+  const payable = (invoice.status === 'sent' || invoice.status === 'partial') && balance > 0;
+  // One link per invoice; the database may send it as one row or a list of one
+  const linkRow = Array.isArray(invoice.payment_links) ? invoice.payment_links[0] : invoice.payment_links;
+  const payUrl = linkRow?.token ? payLinkUrl(linkRow.token) : '';
+  // Card payments that came in but could not be put on the invoice automatically
+  const toReview = (invoice.online_payments || []).filter((row: any) => row.status === 'review');
 
   return (
     <div className="stack">
@@ -59,7 +67,8 @@ function InvoiceDocument() {
         <Link href="/saas/accounting">← Invoices</Link>
         <div className="row-actions">
           {invoice.customer_id && <Link href={`/saas/accounting/statements?customer=${invoice.customer_id}`}>Customer statement</Link>}
-          {(invoice.status === 'sent' || invoice.status === 'partial') && balance > 0 && (
+          {payable && <button onClick={() => setLinking(true)}>Get payment link</button>}
+          {payable && (
             <button onClick={() => setWritingOff(true)}>Write off</button>
           )}
           {Number(invoice.amount_paid) > 0 && <button onClick={() => setRefunding(true)}>Refund</button>}
@@ -127,7 +136,23 @@ function InvoiceDocument() {
         </div>
 
         {invoice.description && <p className="wrap">{invoice.description}</p>}
+
+        {payable && payUrl && (
+          <p className="wrap"><strong>Pay online:</strong> <a href={payUrl}>{payUrl}</a></p>
+        )}
       </div>
+
+      {toReview.length > 0 && (
+        <div className="card no-print">
+          <h2>Card payments to check</h2>
+          <p className="muted">These card payments came in but could not be added to the invoice by themselves. Check them in Stripe, then record or refund them.</p>
+          <ul>
+            {toReview.map((row: any) => (
+              <li key={row.id} className="wrap">{formatDate(row.paid_at)}: {money(row.amount, row.currency)}{row.reference ? ` (${row.reference})` : ''}. {row.note}</li>
+            ))}
+          </ul>
+        </div>
+      )}
 
       {Number(invoice.stock_cost) !== 0 && (
         <div className="card no-print">
@@ -198,6 +223,7 @@ function InvoiceDocument() {
       )}
 
       {writingOff && <WriteOffForm invoice={invoice} onClose={() => setWritingOff(false)} onSaved={load} />}
+      {linking && <PaymentLinkModal invoice={invoice} onClose={() => setLinking(false)} onSaved={load} />}
       {refunding && <RefundForm invoice={invoice} onClose={() => setRefunding(false)} onSaved={load} />}
     </div>
   );
