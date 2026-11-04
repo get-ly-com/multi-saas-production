@@ -4,6 +4,7 @@ import AppShell from '@/components/AppShell';
 import CurrencyFields from '@/components/CurrencyFields';
 import Modal from '@/components/Modal';
 import { api, formatDate, money, today } from '@/lib/api';
+import useSubmit from '@/lib/useSubmit';
 
 const blankLine = { description: '', quantity: '1', unit_price: '', tax_rate_id: '' };
 const blankPlan = {
@@ -50,7 +51,8 @@ function RecurringApp() {
     load();
   }, []);
 
-  const generate = async () => {
+  const { busy, run: once } = useSubmit();
+  const generate = () => once(async () => {
     try {
       const created = await api.post('/api/accounting/recurring/run', { through });
       setNotice(created ? `Created ${created} invoice(s).` : 'Nothing is due yet.');
@@ -59,16 +61,16 @@ function RecurringApp() {
       setNotice('');
       setError(err.message);
     }
-  };
+  });
 
-  const setActive = async (plan: any, is_active: boolean) => {
+  const setActive = (plan: any, is_active: boolean) => once(async () => {
     try {
       await api.put(`/api/accounting/recurring/${plan.id}/active`, { is_active });
       await load();
     } catch (err: any) {
       setError(err.message);
     }
-  };
+  });
 
   return (
     <div className="stack">
@@ -107,7 +109,7 @@ function RecurringApp() {
                   <td>
                     <div className="row-actions">
                       <button onClick={() => setForm({ ...plan, end_date: plan.end_date || '', cost_center_id: plan.cost_center_id || '' })}>Edit</button>
-                      <button onClick={() => setActive(plan, !plan.is_active)}>{plan.is_active ? 'Pause' : 'Resume'}</button>
+                      <button disabled={busy} onClick={() => setActive(plan, !plan.is_active)}>{plan.is_active ? 'Pause' : 'Resume'}</button>
                     </div>
                   </td>
                 </tr>
@@ -132,19 +134,22 @@ function PlanForm({ initial, customers, taxRates, costCenters, onClose, onSaved 
 
   const total = form.line_items.reduce((sum: number, line: any) => sum + Number(line.quantity || 0) * Number(line.unit_price || 0), 0);
 
+  const { busy, run } = useSubmit();
   const submit = async (event: FormEvent) => {
     event.preventDefault();
-    try {
-      await api.post('/api/accounting/recurring', form);
-      await onSaved();
-      onClose();
-    } catch (err: any) {
-      setError(err.message);
-    }
+    return run(async () => {
+      try {
+        await api.post('/api/accounting/recurring', form);
+        await onSaved();
+        onClose();
+      } catch (err: any) {
+        setError(err.message);
+      }
+    });
   };
 
   return (
-    <Modal title={form.id ? `Edit ${form.name}` : 'New recurring invoice'}>
+    <Modal title={form.id ? `Edit ${form.name}` : 'New recurring invoice'} onClose={onClose}>
       <form onSubmit={submit}>
         <div className="form-grid">
           <label>Name<input required value={form.name} onChange={(e) => set('name', e.target.value)} /></label>
@@ -203,7 +208,7 @@ function PlanForm({ initial, customers, taxRates, costCenters, onClose, onSaved 
         </label>
         {error && <p className="error">{error}</p>}
         <div className="form-actions">
-          <button className="primary">Save</button>
+          <button disabled={busy} className="primary">Save</button>
           <button type="button" onClick={onClose}>Cancel</button>
         </div>
       </form>

@@ -3,6 +3,7 @@ import AppShell from '@/components/AppShell';
 import IntegrationsNav, { EVENTS, OnlyManagers, ShowOnce, dateTime, eventLabel } from '@/components/IntegrationsNav';
 import Modal from '@/components/Modal';
 import { api } from '@/lib/api';
+import useSubmit from '@/lib/useSubmit';
 
 export default function Webhooks() {
   return <AppShell><WebhooksApp /></AppShell>;
@@ -35,7 +36,9 @@ function WebhooksApp() {
     load();
   }, []);
 
-  const run = async (work: () => Promise<unknown>, done = '') => {
+  const { busy, run: once } = useSubmit();
+  // One action at a time, so a double click cannot repeat it
+  const run = (work: () => Promise<unknown>, done = '') => once(async () => {
     setNotice('');
     setError('');
     try {
@@ -47,12 +50,13 @@ function WebhooksApp() {
       setError(err.message);
       return false;
     }
-  };
+  });
 
   if (!data) return <div className="stack"><IntegrationsNav />{error ? <p className="error">{error}</p> : <p className="empty">Loading…</p>}</div>;
   if (!data.is_manager) return <div className="stack"><IntegrationsNav /><h1>Webhooks</h1><OnlyManagers /></div>;
 
   const hooks: Hook[] = data.webhooks;
+  // run already allows one action at a time
   const newSecret = async (hook: Hook) => {
     if (!window.confirm(`Make a new signing secret for ${hook.name}? The old one stops working straight away.`)) return;
     await run(async () => {
@@ -102,7 +106,7 @@ function WebhooksApp() {
                     <button disabled={!hook.enabled} onClick={() => run(() => api.post(`/api/integration/webhooks/${hook.id}/test`, {}), 'Test sent. Open the log to see the answer.')}>Send test</button>
                     <button onClick={() => setEditing(hook)}>Edit</button>
                     <button onClick={() => run(() => api.post(`/api/integration/webhooks/${hook.id}/enabled`, { enabled: !hook.enabled }))}>{hook.enabled ? 'Turn off' : 'Turn on'}</button>
-                    <button onClick={() => newSecret(hook)}>New secret</button>
+                    <button disabled={busy} onClick={() => newSecret(hook)}>New secret</button>
                     <button className="danger" onClick={() => window.confirm(`Delete ${hook.name} and its log?`) && run(() => api.delete(`/api/integration/webhooks/${hook.id}`))}>Delete</button>
                   </div>
                 </td>
@@ -152,7 +156,7 @@ function WebhookForm({ hook, onSave, onClose }: { hook: Hook | null; onSave: (bo
   };
 
   return (
-    <Modal title={hook ? 'Edit webhook' : 'Add webhook'}>
+    <Modal title={hook ? 'Edit webhook' : 'Add webhook'} onClose={onClose}>
       <form onSubmit={submit}>
         <div className="form-grid">
           <label>Name<input required maxLength={80} placeholder="Like Zapier or Slack" value={form.name} onChange={(e) => setForm({ ...form, name: e.target.value })} /></label>
@@ -196,14 +200,15 @@ function DeliveryLog({ hook, onClose }: { hook: Hook; onClose: () => void }) {
     load();
   }, []);
 
-  const retry = async (id: string) => {
+  const { busy, run: once } = useSubmit();
+  const retry = (id: string) => once(async () => {
     try {
       await api.post(`/api/integration/deliveries/${id}/retry`, {});
       await load();
     } catch (err: any) {
       setError(err.message);
     }
-  };
+  });
 
   const status = (row: any) => {
     if (row.status === 'delivered') return <span className="badge delivered">Delivered</span>;
@@ -213,7 +218,7 @@ function DeliveryLog({ hook, onClose }: { hook: Hook; onClose: () => void }) {
   };
 
   return (
-    <Modal title={`Log for ${hook.name}`}>
+    <Modal title={`Log for ${hook.name}`} onClose={onClose}>
       <p className="muted">The last 50 messages. Queued messages go out within a minute. Logs are kept for 30 days.</p>
       {error && <p className="error">{error}</p>}
       <div className="table-wrap">
@@ -236,7 +241,7 @@ function DeliveryLog({ hook, onClose }: { hook: Hook; onClose: () => void }) {
                   <td>
                     <div className="row-actions">
                       <button onClick={() => setOpen(open === row.id ? '' : row.id)}>{open === row.id ? 'Hide' : 'Message'}</button>
-                      {row.status === 'failed' && row.event !== 'test' && <button onClick={() => retry(row.id)}>Send again</button>}
+                      {row.status === 'failed' && row.event !== 'test' && <button disabled={busy} onClick={() => retry(row.id)}>Send again</button>}
                     </div>
                   </td>
                 </tr>

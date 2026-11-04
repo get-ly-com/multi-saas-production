@@ -4,6 +4,7 @@ import AppShell from '@/components/AppShell';
 import HrNav from '@/components/HrNav';
 import Modal from '@/components/Modal';
 import { api, formatDate } from '@/lib/api';
+import useSubmit from '@/lib/useSubmit';
 
 export default function HrSettings() {
   return <AppShell><SettingsApp /></AppShell>;
@@ -39,7 +40,9 @@ function SettingsApp() {
     load();
   }, []);
 
-  const run = async (work: () => Promise<unknown>, done = '') => {
+  const { busy, run: once } = useSubmit();
+  // One action at a time, so a double click cannot repeat it
+  const run = (work: () => Promise<unknown>, done = '') => once(async () => {
     setNotice('');
     try {
       await work();
@@ -50,7 +53,7 @@ function SettingsApp() {
       setError(err.message);
       return false;
     }
-  };
+  });
 
   if (manager === false) {
     return (
@@ -94,7 +97,7 @@ function SettingsApp() {
           Let accountants run payroll and see pay
         </label>
         <p className="muted">Accountants can then see everyone's pay, run, approve and pay payroll, and pay payroll tax. Only owners and admins can change people, rates and this setting.</p>
-        <div className="form-actions"><button className="primary">Save rates</button></div>
+        <div className="form-actions"><button disabled={busy} className="primary">Save rates</button></div>
       </form>
 
       <div className="card table-wrap">
@@ -190,9 +193,12 @@ function NewNamed({ fields, onAdd }: { fields: { name: string; label: string; ty
   const blank = Object.fromEntries(fields.map(({ name }) => [name, '']));
   const [form, setForm] = useState<any>(blank);
 
+  const { busy, run } = useSubmit();
   const submit = async (event: FormEvent) => {
     event.preventDefault();
-    if (await onAdd(form)) setForm(blank);
+    return run(async () => {
+      if (await onAdd(form)) setForm(blank);
+    });
   };
 
   return (
@@ -200,7 +206,7 @@ function NewNamed({ fields, onAdd }: { fields: { name: string; label: string; ty
       {fields.map(({ name, label, type }) => (
         <input key={name} aria-label={label} placeholder={label} type={type || 'text'} required value={form[name]} onChange={(e) => setForm({ ...form, [name]: e.target.value })} />
       ))}
-      <button>Add</button>
+      <button disabled={busy}>Add</button>
     </form>
   );
 }
@@ -209,9 +215,12 @@ function NewLeaveType({ onAdd }: { onAdd: (body: any) => Promise<boolean> }) {
   const blank = { name: '', days_per_year: '0', max_carry_over: '0', paid: true };
   const [form, setForm] = useState<any>(blank);
 
+  const { busy, run } = useSubmit();
   const submit = async (event: FormEvent) => {
     event.preventDefault();
-    if (await onAdd(form)) setForm(blank);
+    return run(async () => {
+      if (await onAdd(form)) setForm(blank);
+    });
   };
 
   return (
@@ -220,7 +229,7 @@ function NewLeaveType({ onAdd }: { onAdd: (body: any) => Promise<boolean> }) {
       <label className="check" style={{ marginTop: 0 }}>Days a year <input aria-label="Days a year" type="number" min="0" max="366" step="0.5" value={form.days_per_year} onChange={(e) => setForm({ ...form, days_per_year: e.target.value })} /></label>
       <label className="check" style={{ marginTop: 0 }}>Carry over <input aria-label="Days that carry over to next year" title="Unused days that move to next year (0 for none)" type="number" min="0" max="366" step="0.5" value={form.max_carry_over} onChange={(e) => setForm({ ...form, max_carry_over: e.target.value })} /></label>
       <label className="check" style={{ marginTop: 0 }}><input type="checkbox" checked={form.paid} onChange={(e) => setForm({ ...form, paid: e.target.checked })} /> Paid</label>
-      <button>Add</button>
+      <button disabled={busy}>Add</button>
     </form>
   );
 }
@@ -241,15 +250,18 @@ function PublicHolidays({ onImport }: { onImport: (body: any) => Promise<boolean
     }).catch((err) => setError(err.message));
   }, []);
 
+  const { busy, run } = useSubmit();
   const preview = async (event: FormEvent) => {
     event.preventDefault();
-    setError('');
-    try {
-      setList(await api.get(`/api/hr/public-holidays?country=${country}&year=${year}`));
-      setSkip([]);
-    } catch (err: any) {
-      setError(err.message);
-    }
+    return run(async () => {
+      setError('');
+      try {
+        setList(await api.get(`/api/hr/public-holidays?country=${country}&year=${year}`));
+        setSkip([]);
+      } catch (err: any) {
+        setError(err.message);
+      }
+    });
   };
 
   const add = async () => {
@@ -264,7 +276,7 @@ function PublicHolidays({ onImport }: { onImport: (body: any) => Promise<boolean
           {countries.map((row) => <option key={row.code} value={row.code}>{row.name}</option>)}
         </select>
         <input aria-label="Year" type="number" min="2000" max="2100" value={year} onChange={(e) => setYear(e.target.value)} />
-        <button>Show holidays</button>
+        <button disabled={busy}>Show holidays</button>
       </form>
       {error && <p className="error">{error}</p>}
       {list && (
@@ -324,16 +336,19 @@ function ExpenseCategories() {
     }
   };
 
+  const { busy, run } = useSubmit();
   const add = async (event: FormEvent) => {
     event.preventDefault();
-    setError('');
-    try {
-      await api.post('/api/hr/expense-categories', { name });
-      setName('');
-      await load();
-    } catch (err: any) {
-      setError(err.message);
-    }
+    return run(async () => {
+      setError('');
+      try {
+        await api.post('/api/hr/expense-categories', { name });
+        setName('');
+        await load();
+      } catch (err: any) {
+        setError(err.message);
+      }
+    });
   };
 
   return (
@@ -363,7 +378,7 @@ function ExpenseCategories() {
       </table>
       <form className="row-actions" style={{ justifyContent: 'flex-start', marginTop: 12 }} onSubmit={add}>
         <input aria-label="Name" placeholder="Name, like Mileage" required maxLength={60} value={name} onChange={(e) => setName(e.target.value)} />
-        <button>Add</button>
+        <button disabled={busy}>Add</button>
       </form>
       <p className="muted">When a claim is approved, its category&apos;s account is charged and 2510 Expenses to Reimburse shows what you owe the person until it&apos;s paid.</p>
     </div>
@@ -390,7 +405,8 @@ function Checklists() {
     load();
   }, []);
 
-  const remove = async (row: any) => {
+  const { busy, run: once } = useSubmit();
+  const remove = (row: any) => once(async () => {
     if (!window.confirm(`Delete the ${row.name} checklist? Steps already started on people stay.`)) return;
     try {
       await api.delete(`/api/hr/checklists/${row.id}`);
@@ -398,7 +414,7 @@ function Checklists() {
     } catch (err: any) {
       setError(err.message);
     }
-  };
+  });
 
   return (
     <div className="card table-wrap">
@@ -415,7 +431,7 @@ function Checklists() {
               <td className="num">{row.items.length}</td>
               <td><div className="row-actions">
                 <button onClick={() => setEditing(row)}>Edit</button>
-                <button className="danger" onClick={() => remove(row)}>Delete</button>
+                <button disabled={busy} className="danger" onClick={() => remove(row)}>Delete</button>
               </div></td>
             </tr>
           ))}
@@ -434,21 +450,24 @@ function ChecklistForm({ initial, onClose, onSaved }: { initial: any; onClose: (
   const setItem = (index: number, field: string, value: any) =>
     setForm({ ...form, items: form.items.map((item: any, at: number) => (at === index ? { ...item, [field]: value } : item)) });
 
+  const { busy, run } = useSubmit();
   const submit = async (event: FormEvent) => {
     event.preventDefault();
-    const body = { kind: form.kind, name: form.name, items: form.items.filter((item: any) => String(item.title).trim()) };
-    try {
-      if (form.id) await api.put(`/api/hr/checklists/${form.id}`, body);
-      else await api.post('/api/hr/checklists', body);
-      await onSaved();
-      onClose();
-    } catch (err: any) {
-      setError(err.message);
-    }
+    return run(async () => {
+      const body = { kind: form.kind, name: form.name, items: form.items.filter((item: any) => String(item.title).trim()) };
+      try {
+        if (form.id) await api.put(`/api/hr/checklists/${form.id}`, body);
+        else await api.post('/api/hr/checklists', body);
+        await onSaved();
+        onClose();
+      } catch (err: any) {
+        setError(err.message);
+      }
+    });
   };
 
   return (
-    <Modal title={form.id ? `Edit ${initial.name}` : 'New checklist'}>
+    <Modal title={form.id ? `Edit ${initial.name}` : 'New checklist'} onClose={onClose}>
       <form onSubmit={submit}>
         <div className="form-grid">
           <label>Name<input required maxLength={100} value={form.name} onChange={(e) => setForm({ ...form, name: e.target.value })} /></label>
@@ -473,7 +492,7 @@ function ChecklistForm({ initial, onClose, onSaved }: { initial: any; onClose: (
         <button type="button" onClick={() => setForm({ ...form, items: [...form.items, { title: '', days: 0, who: 'hr' }] })}>Add a step</button>
         {error && <p className="error">{error}</p>}
         <div className="form-actions">
-          <button className="primary">Save</button>
+          <button disabled={busy} className="primary">Save</button>
           <button type="button" onClick={onClose}>Cancel</button>
         </div>
       </form>

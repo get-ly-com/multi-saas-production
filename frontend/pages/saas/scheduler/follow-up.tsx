@@ -3,6 +3,7 @@ import AppShell from '@/components/AppShell';
 import { BookingDetails } from '@/components/SchedulerForms';
 import SchedulerNav, { LOCATIONS, dayLabel } from '@/components/SchedulerNav';
 import { api } from '@/lib/api';
+import useSubmit from '@/lib/useSubmit';
 
 export default function FollowUp() {
   return <AppShell><FollowUpList /></AppShell>;
@@ -40,14 +41,16 @@ function FollowUpList() {
     load();
   }, [staff]);
 
-  const act = async (work: () => Promise<any>) => {
+  const { busy, run: once } = useSubmit();
+  // One action at a time, so a double click cannot repeat it
+  const act = (work: () => Promise<any>) => once(async () => {
     try {
       await work();
       await load();
     } catch (err: any) {
       setError(err.message);
     }
-  };
+  });
 
   if (!data || !lists) return <div className="stack"><SchedulerNav />{error ? <p className="error">{error}</p> : <p>Loading…</p>}</div>;
   const edit = data.can_edit;

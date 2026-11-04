@@ -3,6 +3,7 @@ import AppShell from '@/components/AppShell';
 import Modal from '@/components/Modal';
 import SchedulerNav, { WEEKDAYS, dayLabel } from '@/components/SchedulerNav';
 import { api } from '@/lib/api';
+import useSubmit from '@/lib/useSubmit';
 
 export default function Hours() {
   return <AppShell><HoursApp /></AppShell>;
@@ -51,11 +52,14 @@ function HoursApp() {
     }
   };
 
+  const { busy, run } = useSubmit();
   const addOff = (event: FormEvent) => {
     event.preventDefault();
-    act(async () => {
-      await api.post('/api/scheduler/days-off', off);
-      setOff({ ...off, off_date: '', note: '' });
+    return run(async () => {
+      act(async () => {
+        await api.post('/api/scheduler/days-off', off);
+        setOff({ ...off, off_date: '', note: '' });
+      });
     });
   };
 
@@ -102,7 +106,7 @@ function HoursApp() {
             </label>
             <label>Date<input type="date" required min={data.today} value={off.off_date} onChange={(e) => setOff({ ...off, off_date: e.target.value })} /></label>
             <label>Note<input maxLength={200} placeholder="Optional" value={off.note} onChange={(e) => setOff({ ...off, note: e.target.value })} /></label>
-            <div><button className="primary" disabled={!data.is_manager && !offChoices.length}>Add day off</button></div>
+            <div><button className="primary" disabled={busy || !data.is_manager && !offChoices.length}>Add day off</button></div>
           </form>
         )}
         <table>
@@ -141,19 +145,22 @@ function HoursForm({ person, onClose, onSaved }: { person: any; onClose: () => v
   const change = (index: number, field: string, value: string) =>
     setBlocks(blocks.map((block, i) => (i === index ? { ...block, [field]: value } : block)));
 
+  const { busy, run } = useSubmit();
   const submit = async (event: FormEvent) => {
     event.preventDefault();
-    try {
-      await api.put(`/api/scheduler/staff/${person.user_id}`, { display_name: name, is_bookable: bookable, hours: blocks });
-      await onSaved();
-      onClose();
-    } catch (err: any) {
-      setError(err.message);
-    }
+    return run(async () => {
+      try {
+        await api.put(`/api/scheduler/staff/${person.user_id}`, { display_name: name, is_bookable: bookable, hours: blocks });
+        await onSaved();
+        onClose();
+      } catch (err: any) {
+        setError(err.message);
+      }
+    });
   };
 
   return (
-    <Modal title={`Hours for ${person.display_name}`}>
+    <Modal title={`Hours for ${person.display_name}`} onClose={onClose}>
       <form onSubmit={submit}>
         <div className="form-grid">
           <label>Name visitors see<input required maxLength={100} value={name} onChange={(e) => setName(e.target.value)} /></label>
@@ -187,7 +194,7 @@ function HoursForm({ person, onClose, onSaved }: { person: any; onClose: () => v
         </div>
         {error && <p className="error">{error}</p>}
         <div className="form-actions">
-          <button className="primary">Save hours</button>
+          <button disabled={busy} className="primary">Save hours</button>
           <button type="button" onClick={onClose}>Cancel</button>
         </div>
       </form>

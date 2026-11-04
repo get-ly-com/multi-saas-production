@@ -5,6 +5,7 @@ import { FormEvent, useEffect, useState } from 'react';
 import { AddToCalendar, Answers } from '@/components/SchedulerForms';
 import { LOCATIONS, addDays, dayLabel, placesText } from '@/components/SchedulerNav';
 import { money } from '@/lib/api';
+import useSubmit from '@/lib/useSubmit';
 
 const BASE_URL = process.env.NEXT_PUBLIC_API_BASE_URL;
 const WINDOW = 7;
@@ -12,7 +13,7 @@ const WINDOW = 7;
 const getJson = async (path: string, init?: RequestInit) => {
   const response = await fetch(`${BASE_URL}${path}`, init);
   const result = await response.json().catch(() => null);
-  if (!response.ok) throw new Error(result?.error || 'Too many tries. Please wait a minute and try again.');
+  if (!response.ok) throw new Error(result?.error || (response.status === 429 ? 'Too many tries. Please wait a minute and try again.' : 'Something went wrong. Please try again.'));
   return result;
 };
 
@@ -73,30 +74,33 @@ export default function BookingPage() {
     setError('');
   };
 
+  const { busy, run } = useSubmit();
   const submit = async (event: FormEvent) => {
     event.preventDefault();
-    setSending(true);
-    setError('');
-    try {
-      const result = await getJson(`/api/book/${encodeURIComponent(key as string)}`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ ...form, answers, service_id: service.id, staff_id: staffId || null, start: slot.start, campaign })
-      });
-      setDone(result);
-    } catch (err: any) {
-      setError(err.message);
-      // The time may have just gone, so show fresh times
-      if (/no longer free|already booked|session is full|away on leave|closed that day/i.test(err.message)) {
-        setSlot(null);
-        setSlots(null);
-        const params = new URLSearchParams({ service: service.id, from, days: String(WINDOW) });
-        if (staffId) params.set('staff', staffId);
-        getJson(`/api/book/${encodeURIComponent(key as string)}/slots?${params}`).then(setSlots).catch(() => setSlots([]));
+    return run(async () => {
+      setSending(true);
+      setError('');
+      try {
+        const result = await getJson(`/api/book/${encodeURIComponent(key as string)}`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ ...form, answers, service_id: service.id, staff_id: staffId || null, start: slot.start, campaign })
+        });
+        setDone(result);
+      } catch (err: any) {
+        setError(err.message);
+        // The time may have just gone, so show fresh times
+        if (/no longer free|already booked|session is full|away on leave|closed that day/i.test(err.message)) {
+          setSlot(null);
+          setSlots(null);
+          const params = new URLSearchParams({ service: service.id, from, days: String(WINDOW) });
+          if (staffId) params.set('staff', staffId);
+          getJson(`/api/book/${encodeURIComponent(key as string)}/slots?${params}`).then(setSlots).catch(() => setSlots([]));
+        }
+      } finally {
+        setSending(false);
       }
-    } finally {
-      setSending(false);
-    }
+    });
   };
 
   const byDay: Record<string, any[]> = {};
@@ -208,7 +212,7 @@ export default function BookingPage() {
               <label className="trap" aria-hidden="true">Website<input tabIndex={-1} autoComplete="off" value={form.website} onChange={(e) => setForm({ ...form, website: e.target.value })} /></label>
               {service.location_type === 'video' && <p className="muted">You'll get a video link after booking. Calls run on Jitsi Meet, a free video service.</p>}
               {error && <p className="error">{error}</p>}
-              <div><button className="primary" disabled={sending}>{sending ? 'Booking…' : 'Book'}</button></div>
+              <div><button className="primary" disabled={busy || sending}>{sending ? 'Booking…' : 'Book'}</button></div>
             </form>
           )}
           {!slot && error && <p className="error">{error}</p>}

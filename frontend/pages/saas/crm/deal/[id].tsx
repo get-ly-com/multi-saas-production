@@ -8,9 +8,10 @@ import { DealForm, LostForm, useTeam } from '@/components/CrmForms';
 import { CustomValues } from '@/components/CustomFields';
 import QuoteForm from '@/components/QuoteForm';
 import Timeline from '@/components/Timeline';
-import { api, formatDate, money } from '@/lib/api';
+import { api, formatDate, money, queryId } from '@/lib/api';
 import { automaticCategory, categoryName } from '@/lib/forecast';
 import { quoteBadge, quoteLabel } from '../quotes';
+import useSubmit from '@/lib/useSubmit';
 
 export default function Deal() {
   return <AppShell><DealApp /></AppShell>;
@@ -18,7 +19,7 @@ export default function Deal() {
 
 function DealApp() {
   const router = useRouter();
-  const id = router.query.id as string | undefined;
+  const id = queryId(router.query.id);
   const members = useTeam();
   const [deal, setDeal] = useState<any>(null);
   const [history, setHistory] = useState<any[]>([]);
@@ -60,7 +61,8 @@ function DealApp() {
     return pipeline ? [...pipeline.stages].sort((a: any, b: any) => a.position - b.position) : [];
   }, [pipelines, deal]);
 
-  const move = async (stage: any) => {
+  const { busy, run: once } = useSubmit();
+  const move = (stage: any) => once(async () => {
     if (stage.id === deal.stage_id) return;
     if (stage.kind === 'lost') return setLosing(stage.id);
     try {
@@ -69,9 +71,9 @@ function DealApp() {
     } catch (err: any) {
       setError(err.message);
     }
-  };
+  });
 
-  const remove = async () => {
+  const remove = () => once(async () => {
     if (!window.confirm(`Delete ${deal.title}? This can't be undone.`)) return;
     try {
       await api.delete(`/api/crm/deals/${id}`);
@@ -79,7 +81,7 @@ function DealApp() {
     } catch (err: any) {
       setError(err.message);
     }
-  };
+  });
 
   const owner = members.find(({ user_id }) => user_id === deal?.owner_id)?.email;
   const moves = history.filter((row) => row.from_stage_id).map((row) => ({
@@ -126,13 +128,13 @@ function DealApp() {
             <div className="row-actions">
               <button onClick={() => setQuoting(true)}>New quote</button>
               <button onClick={() => setEditing(true)}>Edit</button>
-              <button className="danger" onClick={remove}>Delete</button>
+              <button disabled={busy} className="danger" onClick={remove}>Delete</button>
             </div>
           </div>
 
           <div className="stage-bar">
             {stages.map((stage: any) => (
-              <button key={stage.id} className={stage.id === deal.stage_id ? 'primary' : ''} onClick={() => move(stage)}>{stage.name}</button>
+              <button disabled={busy} key={stage.id} className={stage.id === deal.stage_id ? 'primary' : ''} onClick={() => move(stage)}>{stage.name}</button>
             ))}
           </div>
           {deal.lost_reason && <p className="muted">Lost because: {deal.lost_reason}</p>}

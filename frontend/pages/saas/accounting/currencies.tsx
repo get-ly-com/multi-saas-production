@@ -2,6 +2,7 @@ import { FormEvent, useEffect, useState } from 'react';
 import AccountingNav from '@/components/AccountingNav';
 import AppShell from '@/components/AppShell';
 import { api, formatDate, setBaseCurrency, today } from '@/lib/api';
+import useSubmit from '@/lib/useSubmit';
 
 export default function Currencies() {
   return <AppShell><CurrenciesApp /></AppShell>;
@@ -29,20 +30,23 @@ function CurrenciesApp() {
     load();
   }, []);
 
+  const { busy, run } = useSubmit();
   const saveRate = async (event: FormEvent) => {
     event.preventDefault();
-    try {
-      await api.post('/api/accounting/currencies/rates', form);
-      setNotice(`Saved the ${form.currency.toUpperCase()} rate.`);
-      setForm({ ...form, currency: '', rate: '' });
-      await load();
-    } catch (err: any) {
-      setNotice('');
-      setError(err.message);
-    }
+    return run(async () => {
+      try {
+        await api.post('/api/accounting/currencies/rates', form);
+        setNotice(`Saved the ${form.currency.toUpperCase()} rate.`);
+        setForm({ ...form, currency: '', rate: '' });
+        await load();
+      } catch (err: any) {
+        setNotice('');
+        setError(err.message);
+      }
+    });
   };
 
-  const saveBase = async () => {
+  const saveBase = () => run(async () => {
     try {
       await api.put('/api/accounting/currencies/base', { currency: base });
       setBaseCurrency(base.toUpperCase());
@@ -52,7 +56,7 @@ function CurrenciesApp() {
       setNotice('');
       setError(err.message);
     }
-  };
+  });
 
   if (!overview) return error ? <p className="error">{error}</p> : <p className="empty">Loading…</p>;
 
@@ -72,7 +76,7 @@ function CurrenciesApp() {
             <div className="report-filters">
               <label>Currency code<input maxLength={3} value={base} onChange={(e) => setBase(e.target.value.toUpperCase())} /></label>
             </div>
-            <div className="form-actions"><button className="primary" onClick={saveBase}>Set base currency</button></div>
+            <div className="form-actions"><button disabled={busy} className="primary" onClick={saveBase}>Set base currency</button></div>
           </>
         )}
       </div>
@@ -85,7 +89,7 @@ function CurrenciesApp() {
             <label>Date<input required type="date" value={form.rate_date} onChange={(e) => setForm({ ...form, rate_date: e.target.value })} /></label>
             <label>1 unit in {overview.base}<input required type="number" min="0.00000001" step="any" value={form.rate} onChange={(e) => setForm({ ...form, rate: e.target.value })} /></label>
           </div>
-          <div className="form-actions"><button className="primary">Save rate</button></div>
+          <div className="form-actions"><button disabled={busy} className="primary">Save rate</button></div>
         </form>
       </div>
 

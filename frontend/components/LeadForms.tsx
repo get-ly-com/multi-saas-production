@@ -5,6 +5,7 @@ import { CustomInputs, useCustomFields } from '@/components/CustomFields';
 import Modal from '@/components/Modal';
 import { TagPicker, useTags } from '@/components/Tags';
 import { api } from '@/lib/api';
+import useSubmit from '@/lib/useSubmit';
 
 export const SOURCES = ['Web form', 'Referral', 'Event', 'Cold call', 'Advertising', 'Import'];
 
@@ -18,7 +19,7 @@ export function LeadForm({ initial, onClose, onSaved }: { initial?: any; onClose
   const members = useTeam();
   const fields = useCustomFields('lead');
   const tags = useTags();
-  const { form, set, error, submit } = useForm(
+  const { form, set, error, submit, busy } = useForm(
     { name: '', email: '', phone: '', company_name: '', job_title: '', source: '', owner_id: '', notes: '', custom: {}, tags: [], ...initial },
     ({ id, name, email, phone, company_name, job_title, source, owner_id, notes, custom, tags }) => {
       const body = { name, email, phone, company_name, job_title, source, owner_id, notes, custom, tags: tags || [] };
@@ -29,7 +30,7 @@ export function LeadForm({ initial, onClose, onSaved }: { initial?: any; onClose
   );
 
   return (
-    <Modal title={form.id ? `Edit ${form.name}` : 'New lead'}>
+    <Modal title={form.id ? `Edit ${form.name}` : 'New lead'} onClose={onClose}>
       <form onSubmit={submit}>
         <div className="form-grid">
           <label>Name<input required value={form.name} onChange={(e) => set('name', e.target.value)} /></label>
@@ -46,14 +47,14 @@ export function LeadForm({ initial, onClose, onSaved }: { initial?: any; onClose
         </div>
         <label style={{ marginTop: 12 }}>Notes<textarea rows={3} value={form.notes || ''} onChange={(e) => set('notes', e.target.value)} /></label>
         <TagPicker value={form.tags} onChange={(ids) => set('tags', ids)} tags={tags} />
-        <Actions error={error} onClose={onClose} />
+        <Actions error={error} onClose={onClose} busy={busy} />
       </form>
     </Modal>
   );
 }
 
 export function DisqualifyForm({ lead, onClose, onSaved }: { lead: any; onClose: () => void; onSaved: () => void }) {
-  const { form, set, error, submit } = useForm(
+  const { form, set, error, submit, busy } = useForm(
     { disqualified_reason: '' },
     ({ disqualified_reason }) => api.put(`/api/crm/leads/${lead.id}`, { status: 'disqualified', disqualified_reason }),
     onClose,
@@ -61,10 +62,10 @@ export function DisqualifyForm({ lead, onClose, onSaved }: { lead: any; onClose:
   );
 
   return (
-    <Modal title={`Why is ${lead.name} not a fit?`}>
+    <Modal title={`Why is ${lead.name} not a fit?`} onClose={onClose}>
       <form onSubmit={submit}>
         <label>Reason<input required value={form.disqualified_reason} onChange={(e) => set('disqualified_reason', e.target.value)} /></label>
-        <Actions error={error} onClose={onClose} />
+        <Actions error={error} onClose={onClose} busy={busy} />
       </form>
     </Modal>
   );
@@ -83,18 +84,21 @@ export function ConvertForm({ lead, matches, onClose }: { lead: any; matches: an
     api.get('/api/crm/pipelines').then(setPipelines).catch(() => setPipelines([]));
   }, []);
 
+  const { busy, run } = useSubmit();
   const submit = async (event: FormEvent) => {
     event.preventDefault();
-    try {
-      const result = await api.post(`/api/crm/leads/${lead.id}/convert`, { contact_id: contactId, deal: wantDeal ? deal : null });
-      router.push(result.deal_id ? `/saas/crm/deal/${result.deal_id}` : `/saas/crm/contact/${result.contact_id}`);
-    } catch (err: any) {
-      setError(err.message);
-    }
+    return run(async () => {
+      try {
+        const result = await api.post(`/api/crm/leads/${lead.id}/convert`, { contact_id: contactId, deal: wantDeal ? deal : null });
+        router.push(result.deal_id ? `/saas/crm/deal/${result.deal_id}` : `/saas/crm/contact/${result.contact_id}`);
+      } catch (err: any) {
+        setError(err.message);
+      }
+    });
   };
 
   return (
-    <Modal title={`Convert ${lead.name}`}>
+    <Modal title={`Convert ${lead.name}`} onClose={onClose}>
       <form onSubmit={submit}>
         <div className="form-grid">
           <label>Contact
@@ -125,7 +129,7 @@ export function ConvertForm({ lead, matches, onClose }: { lead: any; matches: an
         )}
         {error && <p className="error">{error}</p>}
         <div className="form-actions">
-          <button className="primary">Convert</button>
+          <button disabled={busy} className="primary">Convert</button>
           <button type="button" onClick={onClose}>Cancel</button>
         </div>
       </form>

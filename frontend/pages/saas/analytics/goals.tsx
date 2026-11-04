@@ -167,7 +167,7 @@ function GoalForm({ metric, month, target, currency, onSave, onClose }: {
     onSave(value, months);
   };
   return (
-    <Modal title={`Goal: ${metric.label}`}>
+    <Modal title={`Goal: ${metric.label}`} onClose={onClose}>
       <form onSubmit={submit}>
         <div className="form-grid">
           <label>{metric.money ? `Target (${currency})` : 'Target'}

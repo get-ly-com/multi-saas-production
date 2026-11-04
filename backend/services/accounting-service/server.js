@@ -28,12 +28,64 @@ const bills = (req) => req.db.schema('accounting').from('bills');
 const taxRates = (req) => req.db.schema('accounting').from('tax_rates');
 const ledger = (req) => req.db.schema('accounting');
 
+// Unique constraints, by a word in their name, and what to tell people
+const DUPLICATES = [
+  ['invoice_number', 'That invoice number is already used'],
+  ['bill_number', 'That bill number is already used'],
+  ['credit_number', 'That credit number is already used'],
+  ['po_number', 'That purchase order number is already used'],
+  ['entry_number', 'That journal entry number is already used'],
+  ['accounts_tenant_id_code', 'An account with that code already exists'],
+  ['cost_centers_tenant_id_code', 'A cost center with that code already exists'],
+  ['fingerprint', 'That bank line is already imported'],
+  ['one_match', 'That bank line is already matched'],
+  ['rate_date', 'There is already a rate for that currency on that date'],
+  ['days_overdue', 'There is already a step for that many days overdue'],
+  ['revenue_one_per_invoice', 'That invoice already has a revenue schedule'],
+  ['one_reversal', 'That entry is already reversed'],
+  ['name', 'That name is already used']
+];
+
+// Only our own messages and the ones our database functions raise (P0001) reach people
 const sendError = (res, error) => {
+  const code = error?.code || '';
+  if (error?.status) return res.status(error.status).json({ error: error.message });
+  if (!code && error?.constructor === Error) return res.status(400).json({ error: error.message });
+  if (code === 'P0001') return res.status(400).json({ error: error.message });
+  if (/^PT[45]\d\d$/.test(code)) return res.status(Number(code.slice(2))).json({ error: error.message });
+
   console.error('Accounting error:', error);
-  if (error.code === '23505') {
-    return res.status(409).json({ error: 'That number is already used' });
+  if (code === '42501') return res.status(403).json({ error: 'You don’t have access to that' });
+  if (code === '22P02') return res.status(404).json({ error: 'Not found' });
+  if (code === '23503') return res.status(409).json({ error: 'That is still used by other records' });
+  if (code === '23505') {
+    const found = DUPLICATES.find(([word]) => String(error.message || '').includes(word));
+    return res.status(409).json({ error: found ? found[1] : 'That is already saved' });
   }
-  res.status(400).json({ error: error.message });
+  if (code === '23514') return res.status(400).json({ error: 'That value isn’t allowed' });
+  res.status(400).json({ error: 'That didn’t work. Please check and try again.' });
+};
+
+// "Infinity", "1e999" and "NaN" are never real numbers, so they come back as NaN and fail every check
+const toNumber = (value) => {
+  const number = Number(value);
+  return Number.isFinite(number) ? number : NaN;
+};
+
+const parseWhole = (value, min, max, message) => {
+  const number = Number(value);
+  if (!Number.isInteger(number) || number < min || number > max) throw new Error(message);
+  return number;
+};
+
+// Blank lets the database give the next number
+const parseInvoiceNumber = (value) => {
+  const number = value === null || value === undefined ? '' : String(value).trim();
+  if (!number) return null;
+  if (number.length > 30 || !/^[A-Za-z0-9 _-]+$/.test(number)) {
+    throw new Error('Invoice numbers can be up to 30 letters, numbers, spaces, - and _');
+  }
+  return number;
 };
 
 // The database works out totals and tax from these lines
@@ -43,8 +95,8 @@ const parseLineItems = (lineItems) => {
   }
 
   return lineItems.map(({ description, quantity, unit_price, tax_rate_id, item_id }) => {
-    const qty = Number(quantity);
-    const price = Number(unit_price);
+    const qty = toNumber(quantity);
+    const price = toNumber(unit_price);
     if (!description || !(qty > 0) || !(price >= 0)) {
       throw new Error('Each line needs a description, quantity and price');
     }
@@ -53,16 +105,18 @@ const parseLineItems = (lineItems) => {
 };
 
 const parseAmount = (value) => {
-  const amount = Number(value);
+  const amount = toNumber(value);
   if (value === '' || value === null || value === undefined || !(amount >= 0)) {
     throw new Error('Enter a valid amount');
   }
   return amount;
 };
 
+const optionalAmount = (value) => (value === '' || value === null || value === undefined ? null : parseAmount(value));
+
 // One document-currency unit in the base currency. The database ignores it for base-currency documents.
 const parseRate = (value) => {
-  const rate = value === undefined || value === null || value === '' ? 1 : Number(value);
+  const rate = value === undefined || value === null || value === '' ? 1 : toNumber(value);
   if (!(rate > 0)) throw new Error('Enter an exchange rate above zero');
   return rate;
 };
@@ -74,43 +128,32 @@ const parseBillLines = (lineItems) => {
 
   // A stock line names the item and quantity, and the database posts it to Inventory
   return lineItems.map(({ description, account_id, amount, tax_rate_id, cost_center_id, item_id, quantity }) => {
+    const lineAmount = toNumber(amount);
     if (item_id) {
       const qty = Number(quantity);
-      if (!UUID.test(item_id) || !Number.isInteger(qty) || qty <= 0 || !(Number(amount) > 0)) {
+      if (!UUID.test(item_id) || !Number.isInteger(qty) || qty <= 0 || !(lineAmount > 0)) {
         throw new Error('Each stock line needs an item, a whole quantity and an amount');
       }
       return {
         description: description || null,
         item_id,
         quantity: qty,
-        amount: Number(amount),
+        amount: lineAmount,
         tax_rate_id: tax_rate_id || null,
         cost_center_id: cost_center_id || null
       };
     }
-    if (!UUID.test(account_id || '') || !(Number(amount) > 0)) {
+    if (!UUID.test(account_id || '') || !(lineAmount > 0)) {
       throw new Error('Each line needs an account and an amount');
     }
     return {
       description: description || null,
       account_id,
-      amount: Number(amount),
+      amount: lineAmount,
       tax_rate_id: tax_rate_id || null,
       cost_center_id: cost_center_id || null
     };
   });
-};
-
-const nextInvoiceNumber = async (req) => {
-  const { data, error } = await invoices(req)
-    .select('invoice_number')
-    .eq('tenant_id', req.tenantId)
-    .order('created_at', { ascending: false })
-    .limit(1);
-
-  if (error) throw error;
-  const last = Number((data[0]?.invoice_number || '').replace(/\D/g, '')) || 0;
-  return `INV-${String(last + 1).padStart(4, '0')}`;
 };
 
 // Bank statement imports can be a few thousand lines
@@ -128,6 +171,12 @@ app.use((req, res, next) => {
     return res.status(400).json({ error: 'Missing tenant' });
   }
   req.db = supabaseFor(req.headers.authorization);
+  next();
+});
+
+// Every :id in this service is a record id, so a bad link gets a clear answer
+app.param('id', (req, res, next, id) => {
+  if (!UUID.test(id)) return res.status(404).json({ error: 'Not found' });
   next();
 });
 
@@ -176,10 +225,10 @@ app.post('/invoices', async (req, res) => {
   try {
     const { customer_id, invoice_date, due_date, description, invoice_number, line_items, cost_center_id, currency, exchange_rate } = req.body;
     if (!UUID.test(customer_id || '')) throw new Error('Choose a customer');
+    const number = parseInvoiceNumber(invoice_number);
 
     const row = {
       tenant_id: req.tenantId,
-      invoice_number: invoice_number || await nextInvoiceNumber(req),
       customer_id,
       due_date: due_date || null,
       description: description || null,
@@ -190,6 +239,8 @@ app.post('/invoices', async (req, res) => {
       line_items: parseLineItems(line_items)
     };
     if (invoice_date) row.invoice_date = invoice_date;
+    // Left out, the database gives the next number
+    if (number) row.invoice_number = number;
 
     const { data, error } = await invoices(req).insert([row]).select();
 
@@ -442,7 +493,7 @@ app.post('/payments', async (req, res) => {
       p_date: payment_date,
       p_amount: parseAmount(amount),
       p_reference: reference || null,
-      p_rate: exchange_rate ? Number(exchange_rate) : null
+      p_rate: exchange_rate ? parseRate(exchange_rate) : null
     });
 
     if (error) throw error;
@@ -1007,11 +1058,13 @@ app.get('/currencies', async (req, res) => {
 app.post('/currencies/rates', async (req, res) => {
   try {
     const { currency, rate_date, rate } = req.body;
+    const value = toNumber(rate);
+    if (!(value > 0)) throw new Error('Enter an exchange rate above zero');
     const { error } = await ledger(req).rpc('save_exchange_rate', {
       p_tenant: req.tenantId,
       p_currency: currency,
       p_date: parseDate(rate_date, 'a date'),
-      p_rate: Number(rate)
+      p_rate: value
     });
 
     if (error) throw error;
@@ -1178,7 +1231,7 @@ app.post('/budgets', async (req, res) => {
       p_tenant: req.tenantId,
       p_budget: id || null,
       p_name: name,
-      p_year: Number(fiscal_year),
+      p_year: parseWhole(fiscal_year, 1900, 9999, 'Enter a fiscal year'),
       p_lines: lines
     });
 
@@ -1208,8 +1261,8 @@ app.get('/budgets/:id/actual', async (req, res) => {
     const { data, error } = await ledger(req).rpc('budget_vs_actual', {
       p_tenant: req.tenantId,
       p_budget: req.params.id,
-      p_from_month: Number(req.query.from) || 1,
-      p_to_month: Number(req.query.to) || 12
+      p_from_month: req.query.from ? parseWhole(req.query.from, 1, 12, 'Choose months from 1 to 12') : 1,
+      p_to_month: req.query.to ? parseWhole(req.query.to, 1, 12, 'Choose months from 1 to 12') : 12
     });
 
     if (error) throw error;
@@ -1234,14 +1287,15 @@ app.post('/assets', async (req, res) => {
   try {
     const { name, cost, salvage, life_months, start_date, paid_from } = req.body;
     if (!name) throw new Error('Name is required');
-    if (!(Number(life_months) >= 1)) throw new Error('Enter the useful life in months');
+    const life = toNumber(life_months);
+    if (!(life >= 1)) throw new Error('Enter the useful life in months');
 
     const { data, error } = await ledger(req).rpc('register_asset', {
       p_tenant: req.tenantId,
       p_name: name,
       p_cost: parseAmount(cost),
-      p_salvage: Number(salvage) || 0,
-      p_life_months: Number(life_months),
+      p_salvage: optionalAmount(salvage) ?? 0,
+      p_life_months: life,
       p_start: parseDate(start_date, 'a start date'),
       p_paid_from: paid_from || null
     });
@@ -1274,7 +1328,7 @@ app.post('/assets/:id/dispose', async (req, res) => {
       p_tenant: req.tenantId,
       p_asset: req.params.id,
       p_date: parseDate(disposed_on, 'a date'),
-      p_proceeds: Number(proceeds) || 0,
+      p_proceeds: optionalAmount(proceeds) ?? 0,
       p_account: account_id || null
     });
 
@@ -1368,7 +1422,7 @@ app.post('/recurring', (req, res) => callLedger(req, res, 'save_recurring_invoic
     p_frequency: frequency,
     p_start: parseDate(start_date, 'a start date'),
     p_end: end_date || null,
-    p_due_days: Number(due_days) || 0,
+    p_due_days: due_days ? parseWhole(due_days, 0, 3650, 'Due days must be a whole number from 0 to 3650') : 0,
     p_currency: currency || null,
     p_rate: parseRate(exchange_rate),
     p_cost_center: cost_center_id || null,
@@ -1388,7 +1442,7 @@ app.get('/revenue', (req, res) => callLedger(req, res, 'revenue_overview', () =>
 app.post('/revenue', (req, res) => callLedger(req, res, 'create_revenue_schedule', () => ({
   p_invoice: req.body.invoice_id,
   p_start: parseDate(req.body.start_date, 'a start date'),
-  p_months: Number(req.body.months)
+  p_months: parseWhole(req.body.months, 1, 9999, 'Enter the number of months')
 }), 201));
 
 app.post('/revenue/run', (req, res) => callLedger(req, res, 'run_revenue_recognition', () => ({
@@ -1527,8 +1581,6 @@ const requireId = (value, label) => {
   if (!UUID.test(value || '')) throw new Error(`Choose ${label}`);
   return value;
 };
-
-const optionalAmount = (value) => (value === '' || value === null || value === undefined ? null : parseAmount(value));
 
 // Customer statements
 app.get('/customers/:id/statement', (req, res) => callLedger(req, res, 'customer_statement', () => ({
@@ -1673,9 +1725,16 @@ app.delete('/bank/rules/:id', (req, res) => callLedger(req, res, 'delete_bank_ru
 
 // Error handler
 app.use((err, req, res, next) => {
+  if (res.headersSent) return next(err);
+  // Bad JSON and too-large bodies are the sender's mistake, not ours
+  if (err.status >= 400 && err.status < 500) {
+    return res.status(err.status).json({ error: err.status === 413 ? 'That is too large to send' : 'That request could not be read' });
+  }
   console.error('Error:', err);
   res.status(500).json({ error: 'Internal server error' });
 });
+
+process.on('unhandledRejection', (reason) => console.error('Unhandled rejection:', reason));
 
 app.listen(PORT, () => {
   console.log(`📊 Accounting Service running on port ${PORT}`);

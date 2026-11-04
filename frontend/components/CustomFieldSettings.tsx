@@ -1,5 +1,6 @@
 import { FormEvent, useEffect, useState } from 'react';
 import { api } from '@/lib/api';
+import useSubmit from '@/lib/useSubmit';
 
 const ENTITIES = [
   { id: 'lead', name: 'Leads' },
@@ -37,21 +38,24 @@ export default function CustomFieldSettings() {
     load();
   }, []);
 
+  const { busy, run } = useSubmit();
   const save = async (event: FormEvent) => {
     event.preventDefault();
-    try {
-      await api.post('/api/crm/custom-fields', {
-        ...editing,
-        options: editing.kind === 'select' ? editing.options.split(',').map((choice: string) => choice.trim()).filter(Boolean) : []
-      });
-      setEditing(null);
-      await load();
-    } catch (err: any) {
-      setError(err.message);
-    }
+    return run(async () => {
+      try {
+        await api.post('/api/crm/custom-fields', {
+          ...editing,
+          options: editing.kind === 'select' ? editing.options.split(',').map((choice: string) => choice.trim()).filter(Boolean) : []
+        });
+        setEditing(null);
+        await load();
+      } catch (err: any) {
+        setError(err.message);
+      }
+    });
   };
 
-  const remove = async (field: any) => {
+  const remove = (field: any) => run(async () => {
     if (!window.confirm(`Delete ${field.label}? What people entered in it is deleted too.`)) return;
     try {
       await api.delete(`/api/crm/custom-fields/${field.id}`);
@@ -59,7 +63,7 @@ export default function CustomFieldSettings() {
     } catch (err: any) {
       setError(err.message);
     }
-  };
+  });
 
   return (
     <div className="stack">
@@ -87,7 +91,7 @@ export default function CustomFieldSettings() {
           </div>
           <label className="check"><input type="checkbox" checked={editing.required} onChange={(e) => set('required', e.target.checked)} />Required when someone fills in the form</label>
           <div className="form-actions">
-            <button className="primary">Save field</button>
+            <button disabled={busy} className="primary">Save field</button>
             <button type="button" onClick={() => setEditing(null)}>Cancel</button>
           </div>
         </form>
@@ -107,7 +111,7 @@ export default function CustomFieldSettings() {
                 <td>
                   <div className="row-actions">
                     <button onClick={() => setEditing({ ...field, options: field.options.join(', ') })}>Edit</button>
-                    <button className="danger" onClick={() => remove(field)}>Delete</button>
+                    <button disabled={busy} className="danger" onClick={() => remove(field)}>Delete</button>
                   </div>
                 </td>
               </tr>

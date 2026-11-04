@@ -7,6 +7,7 @@ import Modal from '@/components/Modal';
 import PaymentForm from '@/components/PaymentForm';
 import WriteOffForm from '@/components/WriteOffForm';
 import { api, formatDate, money, today } from '@/lib/api';
+import useSubmit from '@/lib/useSubmit';
 
 const blankLine = { description: '', quantity: '1', unit_price: '', tax_rate_id: '' };
 const blankInvoice = { customer_id: '', invoice_date: '', due_date: '', description: '', cost_center_id: '', currency: '', exchange_rate: '1', line_items: [blankLine] };
@@ -68,14 +69,16 @@ function AccountingApp() {
     load();
   }, []);
 
-  const run = async (action: () => Promise<unknown>) => {
+  const { busy, run: once } = useSubmit();
+  // One action at a time, so a double click cannot repeat it
+  const run = (action: () => Promise<unknown>) => once(async () => {
     try {
       await action();
       await load();
     } catch (err: any) {
       setError(err.message);
     }
-  };
+  });
 
   const remove = (path: string, label: string) => {
     if (window.confirm(`Delete this ${label}? This can't be undone.`)) {
@@ -220,19 +223,22 @@ function CreditForm({ invoice, onClose, onSaved }: { invoice: any; onClose: () =
   const [error, setError] = useState('');
   const set = (field: string, value: string) => setForm({ ...form, [field]: value });
 
+  const { busy, run } = useSubmit();
   const submit = async (event: FormEvent) => {
     event.preventDefault();
-    try {
-      await api.post('/api/accounting/credit-notes', { invoice_id: invoice.id, ...form });
-      await onSaved();
-      onClose();
-    } catch (err: any) {
-      setError(err.message);
-    }
+    return run(async () => {
+      try {
+        await api.post('/api/accounting/credit-notes', { invoice_id: invoice.id, ...form });
+        await onSaved();
+        onClose();
+      } catch (err: any) {
+        setError(err.message);
+      }
+    });
   };
 
   return (
-    <Modal title={`Credit note for ${invoice.invoice_number}`}>
+    <Modal title={`Credit note for ${invoice.invoice_number}`} onClose={onClose}>
       <form onSubmit={submit}>
         <p className="muted">Balance {money(balance, invoice.currency)}</p>
         <div className="form-grid">
@@ -242,7 +248,7 @@ function CreditForm({ invoice, onClose, onSaved }: { invoice: any; onClose: () =
         <label style={{ marginTop: 12 }}>Reason<textarea required rows={2} value={form.reason} onChange={(e) => set('reason', e.target.value)} /></label>
         {error && <p className="error">{error}</p>}
         <div className="form-actions">
-          <button className="primary">Issue credit note</button>
+          <button disabled={busy} className="primary">Issue credit note</button>
           <button type="button" onClick={onClose}>Cancel</button>
         </div>
       </form>
@@ -277,22 +283,25 @@ function InvoiceForm({ initial, customers, taxRates, costCenters, onClose, onSav
     return sum + Math.round(lineNet(line) * Number(rate?.rate || 0)) / 100;
   }, 0);
 
+  const { busy, run } = useSubmit();
   const submit = async (event: FormEvent) => {
     event.preventDefault();
-    const { customer_id, invoice_date, due_date, description, line_items, cost_center_id, currency, exchange_rate } = form;
-    const body = { customer_id, invoice_date, due_date, description, line_items, cost_center_id, currency, exchange_rate };
-    try {
-      if (form.id) await api.put(`/api/accounting/invoices/${form.id}`, body);
-      else await api.post('/api/accounting/invoices', body);
-      await onSaved();
-      onClose();
-    } catch (err: any) {
-      setError(err.message);
-    }
+    return run(async () => {
+      const { customer_id, invoice_date, due_date, description, line_items, cost_center_id, currency, exchange_rate } = form;
+      const body = { customer_id, invoice_date, due_date, description, line_items, cost_center_id, currency, exchange_rate };
+      try {
+        if (form.id) await api.put(`/api/accounting/invoices/${form.id}`, body);
+        else await api.post('/api/accounting/invoices', body);
+        await onSaved();
+        onClose();
+      } catch (err: any) {
+        setError(err.message);
+      }
+    });
   };
 
   return (
-    <Modal title={form.id ? `Edit ${form.invoice_number}` : 'New invoice'}>
+    <Modal title={form.id ? `Edit ${form.invoice_number}` : 'New invoice'} onClose={onClose}>
       <form onSubmit={submit}>
         <div className="form-grid">
           <label>Customer
@@ -335,7 +344,7 @@ function InvoiceForm({ initial, customers, taxRates, costCenters, onClose, onSav
         <label>Notes<textarea rows={2} value={form.description} onChange={(e) => set('description', e.target.value)} /></label>
         {error && <p className="error">{error}</p>}
         <div className="form-actions">
-          <button className="primary">Save</button>
+          <button disabled={busy} className="primary">Save</button>
           <button type="button" onClick={onClose}>Cancel</button>
         </div>
       </form>
@@ -348,22 +357,25 @@ function ExpenseForm({ initial, accounts, costCenters, onClose, onSaved }: { ini
   const [error, setError] = useState('');
   const set = (field: string, value: string) => setForm({ ...form, [field]: value });
 
+  const { busy, run } = useSubmit();
   const submit = async (event: FormEvent) => {
     event.preventDefault();
-    const { amount, category, description, expense_date, account_id, cost_center_id } = form;
-    const body = { amount, category, description, expense_date, account_id, cost_center_id };
-    try {
-      if (form.id) await api.put(`/api/accounting/expenses/${form.id}`, body);
-      else await api.post('/api/accounting/expenses', body);
-      await onSaved();
-      onClose();
-    } catch (err: any) {
-      setError(err.message);
-    }
+    return run(async () => {
+      const { amount, category, description, expense_date, account_id, cost_center_id } = form;
+      const body = { amount, category, description, expense_date, account_id, cost_center_id };
+      try {
+        if (form.id) await api.put(`/api/accounting/expenses/${form.id}`, body);
+        else await api.post('/api/accounting/expenses', body);
+        await onSaved();
+        onClose();
+      } catch (err: any) {
+        setError(err.message);
+      }
+    });
   };
 
   return (
-    <Modal title={form.id ? 'Edit expense' : 'New expense'}>
+    <Modal title={form.id ? 'Edit expense' : 'New expense'} onClose={onClose}>
       <form onSubmit={submit}>
         <div className="form-grid">
           <label>Amount<input required type="number" min="0" step="0.01" value={form.amount} onChange={(e) => set('amount', e.target.value)} /></label>
@@ -380,7 +392,7 @@ function ExpenseForm({ initial, accounts, costCenters, onClose, onSaved }: { ini
         <label style={{ marginTop: 12 }}>Description<textarea rows={2} value={form.description} onChange={(e) => set('description', e.target.value)} /></label>
         {error && <p className="error">{error}</p>}
         <div className="form-actions">
-          <button className="primary">Save</button>
+          <button disabled={busy} className="primary">Save</button>
           <button type="button" onClick={onClose}>Cancel</button>
         </div>
       </form>

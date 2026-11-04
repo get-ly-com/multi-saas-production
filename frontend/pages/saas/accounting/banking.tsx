@@ -4,6 +4,7 @@ import AppShell from '@/components/AppShell';
 import BankImport from '@/components/BankImport';
 import Modal from '@/components/Modal';
 import { api, formatDate, money, today } from '@/lib/api';
+import useSubmit from '@/lib/useSubmit';
 
 export default function Banking() {
   return <AppShell><BankingApp /></AppShell>;
@@ -82,14 +83,16 @@ function StatementLines({ accountId, accounts }: { accountId: string; accounts: 
     load();
   }, []);
 
-  const run = async (action: () => Promise<unknown>) => {
+  const { busy, run: once } = useSubmit();
+  // One action at a time, so a double click cannot repeat it
+  const run = (action: () => Promise<unknown>) => once(async () => {
     try {
       await action();
       await load();
     } catch (err: any) {
       setError(err.message);
     }
-  };
+  });
 
   return (
     <>
@@ -186,7 +189,8 @@ function PostForm({ line, accounts, onClose, onSaved }: { line: any; accounts: a
   const [memo, setMemo] = useState(line.description);
   const [error, setError] = useState('');
 
-  const save = async () => {
+  const { busy, run: once } = useSubmit();
+  const save = () => once(async () => {
     try {
       await api.post(`/api/accounting/bank/lines/${line.id}/post`, { account_id: accountId, memo });
       await onSaved();
@@ -194,10 +198,10 @@ function PostForm({ line, accounts, onClose, onSaved }: { line: any; accounts: a
     } catch (err: any) {
       setError(err.message);
     }
-  };
+  });
 
   return (
-    <Modal title={`Post ${money(line.amount)} to the books`}>
+    <Modal title={`Post ${money(line.amount)} to the books`} onClose={onClose}>
       <p className="muted">Use this for money the books don't have yet, such as a bank fee. Customer and vendor money should be matched to its payment instead.</p>
       <div className="form-grid">
         <label>Account
@@ -237,14 +241,16 @@ function Reconcile({ accountId }: { accountId: string }) {
     load();
   }, [asOf]);
 
-  const run = async (action: () => Promise<unknown>) => {
+  const { busy, run: once } = useSubmit();
+  // One action at a time, so a double click cannot repeat it
+  const run = (action: () => Promise<unknown>) => once(async () => {
     try {
       await action();
       await load();
     } catch (err: any) {
       setError(err.message);
     }
-  };
+  });
 
   const unclear = (item: any) => {
     if (window.confirm('Unclear this item? If it was posted from a statement line, that entry is reversed.')) {
@@ -351,14 +357,16 @@ function Rules({ accounts }: { accounts: any[] }) {
     load();
   }, []);
 
-  const run = async (action: () => Promise<unknown>) => {
+  const { busy, run: once } = useSubmit();
+  // One action at a time, so a double click cannot repeat it
+  const run = (action: () => Promise<unknown>) => once(async () => {
     try {
       await action();
       await load();
     } catch (err: any) {
       setError(err.message);
     }
-  };
+  });
 
   const amounts = (rule: any) => {
     if (rule.min_amount === null && rule.max_amount === null) return 'Any amount';
@@ -429,20 +437,23 @@ function RuleForm({ initial, accounts, onClose, onSaved }: { initial: any; accou
   const banks = accounts.filter((account) => account.is_cash);
   const targets = accounts.filter((account) => account.id !== form.bank_account_id && !['1200', '2000'].includes(account.code));
 
+  const { busy, run } = useSubmit();
   const submit = async (event: FormEvent) => {
     event.preventDefault();
-    try {
-      const { id, name, match_text, direction, min_amount, max_amount, bank_account_id, account_id, memo, position, is_active } = form;
-      await api.post('/api/accounting/bank/rules', { id, name, match_text, direction, min_amount, max_amount, bank_account_id, account_id, memo, position, is_active });
-      await onSaved();
-      onClose();
-    } catch (err: any) {
-      setError(err.message);
-    }
+    return run(async () => {
+      try {
+        const { id, name, match_text, direction, min_amount, max_amount, bank_account_id, account_id, memo, position, is_active } = form;
+        await api.post('/api/accounting/bank/rules', { id, name, match_text, direction, min_amount, max_amount, bank_account_id, account_id, memo, position, is_active });
+        await onSaved();
+        onClose();
+      } catch (err: any) {
+        setError(err.message);
+      }
+    });
   };
 
   return (
-    <Modal title={form.id ? 'Edit bank rule' : 'New bank rule'}>
+    <Modal title={form.id ? 'Edit bank rule' : 'New bank rule'} onClose={onClose}>
       <form onSubmit={submit}>
         <div className="form-grid">
           <label>Name<input required maxLength={80} placeholder="Bank fees" value={form.name} onChange={(e) => set('name', e.target.value)} /></label>
@@ -476,7 +487,7 @@ function RuleForm({ initial, accounts, onClose, onSaved }: { initial: any; accou
         </label>
         {error && <p className="error">{error}</p>}
         <div className="form-actions">
-          <button className="primary">Save rule</button>
+          <button disabled={busy} className="primary">Save rule</button>
           <button type="button" onClick={onClose}>Cancel</button>
         </div>
       </form>

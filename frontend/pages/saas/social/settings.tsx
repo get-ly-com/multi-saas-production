@@ -3,6 +3,7 @@ import AppShell from '@/components/AppShell';
 import SocialNav from '@/components/SocialNav';
 import { fileSize } from '@/components/SocialForms';
 import { api } from '@/lib/api';
+import useSubmit from '@/lib/useSubmit';
 
 export default function SocialSettings() {
   return <AppShell><Settings /></AppShell>;
@@ -45,17 +46,20 @@ function Settings() {
     load();
   }, []);
 
+  const { busy, run } = useSubmit();
   const submit = async (event: FormEvent) => {
     event.preventDefault();
-    setError('');
-    setNotice('');
-    try {
-      await api.put('/api/social-media/settings', form);
-      setNotice('Saved.');
-      await load();
-    } catch (err: any) {
-      setError(err.message);
-    }
+    return run(async () => {
+      setError('');
+      setNotice('');
+      try {
+        await api.put('/api/social-media/settings', form);
+        setNotice('Saved.');
+        await load();
+      } catch (err: any) {
+        setError(err.message);
+      }
+    });
   };
 
   if (!overview) return <div className="stack"><SocialNav />{error ? <p className="error">{error}</p> : <p className="muted">Loading…</p>}</div>;
@@ -90,7 +94,7 @@ function Settings() {
         {error && <p className="error">{error}</p>}
         {notice && <p className="notice">{notice}</p>}
         {overview.is_manager ? (
-          <div className="form-actions"><button className="primary" type="submit">Save</button></div>
+          <div className="form-actions"><button disabled={busy} className="primary" type="submit">Save</button></div>
         ) : (
           <p className="muted">Only owners and admins can change these settings.</p>
         )}

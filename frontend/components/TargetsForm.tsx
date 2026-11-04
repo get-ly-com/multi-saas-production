@@ -2,6 +2,7 @@ import { FormEvent, useEffect, useState } from 'react';
 import Modal from '@/components/Modal';
 import { api } from '@/lib/api';
 import { monthName } from '@/lib/forecast';
+import useSubmit from '@/lib/useSubmit';
 
 // Keyed by user id, with '' for the whole company
 type Amounts = Record<string, string>;
@@ -28,23 +29,26 @@ export default function TargetsForm({ month: firstMonth, members, onClose, onSav
   const set = (person: string, value: string) => setAmounts({ ...amounts, [person]: value });
   const peopleTotal = sellers.reduce((sum, { user_id }) => sum + Number(amounts[user_id] || 0), 0);
 
+  const { busy, run } = useSubmit();
   const submit = async (event: FormEvent) => {
     event.preventDefault();
-    try {
-      await api.post('/api/crm/targets', {
-        month,
-        // Saving replaces the month, so a target for someone who left the team goes
-        targets: ['', ...sellers.map(({ user_id }) => user_id)].map((user_id) => ({ user_id, amount: amounts[user_id] ?? '' }))
-      });
-      onSaved();
-      onClose();
-    } catch (err: any) {
-      setError(err.message);
-    }
+    return run(async () => {
+      try {
+        await api.post('/api/crm/targets', {
+          month,
+          // Saving replaces the month, so a target for someone who left the team goes
+          targets: ['', ...sellers.map(({ user_id }) => user_id)].map((user_id) => ({ user_id, amount: amounts[user_id] ?? '' }))
+        });
+        onSaved();
+        onClose();
+      } catch (err: any) {
+        setError(err.message);
+      }
+    });
   };
 
   return (
-    <Modal title="Sales targets">
+    <Modal title="Sales targets" onClose={onClose}>
       <form onSubmit={submit}>
         <p className="muted">Targets are the value of deals to win in a month. Leave the company target blank to add up the people's targets.</p>
         <div className="form-grid">
@@ -75,7 +79,7 @@ export default function TargetsForm({ month: firstMonth, members, onClose, onSav
         )}
         {error && <p className="error">{error}</p>}
         <div className="form-actions">
-          <button className="primary" disabled={loading}>Save targets</button>
+          <button className="primary" disabled={busy || loading}>Save targets</button>
           <button type="button" onClick={onClose}>Cancel</button>
         </div>
       </form>

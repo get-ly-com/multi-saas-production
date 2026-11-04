@@ -4,6 +4,7 @@ import AppShell from '@/components/AppShell';
 import ChatNav, { timeText } from '@/components/ChatNav';
 import Modal from '@/components/Modal';
 import { api, formatDate } from '@/lib/api';
+import useSubmit from '@/lib/useSubmit';
 
 export default function ChatAnswers() {
   return <AppShell><Answers /></AppShell>;
@@ -46,7 +47,8 @@ function Answers() {
   const query = search.trim().toLowerCase();
   const visible = answers.filter((row) => `${row.question} ${row.keywords} ${row.answer}`.toLowerCase().includes(query));
 
-  const remove = async (row: Answer) => {
+  const { busy, run: once } = useSubmit();
+  const remove = (row: Answer) => once(async () => {
     if (!window.confirm(`Delete the answer to "${row.question}"?`)) return;
     try {
       await api.delete(`/api/chatbot/answers/${row.id}`);
@@ -54,16 +56,16 @@ function Answers() {
     } catch (err: any) {
       setError(err.message);
     }
-  };
+  });
 
-  const dismiss = async (id: string) => {
+  const dismiss = (id: string) => once(async () => {
     try {
       await api.delete(`/api/chatbot/unanswered/${id}`);
       setMissed((rows) => rows.filter((row) => row.id !== id));
     } catch (err: any) {
       setError(err.message);
     }
-  };
+  });
 
   return (
     <div className="stack">
@@ -95,7 +97,7 @@ function Answers() {
                       <div className="row-actions">
                         {row.conversation_id && <Link className="button" href={`/saas/chat?c=${row.conversation_id}`}>View chat</Link>}
                         {canEdit && <button onClick={() => setEditing({ ...blank, question: row.question.slice(0, 300), unanswered_id: row.id })}>Add answer</button>}
-                        {canEdit && <button onClick={() => dismiss(row.id)}>Dismiss</button>}
+                        {canEdit && <button disabled={busy} onClick={() => dismiss(row.id)}>Dismiss</button>}
                       </div>
                     </td>
                   </tr>
@@ -126,7 +128,7 @@ function Answers() {
                     {canEdit && (
                       <div className="row-actions">
                         <button onClick={() => setEditing(row)}>Edit</button>
-                        <button className="danger" onClick={() => remove(row)}>Delete</button>
+                        <button disabled={busy} className="danger" onClick={() => remove(row)}>Delete</button>
                       </div>
                     )}
                   </td>
@@ -147,14 +149,17 @@ function TryBot() {
   const [result, setResult] = useState<any>(null);
   const [error, setError] = useState('');
 
+  const { busy, run } = useSubmit();
   const tryIt = async (event: FormEvent) => {
     event.preventDefault();
-    try {
-      setResult(await api.post('/api/chatbot/answers/test', { text: message }));
-      setError('');
-    } catch (err: any) {
-      setError(err.message);
-    }
+    return run(async () => {
+      try {
+        setResult(await api.post('/api/chatbot/answers/test', { text: message }));
+        setError('');
+      } catch (err: any) {
+        setError(err.message);
+      }
+    });
   };
 
   return (
@@ -162,7 +167,7 @@ function TryBot() {
       <h2>Try the bot</h2>
       <div className="chat-try">
         <input aria-label="Question to try" maxLength={1000} placeholder="Type a question a customer might ask" value={message} onChange={(e) => setMessage(e.target.value)} />
-        <button className="always" disabled={!message.trim()}>Try</button>
+        <button className="always" disabled={busy || !message.trim()}>Try</button>
       </div>
       {error && <p className="error">{error}</p>}
       {result && (result.matched
@@ -180,21 +185,24 @@ function AnswerForm({ initial, onClose, onSaved }: { initial: Answer; onClose: (
   const [error, setError] = useState('');
   const set = (field: keyof Answer, value: any) => setForm({ ...form, [field]: value });
 
+  const { busy, run } = useSubmit();
   const save = async (event: FormEvent) => {
     event.preventDefault();
-    setSaving(true);
-    try {
-      if (form.id) await api.put(`/api/chatbot/answers/${form.id}`, form);
-      else await api.post('/api/chatbot/answers', form);
-      onSaved();
-    } catch (err: any) {
-      setError(err.message);
-      setSaving(false);
-    }
+    return run(async () => {
+      setSaving(true);
+      try {
+        if (form.id) await api.put(`/api/chatbot/answers/${form.id}`, form);
+        else await api.post('/api/chatbot/answers', form);
+        onSaved();
+      } catch (err: any) {
+        setError(err.message);
+        setSaving(false);
+      }
+    });
   };
 
   return (
-    <Modal title={form.id ? 'Edit answer' : 'New answer'}>
+    <Modal title={form.id ? 'Edit answer' : 'New answer'} onClose={onClose}>
       <form onSubmit={save} className="stack">
         <label>Question<input required maxLength={300} value={form.question} onChange={(e) => set('question', e.target.value)}
           placeholder="What are your opening hours?" /></label>
@@ -204,7 +212,7 @@ function AnswerForm({ initial, onClose, onSaved }: { initial: Answer; onClose: (
         <label className="check"><input type="checkbox" checked={form.is_active} onChange={(e) => set('is_active', e.target.checked)} /> The bot can use this answer</label>
         {error && <p className="error">{error}</p>}
         <div className="form-actions">
-          <button className="primary" disabled={saving}>{saving ? 'Saving…' : 'Save'}</button>
+          <button className="primary" disabled={busy || saving}>{saving ? 'Saving…' : 'Save'}</button>
           <button type="button" onClick={onClose}>Cancel</button>
         </div>
       </form>

@@ -347,7 +347,7 @@ function SaveReport({ initial, title, onSave, onClose }: {
     onSave(name);
   };
   return (
-    <Modal title={title}>
+    <Modal title={title} onClose={onClose}>
       <form onSubmit={submit}>
         <label>Name<input required autoFocus maxLength={80} value={name} placeholder="Like Unpaid invoices by customer" onChange={(e) => setName(e.target.value)} /></label>
         <p className="muted">The period is saved as chosen, so "This month" always shows the current month.</p>

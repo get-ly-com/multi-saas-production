@@ -3,7 +3,7 @@ import { useRouter } from 'next/router';
 import { useEffect, useState } from 'react';
 import AccountingNav from '@/components/AccountingNav';
 import AppShell from '@/components/AppShell';
-import { api, formatDate, money, today } from '@/lib/api';
+import { api, formatDate, money, today, isUuid } from '@/lib/api';
 
 const KIND_LABELS: Record<string, string> = {
   invoice: 'Invoice',
@@ -48,7 +48,7 @@ function StatementsApp() {
   }, []);
 
   useEffect(() => {
-    if (typeof router.query.customer === 'string') setCustomerId(router.query.customer);
+    if (isUuid(router.query.customer)) setCustomerId(router.query.customer);
   }, [router.query.customer]);
 
   useEffect(() => {

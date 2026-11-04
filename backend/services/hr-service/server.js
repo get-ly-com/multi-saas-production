@@ -22,11 +22,21 @@ const hr = (req) => req.db.schema('hr');
 const EMPLOYEE_FIELDS = '*, department:departments(id, name)';
 const LEAVE_FIELDS = '*, employee:employees(id, first_name, last_name), leave_type:leave_types(id, name, paid)';
 
+// Only our own messages and the ones our database functions raise (P0001) reach people
 const sendError = (res, error) => {
-  if (error.status) return res.status(error.status).json({ error: error.message });
-  if (error.code === '23505') return res.status(409).json({ error: 'That name is already used' });
-  if (error.code === '23503') return res.status(409).json({ error: 'This is in use. Turn it off instead of deleting it.' });
-  res.status(400).json({ error: error.message });
+  const code = error?.code || '';
+  if (error?.status) return res.status(error.status).json({ error: error.message });
+  if (!code && error?.constructor === Error) return res.status(400).json({ error: error.message });
+  if (code === 'P0001') return res.status(400).json({ error: error.message });
+  if (/^PT[45]\d\d$/.test(code)) return res.status(Number(code.slice(2))).json({ error: error.message });
+
+  console.error('HR error:', error);
+  if (code === '42501') return res.status(403).json({ error: 'You don’t have access to that' });
+  if (code === '22P02') return res.status(404).json({ error: 'Not found' });
+  if (code === '23503') return res.status(409).json({ error: 'This is in use. Turn it off instead of deleting it.' });
+  if (code === '23505') return res.status(409).json({ error: 'That name is already used' });
+  if (code === '23514') return res.status(400).json({ error: 'That value isn’t allowed' });
+  res.status(400).json({ error: 'That didn’t work. Please check and try again.' });
 };
 
 const id = (value, label) => {
@@ -46,7 +56,8 @@ const optionalDate = (value, message) => (value === '' || value === null || valu
 const amount = (value, label, max = 1e10) => {
   if (value === '' || value === null || value === undefined) return null;
   const parsed = Number(value);
-  if (!(parsed >= 0) || parsed >= max) throw new Error(`Enter a valid ${label}`);
+  // "Infinity", "1e999" and "NaN" are not amounts
+  if (!Number.isFinite(parsed) || parsed < 0 || parsed >= max) throw new Error(`Enter a valid ${label}`);
   return parsed;
 };
 
@@ -145,11 +156,12 @@ app.get('/employees/:id', handle(async (req) => {
   const employeeId = id(req.params.id, 'Employee');
   const [people, pay, leave, payslips] = await Promise.all([
     rows(hr(req).from('employees').select(EMPLOYEE_FIELDS).eq('tenant_id', req.tenantId)),
-    rows(hr(req).from('compensation').select('employee_id, pay_type, amount, hours_per_week, updated_at').eq('employee_id', employeeId)),
-    rows(hr(req).from('leave_requests').select(LEAVE_FIELDS).eq('employee_id', employeeId)
+    rows(hr(req).from('compensation').select('employee_id, pay_type, amount, hours_per_week, updated_at')
+      .eq('tenant_id', req.tenantId).eq('employee_id', employeeId)),
+    rows(hr(req).from('leave_requests').select(LEAVE_FIELDS).eq('tenant_id', req.tenantId).eq('employee_id', employeeId)
       .order('start_date', { ascending: false }).limit(100)),
     rows(hr(req).from('pay_lines').select('id, gross, net, run:pay_runs(id, run_number, period_start, pay_date, status)')
-      .eq('employee_id', employeeId))
+      .eq('tenant_id', req.tenantId).eq('employee_id', employeeId))
   ]);
   const found = people.find((person) => person.id === employeeId);
   if (!found) {
@@ -163,7 +175,8 @@ app.get('/employees/:id', handle(async (req) => {
   // Private notes come only to owners and admins, even when accountants can see pay
   const notes = pay[0] ? await call(req, 'employee_notes', { p_employee: employeeId }).catch(() => null) : null;
   // Probation is only for the person, their manager, owners and admins
-  const terms = await rows(hr(req).from('employment_terms').select('probation_end_date').eq('employee_id', employeeId))
+  const terms = await rows(hr(req).from('employment_terms').select('probation_end_date')
+    .eq('tenant_id', req.tenantId).eq('employee_id', employeeId))
     .catch(() => []);
   return {
     ...withManagers([found], people)[0],
@@ -328,9 +341,13 @@ app.get('/pay-runs/:id', handle(async (req) => {
   const [run, lines] = await Promise.all([
     rows(hr(req).from('pay_runs').select('*').eq('tenant_id', req.tenantId).eq('id', runId)),
     rows(hr(req).from('pay_lines').select('*, employee:employees(id, employee_number, first_name, last_name, job_title)')
-      .eq('run_id', runId))
+      .eq('tenant_id', req.tenantId).eq('run_id', runId))
   ]);
-  if (!run.length) throw new Error('Pay run not found');
+  if (!run.length) {
+    const error = new Error('Pay run not found');
+    error.status = 404;
+    throw error;
+  }
   const name = (line) => `${line.employee?.first_name || ''} ${line.employee?.last_name || ''}`;
   return { ...run[0], lines: lines.sort((a, b) => name(a).localeCompare(name(b))) };
 }));
@@ -353,8 +370,13 @@ app.delete('/pay-runs/:id', callHr('delete_pay_run', (req) => ({ p_run: id(req.p
 // Only the fields sent are changed; taxes left out follow the company rates
 app.put('/pay-lines/:id', callHr('update_pay_line', (req) => {
   const data = {};
-  for (const field of ['hours', 'additions', 'income_tax', 'employee_contributions', 'other_deductions', 'employer_contributions']) {
+  for (const field of ['hours', 'additions']) {
     if (req.body[field] !== undefined && req.body[field] !== '') data[field] = amount(req.body[field], 'amount');
+  }
+  // A blank tax or deduction goes back to being worked out from the company rates
+  for (const field of ['income_tax', 'employee_contributions', 'other_deductions', 'employer_contributions']) {
+    if (req.body[field] === '' || req.body[field] === null) data[field] = '';
+    else if (req.body[field] !== undefined) data[field] = amount(req.body[field], 'amount');
   }
   if (req.body.note !== undefined) data.note = text(req.body.note, 200);
   return { p_line: id(req.params.id, 'Pay line'), p_data: data };
@@ -607,5 +629,17 @@ app.post('/public-holidays/import', callHr('import_holidays', (req) => {
   if (!chosen.length) throw new Error('Choose at least one holiday');
   return { p_days: chosen };
 }, 201));
+
+app.use((err, req, res, next) => {
+  if (res.headersSent) return next(err);
+  // Bad JSON and too-large bodies are the sender's mistake, not ours
+  if (err.status >= 400 && err.status < 500) {
+    return res.status(err.status).json({ error: err.status === 413 ? 'That is too large to send' : 'That request could not be read' });
+  }
+  console.error('Error:', err);
+  res.status(500).json({ error: 'Internal server error' });
+});
+
+process.on('unhandledRejection', (reason) => console.error('Unhandled rejection:', reason));
 
 app.listen(PORT, () => console.log(`👔 HR Service on ${PORT}`));

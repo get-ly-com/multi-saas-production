@@ -30,10 +30,21 @@ const typingNow = (value) => Boolean(value) && Date.now() - Date.parse(value) < 
 
 const chat = (req) => req.db.schema('chat');
 
+// Only our own messages and the ones our database functions raise (P0001) reach people
 const sendError = (res, error) => {
-  if (error.status) return res.status(error.status).json({ error: error.message });
-  if (error.code === '23505') return res.status(409).json({ error: 'That is already saved' });
-  res.status(400).json({ error: error.message });
+  const code = error?.code || '';
+  if (error?.status) return res.status(error.status).json({ error: error.message });
+  if (!code && error?.constructor === Error) return res.status(400).json({ error: error.message });
+  if (code === 'P0001') return res.status(400).json({ error: error.message });
+  if (/^PT[45]\d\d$/.test(code)) return res.status(Number(code.slice(2))).json({ error: error.message });
+
+  console.error('Chat error:', error);
+  if (code === '42501') return res.status(403).json({ error: 'You don’t have access to that' });
+  if (code === '22P02') return res.status(404).json({ error: 'Not found' });
+  if (code === '23503') return res.status(409).json({ error: 'That is still in use' });
+  if (code === '23505') return res.status(409).json({ error: 'That is already saved' });
+  if (code === '23514') return res.status(400).json({ error: 'That value isn’t allowed' });
+  res.status(400).json({ error: 'That didn’t work. Please check and try again.' });
 };
 
 const id = (value, label) => {
@@ -45,6 +56,9 @@ const text = (value, max) => {
   if (value === null || value === undefined) return '';
   return String(value).slice(0, max);
 };
+
+// Characters that would change a PostgREST .or() filter or act as wildcards
+const searchText = (value) => text(value, 100).replace(/[%_,()*\\"]/g, ' ').trim();
 
 const call = async (req, name, params) => {
   const { data, error } = await chat(req).rpc(name, { p_tenant: req.tenantId, ...params });
@@ -121,7 +135,7 @@ app.get('/conversations', handle((req) => {
     query = query.neq('status', 'closed');
   }
   if (req.query.mine === '1' && UUID.test(req.query.me || '')) query = query.eq('assigned_to', req.query.me);
-  const search = text(req.query.q, 100).replace(/[%_,()*\\]/g, ' ').trim();
+  const search = searchText(req.query.q);
   if (search) query = query.or(`visitor_name.ilike.%${search}%,visitor_email.ilike.%${search}%,last_message.ilike.%${search}%`);
   return rows(query.order('last_message_at', { ascending: false }).limit(200));
 }));
@@ -131,7 +145,7 @@ app.get('/conversations/:id', handle(async (req) => {
   const conversationId = id(req.params.id, 'Chat');
   const after = Number.isSafeInteger(Number(req.query.after)) ? Number(req.query.after) : 0;
   const messageQuery = chat(req).from('messages').select('id, sender, author_id, answer_id, body, created_at')
-    .eq('conversation_id', conversationId);
+    .eq('tenant_id', req.tenantId).eq('conversation_id', conversationId);
   const [found, messages] = await Promise.all([
     rows(chat(req).from('conversations').select(CONVERSATION_FIELDS).eq('tenant_id', req.tenantId).eq('id', conversationId)),
     rows(after > 0
@@ -174,7 +188,7 @@ app.post('/conversations/:id/ticket', callChat('ticket_from_chat', (req) => ({
 
 // CRM contacts to link a chat to. ?q=name or email
 app.get('/contacts', handle((req) => {
-  const search = text(req.query.q, 100).replace(/[%_,()*\\]/g, ' ').trim();
+  const search = searchText(req.query.q);
   let query = req.db.schema('crm').from('contacts').select('id, name, email').eq('tenant_id', req.tenantId);
   if (search) query = query.or(`name.ilike.%${search}%,email.ilike.%${search}%`);
   return rows(query.order('name').limit(20));
@@ -305,7 +319,7 @@ app.get('/tickets', handle((req) => {
   if (req.query.mine === '1' && UUID.test(req.query.me || '')) query = query.eq('assigned_to', req.query.me);
   if (req.query.overdue === '1') query = query.in('status', ['new', 'in_progress']).lt('due_at', new Date().toISOString());
   if (PRIORITIES.includes(req.query.priority)) query = query.eq('priority', req.query.priority);
-  const search = text(req.query.q, 100).replace(/[%_,()*\\]/g, ' ').trim();
+  const search = searchText(req.query.q);
   if (search) {
     const number = /^#?\d{1,9}$/.test(search) ? Number(search.replace('#', '')) : null;
     query = query.or(`subject.ilike.%${search}%,customer_name.ilike.%${search}%,customer_email.ilike.%${search}%`
@@ -318,7 +332,7 @@ app.get('/tickets/:id', handle(async (req) => {
   const ticketId = id(req.params.id, 'Ticket');
   const [found, notes] = await Promise.all([
     rows(chat(req).from('tickets').select(TICKET_FIELDS).eq('tenant_id', req.tenantId).eq('id', ticketId)),
-    rows(chat(req).from('ticket_notes').select('id, author_id, kind, body, created_at').eq('ticket_id', ticketId).order('id').limit(200))
+    rows(chat(req).from('ticket_notes').select('id, author_id, kind, body, created_at').eq('tenant_id', req.tenantId).eq('ticket_id', ticketId).order('id').limit(200))
   ]);
   if (!found.length) throw notFound('Ticket not found');
   let contact = null;
@@ -358,5 +372,17 @@ app.post('/tickets/:id/notes', callChat('add_ticket_note', (req) => {
   return { p_ticket: id(req.params.id, 'Ticket'), p_body: body };
 }, 201));
 app.delete('/tickets/:id', callChat('delete_ticket', (req) => ({ p_ticket: id(req.params.id, 'Ticket') })));
+
+app.use((err, req, res, next) => {
+  if (res.headersSent) return next(err);
+  // Bad JSON and too-large bodies are the sender's mistake, not ours
+  if (err.status >= 400 && err.status < 500) {
+    return res.status(err.status).json({ error: err.status === 413 ? 'That is too large to send' : 'That request could not be read' });
+  }
+  console.error('Error:', err);
+  res.status(500).json({ error: 'Internal server error' });
+});
+
+process.on('unhandledRejection', (reason) => console.error('Unhandled rejection:', reason));
 
 app.listen(PORT, () => console.log(`💬 Chat Service on ${PORT}`));

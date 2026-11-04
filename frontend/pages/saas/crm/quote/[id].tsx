@@ -4,8 +4,9 @@ import { useEffect, useState } from 'react';
 import AppShell from '@/components/AppShell';
 import CrmNav from '@/components/CrmNav';
 import QuoteForm from '@/components/QuoteForm';
-import { api, formatDate, money } from '@/lib/api';
+import { api, formatDate, money, queryId } from '@/lib/api';
 import { quoteBadge, quoteLabel } from '../quotes';
+import useSubmit from '@/lib/useSubmit';
 
 export default function Quote() {
   return <AppShell><QuoteApp /></AppShell>;
@@ -13,7 +14,7 @@ export default function Quote() {
 
 function QuoteApp() {
   const router = useRouter();
-  const id = router.query.id as string | undefined;
+  const id = queryId(router.query.id);
   const [quote, setQuote] = useState<any>(null);
   const [invoice, setInvoice] = useState<any>(null);
   const [company, setCompany] = useState('');
@@ -37,14 +38,16 @@ function QuoteApp() {
     if (id) load();
   }, [id]);
 
-  const run = async (action: () => Promise<unknown>) => {
+  const { busy, run: once } = useSubmit();
+  // One action at a time, so a double click cannot repeat it
+  const run = (action: () => Promise<unknown>) => once(async () => {
     try {
       await action();
       await load();
     } catch (err: any) {
       setError(err.message);
     }
-  };
+  });
 
   const setStatus = (status: string) => run(() => api.post(`/api/crm/quotes/${id}/status`, { status }));
 
@@ -53,7 +56,7 @@ function QuoteApp() {
     if (window.confirm(question)) run(() => api.post(`/api/crm/quotes/${id}/accept`, {}));
   };
 
-  const remove = async () => {
+  const remove = () => once(async () => {
     if (!window.confirm(`Delete ${quote.quote_number}? This can't be undone.`)) return;
     try {
       await api.delete(`/api/crm/quotes/${id}`);
@@ -61,7 +64,7 @@ function QuoteApp() {
     } catch (err: any) {
       setError(err.message);
     }
-  };
+  });
 
   const label = quote ? quoteLabel(quote) : '';
 
@@ -81,7 +84,7 @@ function QuoteApp() {
                 <>
                   <button className="primary" onClick={() => setStatus('sent')}>Mark sent</button>
                   <button onClick={() => setEditing(true)}>Edit</button>
-                  <button className="danger" onClick={remove}>Delete</button>
+                  <button disabled={busy} className="danger" onClick={remove}>Delete</button>
                 </>
               )}
               {quote.status === 'sent' && (

@@ -3,6 +3,7 @@ import { FormEvent, useEffect, useState } from 'react';
 import AccountingNav from '@/components/AccountingNav';
 import Modal from '@/components/Modal';
 import { api, money } from '@/lib/api';
+import useSubmit from '@/lib/useSubmit';
 
 const blank = { name: '', email: '', phone: '', address: '' };
 
@@ -29,14 +30,15 @@ export default function PartyList({ title, noun, path, balanceLabel, statementPa
     load();
   }, []);
 
-  const setActive = async (row: any, is_active: boolean) => {
+  const { busy, run: once } = useSubmit();
+  const setActive = (row: any, is_active: boolean) => once(async () => {
     try {
       await api.put(`${path}/${row.id}`, { is_active });
       await load();
     } catch (err: any) {
       setError(err.message);
     }
-  };
+  });
 
   return (
     <div className="stack">
@@ -65,7 +67,7 @@ export default function PartyList({ title, noun, path, balanceLabel, statementPa
                   <td>
                     <div className="row-actions">
                       <button onClick={() => setForm({ ...row, email: row.email || '', phone: row.phone || '', address: row.address || '' })}>Edit</button>
-                      <button onClick={() => setActive(row, !row.is_active)}>{row.is_active ? 'Deactivate' : 'Reactivate'}</button>
+                      <button disabled={busy} onClick={() => setActive(row, !row.is_active)}>{row.is_active ? 'Deactivate' : 'Reactivate'}</button>
                       {statementPath && <Link href={`${statementPath}?customer=${row.id}`}>Statement</Link>}
                     </div>
                   </td>
@@ -86,22 +88,25 @@ function PartyForm({ initial, noun, path, onClose, onSaved }: { initial: any; no
   const [error, setError] = useState('');
   const set = (field: string, value: string) => setForm({ ...form, [field]: value });
 
+  const { busy, run } = useSubmit();
   const submit = async (event: FormEvent) => {
     event.preventDefault();
-    const { name, email, phone, address } = form;
-    const body = { name, email, phone, address };
-    try {
-      if (form.id) await api.put(`${path}/${form.id}`, body);
-      else await api.post(path, body);
-      await onSaved();
-      onClose();
-    } catch (err: any) {
-      setError(err.message);
-    }
+    return run(async () => {
+      const { name, email, phone, address } = form;
+      const body = { name, email, phone, address };
+      try {
+        if (form.id) await api.put(`${path}/${form.id}`, body);
+        else await api.post(path, body);
+        await onSaved();
+        onClose();
+      } catch (err: any) {
+        setError(err.message);
+      }
+    });
   };
 
   return (
-    <Modal title={form.id ? `Edit ${noun}` : `New ${noun}`}>
+    <Modal title={form.id ? `Edit ${noun}` : `New ${noun}`} onClose={onClose}>
       <form onSubmit={submit}>
         <div className="form-grid">
           <label>Name<input required value={form.name} onChange={(e) => set('name', e.target.value)} /></label>
@@ -111,7 +116,7 @@ function PartyForm({ initial, noun, path, onClose, onSaved }: { initial: any; no
         <label style={{ marginTop: 12 }}>Address<textarea rows={2} value={form.address} onChange={(e) => set('address', e.target.value)} /></label>
         {error && <p className="error">{error}</p>}
         <div className="form-actions">
-          <button className="primary">Save</button>
+          <button disabled={busy} className="primary">Save</button>
           <button type="button" onClick={onClose}>Cancel</button>
         </div>
       </form>

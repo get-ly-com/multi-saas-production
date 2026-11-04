@@ -1,6 +1,7 @@
 import { FormEvent, useEffect, useState } from 'react';
 import Modal from '@/components/Modal';
 import { api } from '@/lib/api';
+import useSubmit from '@/lib/useSubmit';
 
 type Links = { contact_id?: string; deal_id?: string; lead_id?: string };
 
@@ -54,22 +55,25 @@ export default function EmailForm({ links, onClose }: { links: Links; onClose: (
     if (template && recipient) setForm({ subject: fill(template.subject, recipient.values), body: fill(template.body, recipient.values) });
   };
 
+  const { busy, run } = useSubmit();
   const submit = async (event: FormEvent) => {
     event.preventDefault();
-    setSending(true);
-    try {
-      await api.post('/api/crm/emails', { ...links, to: recipient?.email, ...form });
-      onClose();
-    } catch (err: any) {
-      setError(err.message);
-      setSending(false);
-    }
+    return run(async () => {
+      setSending(true);
+      try {
+        await api.post('/api/crm/emails', { ...links, to: recipient?.email, ...form });
+        onClose();
+      } catch (err: any) {
+        setError(err.message);
+        setSending(false);
+      }
+    });
   };
 
   const ready = status?.configured && recipient?.email && Number(status.left_today) > 0;
 
   return (
-    <Modal title="Send email">
+    <Modal title="Send email" onClose={onClose}>
       <form onSubmit={submit}>
         {status && !status.configured && (
           <p className="error">Email sending isn't set up yet. You can still log an email you sent elsewhere on the timeline.</p>
@@ -100,7 +104,7 @@ export default function EmailForm({ links, onClose }: { links: Links; onClose: (
 
         {error && <p className="error">{error}</p>}
         <div className="form-actions">
-          <button className="primary" disabled={!ready || sending}>{sending ? 'Sending…' : 'Send'}</button>
+          <button className="primary" disabled={busy || !ready || sending}>{sending ? 'Sending…' : 'Send'}</button>
           <button type="button" onClick={onClose}>Cancel</button>
         </div>
       </form>

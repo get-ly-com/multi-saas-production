@@ -30,7 +30,8 @@ const LEAD_STATUSES = ['new', 'working', 'disqualified'];
 const parseValue = (value) => {
   if (value === '' || value === null || value === undefined) return null;
   const parsed = Number(value);
-  if (!(parsed >= 0)) throw new Error('Enter a valid deal value');
+  // "Infinity", "1e999" and "NaN" are not amounts
+  if (!Number.isFinite(parsed) || parsed < 0) throw new Error('Enter a valid deal value');
   return parsed;
 };
 
@@ -78,7 +79,34 @@ const parseTime = (value) => {
   return value;
 };
 
-const optionalNumber = (value) => (value === '' || value === null || value === undefined ? null : Number(value));
+const optionalNumber = (value) => {
+  if (value === '' || value === null || value === undefined) return null;
+  const parsed = Number(value);
+  if (!Number.isFinite(parsed)) throw new Error('Enter a valid number');
+  return parsed;
+};
+
+// The database checks quote lines; numbers that aren't real numbers are stopped here
+const parseQuoteLines = (lines) => {
+  if (!Array.isArray(lines)) return lines;
+  for (const line of lines) {
+    for (const field of ['quantity', 'unit_price', 'discount']) {
+      const value = line && typeof line === 'object' ? line[field] : undefined;
+      if (value !== undefined && value !== null && value !== '' && !Number.isFinite(Number(value))) {
+        throw new Error('Enter quantities, prices and discounts as numbers');
+      }
+    }
+  }
+  return lines;
+};
+
+// Blank clears a target
+const parseTarget = (value) => {
+  if (value === '' || value === null || value === undefined) return '';
+  const parsed = Number(value);
+  if (!Number.isFinite(parsed) || parsed < 0) throw new Error('Enter targets as numbers of 0 or more');
+  return parsed;
+};
 
 // Only the fields that were sent, so a stage move can't wipe the rest of a deal
 const pick = (body, fields) => Object.fromEntries(
@@ -87,9 +115,21 @@ const pick = (body, fields) => Object.fromEntries(
     .map(([field, parse]) => [field, parse(body[field])])
 );
 
+// Only our own messages and the ones our database functions raise (P0001) reach people
 const sendError = (res, error) => {
-  if (error.code === '23505') return res.status(409).json({ error: 'That name is already used' });
-  res.status(400).json({ error: error.message });
+  const code = error?.code || '';
+  if (error?.status) return res.status(error.status).json({ error: error.message });
+  if (!code && error?.constructor === Error) return res.status(400).json({ error: error.message });
+  if (code === 'P0001') return res.status(400).json({ error: error.message });
+  if (/^PT[45]\d\d$/.test(code)) return res.status(Number(code.slice(2))).json({ error: error.message });
+
+  console.error('CRM error:', error);
+  if (code === '42501') return res.status(403).json({ error: 'You don’t have access to that' });
+  if (code === '22P02') return res.status(404).json({ error: 'Not found' });
+  if (code === '23503') return res.status(409).json({ error: 'That is still linked to other records' });
+  if (code === '23505') return res.status(409).json({ error: 'That name is already used' });
+  if (code === '23514') return res.status(400).json({ error: 'That value isn’t allowed' });
+  res.status(400).json({ error: 'That didn’t work. Please check and try again.' });
 };
 
 const list = (query) => async (req, res) => {
@@ -265,6 +305,12 @@ app.use((req, res, next) => {
     return res.status(400).json({ error: 'Missing tenant' });
   }
   req.db = supabaseFor(req.headers.authorization);
+  next();
+});
+
+// Every :id in this service is a record id, so a bad link gets a clear answer
+app.param('id', (req, res, next, id) => {
+  if (!UUID.test(id)) return res.status(404).json({ error: 'Not found' });
   next();
 });
 
@@ -529,8 +575,8 @@ app.post('/quotes', callCrm('save_quote', (req) => ({
   p_company: optional(req.body.company_id),
   p_issue: parseDate(req.body.issue_date),
   p_valid: parseDate(req.body.valid_until),
-  p_due_days: req.body.due_days === '' || req.body.due_days === undefined ? null : Number(req.body.due_days),
-  p_lines: req.body.line_items,
+  p_due_days: optionalNumber(req.body.due_days),
+  p_lines: parseQuoteLines(req.body.line_items),
   p_notes: req.body.notes || null
 })));
 app.post('/quotes/:id/status', callCrm('set_quote_status', (req) => ({ p_quote: req.params.id, p_status: req.body.status })));
@@ -584,7 +630,7 @@ app.get('/targets', list((req) => crm(req).from('targets')
 app.post('/targets', callCrm('save_targets', (req) => ({
   p_month: parseMonth(req.body.month),
   p_targets: Array.isArray(req.body.targets)
-    ? req.body.targets.map(({ user_id, amount }) => ({ user_id: user_id || null, amount: amount ?? '' }))
+    ? req.body.targets.map(({ user_id, amount }) => ({ user_id: user_id || null, amount: parseTarget(amount) }))
     : []
 })));
 
@@ -684,5 +730,17 @@ app.post('/email-templates', create(templates, '*', (body) => {
 }));
 app.put('/email-templates/:id', update(templates, '*', (body) => ({ ...templateFields(body), updated_at: new Date().toISOString() }), 'Template'));
 app.delete('/email-templates/:id', remove(templates, 'Template'));
+
+app.use((err, req, res, next) => {
+  if (res.headersSent) return next(err);
+  // Bad JSON and too-large bodies are the sender's mistake, not ours
+  if (err.status >= 400 && err.status < 500) {
+    return res.status(err.status).json({ error: err.status === 413 ? 'That is too large to send' : 'That request could not be read' });
+  }
+  console.error('Error:', err);
+  res.status(500).json({ error: 'Internal server error' });
+});
+
+process.on('unhandledRejection', (reason) => console.error('Unhandled rejection:', reason));
 
 app.listen(PORT, () => console.log(`👥 CRM Service running on port ${PORT}`));

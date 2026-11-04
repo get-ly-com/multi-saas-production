@@ -6,6 +6,7 @@ import { monthName } from '@/components/HrForms';
 import HrNav from '@/components/HrNav';
 import Modal from '@/components/Modal';
 import { api, formatDate, money, today } from '@/lib/api';
+import useSubmit from '@/lib/useSubmit';
 
 export default function Payroll() {
   return <AppShell><PayrollApp /></AppShell>;
@@ -102,20 +103,23 @@ function Liabilities() {
     }).catch((err) => setError(err.message));
   }, []);
 
+  const { busy, run } = useSubmit();
   const submit = async (event: FormEvent) => {
     event.preventDefault();
-    if (!window.confirm(`Record ${money(form.amount)} of tax and contributions paid?`)) return;
-    setSaving(true);
-    try {
-      await api.post('/api/hr/liabilities/pay', form);
-      setForm((current) => ({ ...current, memo: '' }));
-      await load();
-      setError('');
-    } catch (err: any) {
-      setError(err.message);
-    } finally {
-      setSaving(false);
-    }
+    return run(async () => {
+      if (!window.confirm(`Record ${money(form.amount)} of tax and contributions paid?`)) return;
+      setSaving(true);
+      try {
+        await api.post('/api/hr/liabilities/pay', form);
+        setForm((current) => ({ ...current, memo: '' }));
+        await load();
+        setError('');
+      } catch (err: any) {
+        setError(err.message);
+      } finally {
+        setSaving(false);
+      }
+    });
   };
 
   const owed = Number(data?.owed || 0);
@@ -141,7 +145,7 @@ function Liabilities() {
               </div>
               {error && <p className="error">{error}</p>}
               <div className="form-actions">
-                <button className="primary" disabled={saving || !form.account_id}>{saving ? 'Saving…' : 'Record payment'}</button>
+                <button className="primary" disabled={busy || saving || !form.account_id}>{saving ? 'Saving…' : 'Record payment'}</button>
               </div>
             </form>
           )}
@@ -169,37 +173,46 @@ function Liabilities() {
   );
 }
 
+// The last day of a YYYY-MM month, as YYYY-MM-DD
+const monthEnd = (month: string) => {
+  if (!/^\d{4}-\d{2}$/.test(month)) return '';
+  const last = new Date(Number(month.slice(0, 4)), Number(month.slice(5, 7)), 0).getDate();
+  return `${month}-${String(last).padStart(2, '0')}`;
+};
+
 function NewRun({ onClose }: { onClose: () => void }) {
   const router = useRouter();
   const now = today();
-  const lastDay = new Date(Number(now.slice(0, 4)), Number(now.slice(5, 7)), 0).getDate();
-  const [form, setForm] = useState({ month: now.slice(0, 7), pay_date: `${now.slice(0, 7)}-${lastDay}` });
+  const [form, setForm] = useState({ month: now.slice(0, 7), pay_date: monthEnd(now.slice(0, 7)) });
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState('');
 
+  const { busy, run } = useSubmit();
   const submit = async (event: FormEvent) => {
     event.preventDefault();
-    setSaving(true);
-    try {
-      const run = await api.post('/api/hr/pay-runs', form);
-      router.push(`/saas/hr/payroll/${run.id}`);
-    } catch (err: any) {
-      setError(err.message);
-      setSaving(false);
-    }
+    return run(async () => {
+      setSaving(true);
+      try {
+        const run = await api.post('/api/hr/pay-runs', form);
+        router.push(`/saas/hr/payroll/${run.id}`);
+      } catch (err: any) {
+        setError(err.message);
+        setSaving(false);
+      }
+    });
   };
 
   return (
-    <Modal title="New pay run">
+    <Modal title="New pay run" onClose={onClose}>
       <form onSubmit={submit}>
         <div className="form-grid">
-          <label>Month<input type="month" required value={form.month} onChange={(e) => setForm({ ...form, month: e.target.value })} /></label>
+          <label>Month<input type="month" required value={form.month} onChange={(e) => setForm({ ...form, month: e.target.value, pay_date: monthEnd(e.target.value) || form.pay_date })} /></label>
           <label>Pay date<input type="date" required value={form.pay_date} onChange={(e) => setForm({ ...form, pay_date: e.target.value })} /></label>
         </div>
         <p className="muted">Everyone employed during the month is included, except contractors. You can check and change it before approving.</p>
         {error && <p className="error">{error}</p>}
         <div className="form-actions">
-          <button className="primary" disabled={saving}>{saving ? 'Working it out…' : 'Create'}</button>
+          <button className="primary" disabled={busy || saving}>{saving ? 'Working it out…' : 'Create'}</button>
           <button type="button" onClick={onClose}>Cancel</button>
         </div>
       </form>

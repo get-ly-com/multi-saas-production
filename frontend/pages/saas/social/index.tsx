@@ -6,7 +6,7 @@ import SocialNav from '@/components/SocialNav';
 import {
   PLATFORMS, PostForm, PostView, formatWhen, memberName, statusClass, statusLabel, toLocalInput
 } from '@/components/SocialForms';
-import { api } from '@/lib/api';
+import { api, isUuid } from '@/lib/api';
 
 export default function Social() {
   return <AppShell><Planner /></AppShell>;
@@ -97,7 +97,7 @@ function Planner() {
   // Opening a post from an alert: /saas/social?post=<id>
   useEffect(() => {
     const postId = router.query.post;
-    if (typeof postId !== 'string') return;
+    if (!isUuid(postId)) return;
     api.get(`/api/social-media/posts/${postId}`).then(setOpen).catch((err) => setError(err.message));
   }, [router.query.post]);
 

@@ -4,6 +4,7 @@ import Modal from '@/components/Modal';
 import { priceText } from '@/components/SchedulerForms';
 import SchedulerNav, { LOCATIONS } from '@/components/SchedulerNav';
 import { api } from '@/lib/api';
+import useSubmit from '@/lib/useSubmit';
 
 export default function Services() {
   return <AppShell><ServiceList /></AppShell>;
@@ -34,14 +35,16 @@ function ServiceList() {
     load();
   }, []);
 
-  const act = async (work: () => Promise<any>) => {
+  const { busy, run: once } = useSubmit();
+  // One action at a time, so a double click cannot repeat it
+  const act = (work: () => Promise<any>) => once(async () => {
     try {
       await work();
       await load();
     } catch (err: any) {
       setError(err.message);
     }
-  };
+  });
 
   const nameOf = (userId: string) => data?.staff.find((row: any) => row.user_id === userId)?.display_name || 'Former team member';
 
@@ -97,20 +100,23 @@ function ServiceForm({ initial, staff, onClose, onSaved }: { initial: any; staff
   const toggle = (userId: string) =>
     set('staff_ids', form.staff_ids.includes(userId) ? form.staff_ids.filter((id: string) => id !== userId) : [...form.staff_ids, userId]);
 
+  const { busy, run } = useSubmit();
   const submit = async (event: FormEvent) => {
     event.preventDefault();
-    try {
-      if (form.id) await api.put(`/api/scheduler/services/${form.id}`, form);
-      else await api.post('/api/scheduler/services', form);
-      await onSaved();
-      onClose();
-    } catch (err: any) {
-      setError(err.message);
-    }
+    return run(async () => {
+      try {
+        if (form.id) await api.put(`/api/scheduler/services/${form.id}`, form);
+        else await api.post('/api/scheduler/services', form);
+        await onSaved();
+        onClose();
+      } catch (err: any) {
+        setError(err.message);
+      }
+    });
   };
 
   return (
-    <Modal title={form.id ? `Edit ${initial.name}` : 'Add a service'}>
+    <Modal title={form.id ? `Edit ${initial.name}` : 'Add a service'} onClose={onClose}>
       <form onSubmit={submit}>
         <div className="form-grid">
           <label>Name<input required maxLength={100} value={form.name} onChange={(e) => set('name', e.target.value)} /></label>
@@ -145,7 +151,7 @@ function ServiceForm({ initial, staff, onClose, onSaved }: { initial: any; staff
         </div>
         {error && <p className="error">{error}</p>}
         <div className="form-actions">
-          <button className="primary">Save</button>
+          <button disabled={busy} className="primary">Save</button>
           <button type="button" onClick={onClose}>Cancel</button>
         </div>
       </form>

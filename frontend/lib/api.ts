@@ -88,3 +88,12 @@ export const today = () => {
   const now = new Date();
   return new Date(now.getTime() - now.getTimezoneOffset() * 60000).toISOString().slice(0, 10);
 };
+
+const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+
+export const isUuid = (value: unknown): value is string => typeof value === 'string' && UUID.test(value);
+
+// An id from the address bar, before it goes into an API path. Anything that isn't an id becomes
+// the empty id, which the API answers with "not found", so it can never reach another path.
+export const queryId = (value: string | string[] | undefined) =>
+  value === undefined ? undefined : isUuid(value) ? value : '00000000-0000-0000-0000-000000000000';

@@ -36,17 +36,30 @@ const saveToken = (key: string, token: string) => {
   }
 };
 
-// Where the visitor is chatting from, without the query string
-const startedOn = () => {
+// Where the visitor is chatting from, without the query string. An embed snippet passes the
+// host page as ?page=, which is more exact than the referrer (often cut to the bare origin).
+const startedOn = (given?: string) => {
+  const clean = (source: string) => {
+    const url = new URL(source);
+    if (url.protocol !== 'http:' && url.protocol !== 'https:') return '';
+    return `${url.origin}${url.pathname}`.slice(0, 500);
+  };
+  try {
+    if (given) return clean(given);
+  } catch {
+    // Not a usable address, so fall back to what the browser says
+  }
   try {
     const source = window.self !== window.top ? document.referrer : window.location.href;
-    if (!source) return '';
-    const url = new URL(source);
-    return `${url.origin}${url.pathname}`.slice(0, 500);
+    return source ? clean(source) : '';
   } catch {
     return '';
   }
 };
+
+// The saved chat is gone (ended, removed or never real), so a fresh one is needed
+const chatGone = (err: any) =>
+  err?.status === 404 || (err?.status === 400 && /not available|not found/i.test(err?.message || ''));
 
 const post = async (path: string, body: unknown) => {
   const response = await fetch(`${BASE_URL}${path}`, {
@@ -69,6 +82,7 @@ export default function PublicChat() {
   const router = useRouter();
   const key = typeof router.query.key === 'string' ? router.query.key : '';
   const embedded = router.query.embed === '1';
+  const hostPage = typeof router.query.page === 'string' ? router.query.page : '';
   const [info, setInfo] = useState<Info | null>(null);
   const [closed, setClosed] = useState(false);
   const [token, setToken] = useState('');
@@ -102,6 +116,17 @@ export default function PublicChat() {
     lastId.current = Math.max(...fresh.map((m) => m.id));
     setMessages((current) => [...current, ...fresh]);
   }, []);
+
+  // Forget the saved chat and go back to the start, keeping whatever the visitor typed
+  const reset = useCallback(() => {
+    saveToken(key, '');
+    setToken('');
+    setState(null);
+    setMessages([]);
+    lastId.current = 0;
+    setRating(0);
+    setComment('');
+  }, [key]);
 
   useEffect(() => {
     if (!key) return;
@@ -139,8 +164,8 @@ export default function PublicChat() {
           take(await post(`${base}/poll`, { token, after: lastId.current }));
         } catch (err: any) {
           if (err.status === 404 || err.status === 400) {
-            setError('This chat is no longer available.');
-            saveToken(key, '');
+            reset();
+            setError('That chat has ended. Send a message to start a new one.');
             return;
           }
         }
@@ -161,7 +186,7 @@ export default function PublicChat() {
       window.clearTimeout(timer);
       document.removeEventListener('visibilitychange', wake);
     };
-  }, [token, base, take]);
+  }, [token, base, take, reset]);
 
   useEffect(() => {
     bottom.current?.scrollIntoView({ block: 'end' });
@@ -174,7 +199,12 @@ export default function PublicChat() {
     try {
       await work();
     } catch (err: any) {
-      setError(err.message);
+      if (token && chatGone(err)) {
+        reset();
+        setError('That chat has ended. Send your message again to start a new one.');
+      } else {
+        setError(err.message);
+      }
     } finally {
       setBusy(false);
     }
@@ -187,7 +217,7 @@ export default function PublicChat() {
     run(async () => {
       let current = token;
       if (!current) {
-        const started = await post(`${base}/start`, { name: name.trim(), page: startedOn(), campaign: campaignFromUrl(), website });
+        const started = await post(`${base}/start`, { name: name.trim(), page: startedOn(hostPage), campaign: campaignFromUrl(), website });
         current = started.token;
         saveToken(key, current);
         setToken(current);
@@ -224,7 +254,7 @@ export default function PublicChat() {
   const askPerson = () => run(async () => {
     let current = token;
     if (!current) {
-      const started = await post(`${base}/start`, { name: name.trim(), page: startedOn(), campaign: campaignFromUrl(), website });
+      const started = await post(`${base}/start`, { name: name.trim(), page: startedOn(hostPage), campaign: campaignFromUrl(), website });
       current = started.token;
       saveToken(key, current);
       setToken(current);

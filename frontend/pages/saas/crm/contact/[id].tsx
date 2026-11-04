@@ -8,7 +8,8 @@ import { TagChips, useTags } from '@/components/Tags';
 import { ContactForm, DealForm } from '@/components/CrmForms';
 import { CustomValues } from '@/components/CustomFields';
 import Timeline from '@/components/Timeline';
-import { api, money } from '@/lib/api';
+import { api, money, queryId } from '@/lib/api';
+import useSubmit from '@/lib/useSubmit';
 
 export default function Contact() {
   return <AppShell><ContactApp /></AppShell>;
@@ -16,7 +17,7 @@ export default function Contact() {
 
 function ContactApp() {
   const router = useRouter();
-  const id = router.query.id as string | undefined;
+  const id = queryId(router.query.id);
   const [contact, setContact] = useState<any>(null);
   const [deals, setDeals] = useState<any[]>([]);
   const [error, setError] = useState('');
@@ -39,7 +40,8 @@ function ContactApp() {
     if (id) load();
   }, [id]);
 
-  const remove = async () => {
+  const { busy, run: once } = useSubmit();
+  const remove = () => once(async () => {
     if (!window.confirm(`Delete ${contact.name}? Their deals and timeline stay.`)) return;
     try {
       await api.delete(`/api/crm/contacts/${id}`);
@@ -47,7 +49,7 @@ function ContactApp() {
     } catch (err: any) {
       setError(err.message);
     }
-  };
+  });
 
   return (
     <div className="stack">
@@ -68,7 +70,7 @@ function ContactApp() {
             <div className="row-actions">
               <button onClick={() => setAdding(true)}>New deal</button>
               <button onClick={() => setEditing(true)}>Edit</button>
-              <button className="danger" onClick={remove}>Delete</button>
+              <button disabled={busy} className="danger" onClick={remove}>Delete</button>
             </div>
           </div>
           {contact.notes && <div className="card wrap">{contact.notes}</div>}

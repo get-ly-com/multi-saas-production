@@ -1,6 +1,7 @@
 import { FormEvent, useEffect, useState } from 'react';
 import { useTeam } from '@/components/CrmForms';
 import { api } from '@/lib/api';
+import useSubmit from '@/lib/useSubmit';
 
 const RULE_KINDS = [
   { id: 'email', name: 'Has an email' },
@@ -41,19 +42,22 @@ export default function LeadSettings() {
   const toggle = (id: string) =>
     set('assignees', settings.assignees.includes(id) ? settings.assignees.filter((user: string) => user !== id) : [...settings.assignees, id]);
 
+  const { busy, run } = useSubmit();
   const save = async (event: FormEvent) => {
     event.preventDefault();
-    try {
-      await api.post('/api/crm/lead-settings', settings);
-      setNotice('Lead settings saved. Open leads have been scored again.');
-      await load();
-    } catch (err: any) {
-      setNotice('');
-      setError(err.message);
-    }
+    return run(async () => {
+      try {
+        await api.post('/api/crm/lead-settings', settings);
+        setNotice('Lead settings saved. Open leads have been scored again.');
+        await load();
+      } catch (err: any) {
+        setNotice('');
+        setError(err.message);
+      }
+    });
   };
 
-  const newKey = async () => {
+  const newKey = () => run(async () => {
     if (!window.confirm('Create a new form address? The old address stops working, including on your website.')) return;
     try {
       await api.post('/api/crm/lead-settings/form-key', {});
@@ -62,12 +66,16 @@ export default function LeadSettings() {
     } catch (err: any) {
       setError(err.message);
     }
-  };
+  });
 
   if (!settings) return error ? <p className="error">{error}</p> : null;
 
   const address = `${origin}/form/${settings.form_key}`;
-  const embed = `<iframe src="${address}" title="Contact form" style="width:100%;height:620px;border:0"></iframe>`;
+  // A tiny script writes the form so the campaign (utm_campaign) in the host page's link reaches it;
+  // browsers usually hide the rest of that link from an embedded page
+  const embed = `<!-- Contact form -->
+<script>(function(s){var c=new URLSearchParams(location.search).get('utm_campaign'),f=document.createElement('iframe');f.src='${address}'+(c?'?utm_campaign='+encodeURIComponent(c):'');f.title='Contact form';f.style.cssText='width:100%;height:620px;border:0';s.parentNode.insertBefore(f,s)})(document.currentScript);</script>
+<noscript><iframe src="${address}" title="Contact form" style="width:100%;height:620px;border:0"></iframe></noscript>`;
 
   return (
     <form className="stack" onSubmit={save}>
@@ -116,11 +124,11 @@ export default function LeadSettings() {
           <label>Thank you message<input required maxLength={500} value={settings.form_thanks} onChange={(e) => set('form_thanks', e.target.value)} /></label>
         </div>
         <label>Form address<input readOnly value={address} onFocus={(e) => e.target.select()} /></label>
-        <label>Code for your website<textarea readOnly rows={3} value={embed} onFocus={(e) => e.target.select()} /></label>
-        <div><button type="button" onClick={newKey}>New form address</button></div>
+        <label>Code for your website<textarea readOnly rows={5} value={embed} onFocus={(e) => e.target.select()} /></label>
+        <div><button disabled={busy} type="button" onClick={newKey}>New form address</button></div>
       </div>
 
-      <div><button className="primary">Save lead settings</button></div>
+      <div><button disabled={busy} className="primary">Save lead settings</button></div>
     </form>
   );
 }

@@ -3,6 +3,7 @@ import AccountingNav from '@/components/AccountingNav';
 import AppShell from '@/components/AppShell';
 import Modal from '@/components/Modal';
 import { api } from '@/lib/api';
+import useSubmit from '@/lib/useSubmit';
 
 export default function Taxes() {
   return <AppShell><TaxesApp /></AppShell>;
@@ -83,19 +84,22 @@ function RateForm({ onClose, onSaved }: { onClose: () => void; onSaved: () => vo
   const [error, setError] = useState('');
   const set = (field: string, value: string) => setForm({ ...form, [field]: value });
 
+  const { busy, run } = useSubmit();
   const submit = async (event: FormEvent) => {
     event.preventDefault();
-    try {
-      await api.post('/api/accounting/tax-rates', form);
-      await onSaved();
-      onClose();
-    } catch (err: any) {
-      setError(err.message);
-    }
+    return run(async () => {
+      try {
+        await api.post('/api/accounting/tax-rates', form);
+        await onSaved();
+        onClose();
+      } catch (err: any) {
+        setError(err.message);
+      }
+    });
   };
 
   return (
-    <Modal title="New tax rate">
+    <Modal title="New tax rate" onClose={onClose}>
       <form onSubmit={submit}>
         <div className="form-grid">
           <label>Name<input required value={form.name} onChange={(e) => set('name', e.target.value)} /></label>
@@ -103,7 +107,7 @@ function RateForm({ onClose, onSaved }: { onClose: () => void; onSaved: () => vo
         </div>
         {error && <p className="error">{error}</p>}
         <div className="form-actions">
-          <button className="primary">Save</button>
+          <button disabled={busy} className="primary">Save</button>
           <button type="button" onClick={onClose}>Cancel</button>
         </div>
       </form>

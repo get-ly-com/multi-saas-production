@@ -27,7 +27,9 @@ const SECRET_PATHS = /^(\/api\/hooks\/in\/|\/api\/book\/feed\/|\/api\/book\/canc
 const safePath = (path) => path.replace(SECRET_PATHS, '$1[hidden]');
 morgan.token('safe-url', (req) => safePath(req.originalUrl || req.url));
 app.use(morgan(':remote-addr - :remote-user [:date[clf]] ":method :safe-url HTTP/:http-version" :status :res[content-length] ":referrer" ":user-agent"'));
-app.use(rateLimit({ windowMs: 60 * 1000, limit: 300, standardHeaders: true, legacyHeaders: false }));
+// Per address. A whole office shares one address, and the inbox and alerts check in every few seconds,
+// so this leaves room for a team of about 40 people.
+app.use(rateLimit({ windowMs: 60 * 1000, limit: 1200, standardHeaders: true, legacyHeaders: false }));
 
 // Request logging
 app.use((req, res, next) => {
@@ -48,6 +50,7 @@ const AUTH_URL = `${(process.env.SUPABASE_URL || '').replace(/\/+$/, '')}/auth/v
 const JWKS_URL = `${AUTH_URL}/.well-known/jwks.json`;
 const ISSUER = AUTH_URL;
 let signingKeys = { at: 0, keys: new Map() };
+let lastForcedKeyLoad = 0;
 
 const loadSigningKeys = async (force = false) => {
   if (!force && Date.now() - signingKeys.at < 10 * 60 * 1000) return signingKeys.keys;
@@ -76,10 +79,15 @@ const verifyLocally = async (token) => {
   } catch {
     return undefined;
   }
+  if (!header || typeof header !== 'object' || !claims || typeof claims !== 'object') return undefined;
   if (header.alg !== 'ES256' || !header.kid) return undefined;
 
   let keys = await loadSigningKeys().catch(() => null);
-  if (keys && !keys.has(header.kid)) keys = await loadSigningKeys(true).catch(() => null);
+  // An unknown key id fetches the keys again at most once a minute, so made-up ids can't flood the auth server
+  if (keys && !keys.has(header.kid) && Date.now() - lastForcedKeyLoad > 60 * 1000) {
+    lastForcedKeyLoad = Date.now();
+    keys = await loadSigningKeys(true).catch(() => null);
+  }
   const key = keys?.get(header.kid);
   if (!key) return undefined;
 
@@ -255,7 +263,8 @@ app.post('/api/forms/:key', formLimit, express.json({ limit: '16kb' }), async (r
       campaign: typeof req.body?.campaign === 'string' ? req.body.campaign.slice(0, 100) : undefined
     }
   });
-  if (error) return res.status(400).json({ error: error.message });
+  // Only the form's own messages go back to visitors, never database details
+  if (error) return res.status(400).json({ error: error.code === 'P0001' ? error.message : 'Could not send the form. Please try again.' });
   res.status(201).json(data);
 });
 
@@ -664,6 +673,8 @@ serviceRoutes.forEach(({ path, service, port }) => {
   const serviceUrl = `http://${serviceHost(service)}:${port}`;
 
   app.use(path, requireUser, requireTenant, httpProxy(serviceUrl, {
+    // Bank and contact imports can be up to 2 MB
+    limit: '2mb',
     proxyReqPathResolver: (req) => req.url,
     proxyReqOptDecorator: (proxyReqOpts, req) => {
       proxyReqOpts.headers['x-tenant-id'] = req.tenantId;
@@ -671,16 +682,14 @@ serviceRoutes.forEach(({ path, service, port }) => {
       return proxyReqOpts;
     },
     proxyErrorHandler: (err, res, next) => {
+      if (err.type === 'entity.too.large' || err.status === 413) {
+        return res.status(413).json({ error: 'That is too large to send. Split it into smaller parts.' });
+      }
       console.error(`[ERROR] ${service}: ${err.message}`);
       res.status(503).json({ error: `${service} unavailable` });
     }
   }));
 });
-
-// WebSocket proxy (if needed)
-app.use('/ws', requireUser, requireTenant, httpProxy(`http://${serviceHost('websocket-service')}:3009`, {
-  ws: true
-}));
 
 // Health checks
 app.get('/health', (req, res) => {
@@ -720,6 +729,10 @@ app.use((req, res) => {
 
 // Error handler
 app.use((err, req, res, next) => {
+  // Bad JSON and too-large bodies are the sender's mistake, not ours
+  if (err.status >= 400 && err.status < 500) {
+    return res.status(err.status).json({ error: err.status === 413 ? 'That is too large to send' : 'That request could not be read' });
+  }
   console.error('[ERROR]', err);
   res.status(500).json({ error: 'Internal server error' });
 });

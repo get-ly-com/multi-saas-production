@@ -4,6 +4,7 @@ import Modal from '@/components/Modal';
 import SocialNav from '@/components/SocialNav';
 import { PLATFORMS } from '@/components/SocialForms';
 import { api } from '@/lib/api';
+import useSubmit from '@/lib/useSubmit';
 
 export default function SocialAccounts() {
   return <AppShell><Accounts /></AppShell>;
@@ -32,14 +33,16 @@ function Accounts() {
     load();
   }, []);
 
-  const act = async (work: () => Promise<any>) => {
+  const { busy, run: once } = useSubmit();
+  // One action at a time, so a double click cannot repeat it
+  const act = (work: () => Promise<any>) => once(async () => {
     try {
       await work();
       await load();
     } catch (err: any) {
       setError(err.message);
     }
-  };
+  });
 
   return (
     <div className="stack">
@@ -90,21 +93,24 @@ function AccountForm({ initial, onClose, onSaved }: { initial: any; onClose: () 
   const [error, setError] = useState('');
   const set = (field: string, value: string) => setForm({ ...form, [field]: value });
 
+  const { busy, run } = useSubmit();
   const submit = async (event: FormEvent) => {
     event.preventDefault();
-    try {
-      const body = { platform: form.platform, handle: form.handle, profile_url: form.profile_url };
-      if (form.id) await api.put(`/api/social-media/accounts/${form.id}`, body);
-      else await api.post('/api/social-media/accounts', body);
-      await onSaved();
-      onClose();
-    } catch (err: any) {
-      setError(err.message);
-    }
+    return run(async () => {
+      try {
+        const body = { platform: form.platform, handle: form.handle, profile_url: form.profile_url };
+        if (form.id) await api.put(`/api/social-media/accounts/${form.id}`, body);
+        else await api.post('/api/social-media/accounts', body);
+        await onSaved();
+        onClose();
+      } catch (err: any) {
+        setError(err.message);
+      }
+    });
   };
 
   return (
-    <Modal title={form.id ? 'Edit account' : 'Add account'}>
+    <Modal title={form.id ? 'Edit account' : 'Add account'} onClose={onClose}>
       <form onSubmit={submit}>
         <div className="form-grid">
           <label>Platform
@@ -117,7 +123,7 @@ function AccountForm({ initial, onClose, onSaved }: { initial: any; onClose: () 
         </div>
         {error && <p className="error">{error}</p>}
         <div className="form-actions">
-          <button className="primary" type="submit">Save</button>
+          <button disabled={busy} className="primary" type="submit">Save</button>
           <button type="button" onClick={onClose}>Cancel</button>
         </div>
       </form>

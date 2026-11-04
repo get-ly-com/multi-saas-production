@@ -3,6 +3,7 @@ import Modal from '@/components/Modal';
 import { fullName } from '@/components/HrForms';
 import { api, formatDate, today } from '@/lib/api';
 import { getSupabase } from '@/lib/supabase';
+import useSubmit from '@/lib/useSubmit';
 
 // Shared pieces for attendance, expense claims and onboarding/offboarding checklists
 
@@ -56,31 +57,34 @@ export function TimeEntryForm({ entry, employeeId, onClose, onSaved }: {
   const [error, setError] = useState('');
   const set = (field: string, value: string) => setForm({ ...form, [field]: value });
 
+  const { busy, run } = useSubmit();
   const submit = async (event: FormEvent) => {
     event.preventDefault();
-    const body = {
-      employee_id: employeeId,
-      check_in: new Date(form.check_in).toISOString(),
-      check_out: form.check_out ? new Date(form.check_out).toISOString() : null,
-      break_minutes: form.break_minutes || 0,
-      work_date: form.check_in.slice(0, 10),
-      note: form.note,
-      tz: timeZone()
-    };
-    try {
-      if (entry?.id) await api.put(`/api/hr/attendance/${entry.id}`, body);
-      else await api.post('/api/hr/attendance', body);
-      await onSaved();
-      onClose();
-    } catch (err: any) {
-      setError(err.message);
-    }
+    return run(async () => {
+      const body = {
+        employee_id: employeeId,
+        check_in: new Date(form.check_in).toISOString(),
+        check_out: form.check_out ? new Date(form.check_out).toISOString() : null,
+        break_minutes: form.break_minutes || 0,
+        work_date: form.check_in.slice(0, 10),
+        note: form.note,
+        tz: timeZone()
+      };
+      try {
+        if (entry?.id) await api.put(`/api/hr/attendance/${entry.id}`, body);
+        else await api.post('/api/hr/attendance', body);
+        await onSaved();
+        onClose();
+      } catch (err: any) {
+        setError(err.message);
+      }
+    });
   };
 
   const minutes = form.check_out ? (Date.parse(form.check_out) - Date.parse(form.check_in)) / 60000 - Number(form.break_minutes || 0) : 0;
 
   return (
-    <Modal title={entry?.id ? 'Change time' : 'Add time'}>
+    <Modal title={entry?.id ? 'Change time' : 'Add time'} onClose={onClose}>
       <form onSubmit={submit}>
         <div className="form-grid">
           <label>In<input type="datetime-local" required value={form.check_in} onChange={(e) => set('check_in', e.target.value)} /></label>
@@ -92,7 +96,7 @@ export function TimeEntryForm({ entry, employeeId, onClose, onSaved }: {
         <p className="muted">Leave Out empty if they're still at work. Approved time can only be changed by an owner or admin.</p>
         {error && <p className="error">{error}</p>}
         <div className="form-actions">
-          <button className="primary always">Save</button>
+          <button disabled={busy} className="primary always">Save</button>
           <button type="button" onClick={onClose}>Cancel</button>
         </div>
       </form>
@@ -107,10 +111,19 @@ const extensionOf = (name: string) => (name.includes('.') ? name.split('.').pop(
 const safeFileName = (name: string) =>
   name.normalize('NFKD').replace(/[^A-Za-z0-9._-]+/g, '-').replace(/-+/g, '-').replace(/^[-.]+/, '').slice(-100) || 'receipt';
 
+// Call straight from a click: the tab opens before the wait for the link, so the browser doesn't block it
 export const openReceipt = async (path: string) => {
-  const { data, error } = await getSupabase().storage.from(RECEIPT_BUCKET).createSignedUrl(path, 60);
-  if (error || !data?.signedUrl) throw new Error('That receipt couldn’t be opened. Please try again.');
-  window.open(data.signedUrl, '_blank', 'noopener');
+  const tab = window.open('', '_blank');
+  if (tab) tab.opener = null;
+  try {
+    const { data, error } = await getSupabase().storage.from(RECEIPT_BUCKET).createSignedUrl(path, 60);
+    if (error || !data?.signedUrl) throw new Error('That receipt couldn’t be opened. Please try again.');
+    if (tab) tab.location.href = data.signedUrl;
+    else window.open(data.signedUrl, '_blank', 'noopener');
+  } catch (err) {
+    tab?.close();
+    throw err;
+  }
 };
 
 export function ExpenseForm({ people, me, categories, tenantId, onClose, onSaved }: {
@@ -163,7 +176,7 @@ export function ExpenseForm({ people, me, categories, tenantId, onClose, onSaved
   };
 
   return (
-    <Modal title="New expense claim">
+    <Modal title="New expense claim" onClose={onClose}>
       <form onSubmit={submit}>
         <div className="form-grid">
           {people.length > 1 && (
@@ -223,7 +236,9 @@ export function EmployeeChecklists({ employee, manager, isMe, isTheirManager }: 
     }).catch(() => setTemplates([]));
   }, [employee.id, manager]);
 
-  const run = async (work: () => Promise<unknown>) => {
+  const { busy, run: once } = useSubmit();
+  // One action at a time, so a double click cannot repeat it
+  const run = (work: () => Promise<unknown>) => once(async () => {
     setError('');
     try {
       await work();
@@ -233,7 +248,7 @@ export function EmployeeChecklists({ employee, manager, isMe, isTheirManager }: 
       setError(err.message);
       return false;
     }
-  };
+  });
 
   const canTick = (task: any) => manager || (task.who === 'employee' && isMe) || (task.who === 'manager' && isTheirManager);
   if (tasks === null && !error) return null;
@@ -297,7 +312,7 @@ export function EmployeeChecklists({ employee, manager, isMe, isTheirManager }: 
             <select aria-label="Who" value={adding.who} onChange={(e) => setAdding({ ...adding, who: e.target.value })}>
               {Object.entries(WHO).map(([value, label]) => <option key={value} value={value}>{label === 'Them' ? 'The person' : label}</option>)}
             </select>
-            <button>Add</button>
+            <button disabled={busy}>Add</button>
           </form>
           <p className="muted">Steps are due counting from the start date (onboarding) or the last day (offboarding). Whoever does a step gets an alert on the day it&apos;s due.</p>
         </>

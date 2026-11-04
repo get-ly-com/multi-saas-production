@@ -5,6 +5,7 @@ import AppShell from '@/components/AppShell';
 import InventoryNav from '@/components/InventoryNav';
 import Modal from '@/components/Modal';
 import { api, formatDate, money } from '@/lib/api';
+import useSubmit from '@/lib/useSubmit';
 
 export default function Counts() {
   return <AppShell><CountsApp /></AppShell>;
@@ -76,18 +77,21 @@ function StartForm({ places, categories, onClose }: { places: any[]; categories:
   const [note, setNote] = useState('');
   const [error, setError] = useState('');
 
+  const { busy, run } = useSubmit();
   const submit = async (event: FormEvent) => {
     event.preventDefault();
-    try {
-      const { id } = await api.post('/api/inventory/counts', { location_id: location, category_id: category, note });
-      router.push(`/saas/inventory/counts/${id}`);
-    } catch (err: any) {
-      setError(err.message);
-    }
+    return run(async () => {
+      try {
+        const { id } = await api.post('/api/inventory/counts', { location_id: location, category_id: category, note });
+        router.push(`/saas/inventory/counts/${id}`);
+      } catch (err: any) {
+        setError(err.message);
+      }
+    });
   };
 
   return (
-    <Modal title="Start a count">
+    <Modal title="Start a count" onClose={onClose}>
       <form onSubmit={submit}>
         <div className="form-grid">
           <label>Where
@@ -105,7 +109,7 @@ function StartForm({ places, categories, onClose }: { places: any[]; categories:
         </div>
         {error && <p className="error">{error}</p>}
         <div className="form-actions">
-          <button className="primary">Start</button>
+          <button disabled={busy} className="primary">Start</button>
           <button type="button" onClick={onClose}>Cancel</button>
         </div>
       </form>

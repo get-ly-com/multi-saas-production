@@ -1,6 +1,7 @@
 import { FormEvent, useEffect, useState } from 'react';
 import Modal from '@/components/Modal';
 import { api, money, today } from '@/lib/api';
+import useSubmit from '@/lib/useSubmit';
 
 type Props = {
   target: { invoice_id?: string; bill_id?: string };
@@ -37,19 +38,22 @@ export default function PaymentForm({ target, label, balance, currency, onClose,
       .catch((err) => setError(err.message));
   }, []);
 
+  const { busy, run } = useSubmit();
   const submit = async (event: FormEvent) => {
     event.preventDefault();
-    try {
-      await api.post('/api/accounting/payments', { ...target, ...form });
-      await onSaved();
-      onClose();
-    } catch (err: any) {
-      setError(err.message);
-    }
+    return run(async () => {
+      try {
+        await api.post('/api/accounting/payments', { ...target, ...form });
+        await onSaved();
+        onClose();
+      } catch (err: any) {
+        setError(err.message);
+      }
+    });
   };
 
   return (
-    <Modal title={`Record payment for ${label}`}>
+    <Modal title={`Record payment for ${label}`} onClose={onClose}>
       <form onSubmit={submit}>
         <p className="muted">Balance {money(balance, currency)}</p>
         <div className="form-grid">
@@ -69,7 +73,7 @@ export default function PaymentForm({ target, label, balance, currency, onClose,
         </div>
         {error && <p className="error">{error}</p>}
         <div className="form-actions">
-          <button className="primary">Record payment</button>
+          <button disabled={busy} className="primary">Record payment</button>
           <button type="button" onClick={onClose}>Cancel</button>
         </div>
       </form>

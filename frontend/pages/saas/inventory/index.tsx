@@ -3,6 +3,7 @@ import AppShell from '@/components/AppShell';
 import InventoryNav from '@/components/InventoryNav';
 import Modal from '@/components/Modal';
 import { api, formatDate, money } from '@/lib/api';
+import useSubmit from '@/lib/useSubmit';
 
 const blankItem = {
   sku: '', name: '', barcode: '', unit: 'units', category_id: '', vendor_id: '',
@@ -72,7 +73,7 @@ function InventoryApp() {
     load();
   }, []);
 
-  const remove = async (item: any) => {
+  const remove = (item: any) => run(async () => {
     if (!window.confirm(`Delete ${item.name} and its history? This can't be undone.`)) return;
     try {
       await api.delete(`/api/inventory/items/${item.id}`);
@@ -80,20 +81,23 @@ function InventoryApp() {
     } catch (err: any) {
       setError(err.message);
     }
-  };
+  });
 
   // Scanners type the code and press Enter
+  const { busy, run } = useSubmit();
   const lookUp = async (event: FormEvent) => {
     event.preventDefault();
-    const code = scan.trim();
-    if (!code) return;
-    try {
-      setFound(await api.get(`/api/inventory/items/lookup?code=${encodeURIComponent(code)}`));
-      setScan('');
-      setError('');
-    } catch (err: any) {
-      setError(err.message);
-    }
+    return run(async () => {
+      const code = scan.trim();
+      if (!code) return;
+      try {
+        setFound(await api.get(`/api/inventory/items/lookup?code=${encodeURIComponent(code)}`));
+        setScan('');
+        setError('');
+      } catch (err: any) {
+        setError(err.message);
+      }
+    });
   };
 
   const editForm = (item: any) => ({
@@ -203,7 +207,7 @@ function InventoryApp() {
                         <button onClick={() => setCosting(item)}>Set cost</button>
                         <button onClick={() => setHistory(item)}>History</button>
                         <button onClick={() => setItemForm(editForm(item))}>Edit</button>
-                        <button className="danger" onClick={() => remove(item)}>Delete</button>
+                        <button disabled={busy} className="danger" onClick={() => remove(item)}>Delete</button>
                       </div>
                     </td>
                   </tr>
@@ -238,22 +242,25 @@ function ItemForm({ initial, categories, suppliers, places, onClose, onSaved }: 
   const [error, setError] = useState('');
   const set = (field: string, value: string) => setForm({ ...form, [field]: value });
 
+  const { busy, run } = useSubmit();
   const submit = async (event: FormEvent) => {
     event.preventDefault();
-    const { sku, name, barcode, unit, category_id, vendor_id, quantity, unit_cost, location_id, price, reorder_level, reorder_to } = form;
-    const details = { sku, name, barcode, unit, category_id, vendor_id, price, reorder_level, reorder_to };
-    try {
-      if (form.id) await api.put(`/api/inventory/items/${form.id}`, details);
-      else await api.post('/api/inventory/items', { ...details, quantity, unit_cost, location_id });
-      await onSaved();
-      onClose();
-    } catch (err: any) {
-      setError(err.message);
-    }
+    return run(async () => {
+      const { sku, name, barcode, unit, category_id, vendor_id, quantity, unit_cost, location_id, price, reorder_level, reorder_to } = form;
+      const details = { sku, name, barcode, unit, category_id, vendor_id, price, reorder_level, reorder_to };
+      try {
+        if (form.id) await api.put(`/api/inventory/items/${form.id}`, details);
+        else await api.post('/api/inventory/items', { ...details, quantity, unit_cost, location_id });
+        await onSaved();
+        onClose();
+      } catch (err: any) {
+        setError(err.message);
+      }
+    });
   };
 
   return (
-    <Modal title={form.id ? 'Edit item' : 'New item'}>
+    <Modal title={form.id ? 'Edit item' : 'New item'} onClose={onClose}>
       <form onSubmit={submit}>
         <div className="form-grid">
           <label>SKU<input required maxLength={100} value={form.sku} onChange={(e) => set('sku', e.target.value)} /></label>
@@ -301,7 +308,7 @@ function ItemForm({ initial, categories, suppliers, places, onClose, onSaved }: 
         )}
         {error && <p className="error">{error}</p>}
         <div className="form-actions">
-          <button className="primary">Save</button>
+          <button disabled={busy} className="primary">Save</button>
           <button type="button" onClick={onClose}>Cancel</button>
         </div>
       </form>
@@ -322,19 +329,22 @@ function AdjustForm({ item, places, onClose, onSaved }: { item: any; places: any
     : item.quantity + Number(change) === 0 ? -Number(item.stock_value) : (Number(item.stock_value) * Number(change)) / (item.quantity || 1);
   const choosable = places.filter((row) => row.active || levelAt(item, row.id) > 0);
 
+  const { busy, run } = useSubmit();
   const submit = async (event: FormEvent) => {
     event.preventDefault();
-    try {
-      await api.post(`/api/inventory/items/${item.id}/adjust`, { change, reason, unit_cost: adding ? unitCostValue : '', location_id: place });
-      await onSaved();
-      onClose();
-    } catch (err: any) {
-      setError(err.message);
-    }
+    return run(async () => {
+      try {
+        await api.post(`/api/inventory/items/${item.id}/adjust`, { change, reason, unit_cost: adding ? unitCostValue : '', location_id: place });
+        await onSaved();
+        onClose();
+      } catch (err: any) {
+        setError(err.message);
+      }
+    });
   };
 
   return (
-    <Modal title={`Adjust ${item.name}`}>
+    <Modal title={`Adjust ${item.name}`} onClose={onClose}>
       <p>On hand: {item.quantity} {item.unit}{Number(item.stock_value) > 0 && `, worth ${money(item.stock_value)}`}</p>
       {places.length > 1 && <PlaceBreakdown item={item} places={places} />}
       <p className="muted">
@@ -362,7 +372,7 @@ function AdjustForm({ item, places, onClose, onSaved }: { item: any; places: any
         )}
         {error && <p className="error">{error}</p>}
         <div className="form-actions">
-          <button className="primary">Save</button>
+          <button disabled={busy} className="primary">Save</button>
           <button type="button" onClick={onClose}>Cancel</button>
         </div>
       </form>
@@ -386,19 +396,22 @@ function CostForm({ item, onClose, onSaved }: { item: any; onClose: () => void; 
   const newValue = Math.round(item.quantity * Number(cost || 0) * 100) / 100;
   const difference = newValue - Number(item.stock_value);
 
+  const { busy, run } = useSubmit();
   const submit = async (event: FormEvent) => {
     event.preventDefault();
-    try {
-      await api.post(`/api/inventory/items/${item.id}/cost`, { unit_cost: cost });
-      await onSaved();
-      onClose();
-    } catch (err: any) {
-      setError(err.message);
-    }
+    return run(async () => {
+      try {
+        await api.post(`/api/inventory/items/${item.id}/cost`, { unit_cost: cost });
+        await onSaved();
+        onClose();
+      } catch (err: any) {
+        setError(err.message);
+      }
+    });
   };
 
   return (
-    <Modal title={`Set cost of ${item.name}`}>
+    <Modal title={`Set cost of ${item.name}`} onClose={onClose}>
       <p className="muted">
         For stock you had before costs were tracked, or a cost that was wrong. The {item.quantity} on hand will be valued at this cost,
         and the difference goes to Owner's Equity. Only owners and admins can do this.
@@ -412,7 +425,7 @@ function CostForm({ item, onClose, onSaved }: { item: any; onClose: () => void; 
         )}
         {error && <p className="error">{error}</p>}
         <div className="form-actions">
-          <button className="primary">Set cost</button>
+          <button disabled={busy} className="primary">Set cost</button>
           <button type="button" onClick={onClose}>Cancel</button>
         </div>
       </form>
@@ -429,7 +442,7 @@ function History({ item, onClose }: { item: any; onClose: () => void }) {
   }, []);
 
   return (
-    <Modal title={`History for ${item.name}`}>
+    <Modal title={`History for ${item.name}`} onClose={onClose}>
       {error && <p className="error">{error}</p>}
       {rows && rows.length === 0 && <p className="empty">No stock changes yet</p>}
       {rows && rows.length > 0 && (
@@ -459,7 +472,7 @@ function Found({ item, places, onClose, onAdjust, onHistory }: {
   item: any; places: any[]; onClose: () => void; onAdjust: () => void; onHistory: () => void;
 }) {
   return (
-    <Modal title={item.name}>
+    <Modal title={item.name} onClose={onClose}>
       <div className="facts">
         <div><div className="stat-label">SKU</div>{item.sku}</div>
         <div><div className="stat-label">Barcode</div>{item.barcode || '—'}</div>
@@ -482,7 +495,9 @@ function Categories({ rows, onClose, onSaved }: { rows: any[]; onClose: () => vo
   const [editing, setEditing] = useState<any>(null);
   const [error, setError] = useState('');
 
-  const run = async (action: () => Promise<unknown>) => {
+  const { busy, run: once } = useSubmit();
+  // One action at a time, so a double click cannot repeat it
+  const run = (action: () => Promise<unknown>) => once(async () => {
     try {
       await action();
       await onSaved();
@@ -492,7 +507,7 @@ function Categories({ rows, onClose, onSaved }: { rows: any[]; onClose: () => vo
       setError(err.message);
       return false;
     }
-  };
+  });
 
   const add = async (event: FormEvent) => {
     event.preventDefault();
@@ -510,10 +525,10 @@ function Categories({ rows, onClose, onSaved }: { rows: any[]; onClose: () => vo
   };
 
   return (
-    <Modal title="Categories">
+    <Modal title="Categories" onClose={() => setEditing(null)}>
       <form className="report-filters" onSubmit={add}>
         <label>New category<input required maxLength={80} value={name} onChange={(e) => setName(e.target.value)} /></label>
-        <div className="form-actions"><button className="primary">Add</button></div>
+        <div className="form-actions"><button disabled={busy} className="primary">Add</button></div>
       </form>
       {error && <p className="error">{error}</p>}
       {rows.length === 0 ? <p className="empty">No categories yet</p> : (
@@ -526,7 +541,7 @@ function Categories({ rows, onClose, onSaved }: { rows: any[]; onClose: () => vo
                   {editing?.id === row.id ? (
                     <form onSubmit={rename} className="row-actions">
                       <input aria-label="Category name" required maxLength={80} value={editing.name} onChange={(e) => setEditing({ ...editing, name: e.target.value })} />
-                      <button className="primary">Save</button>
+                      <button disabled={busy} className="primary">Save</button>
                       <button type="button" onClick={() => setEditing(null)}>Cancel</button>
                     </form>
                   ) : row.name}

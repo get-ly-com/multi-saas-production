@@ -1,6 +1,7 @@
 import { FormEvent, useEffect, useState } from 'react';
 import AppShell from '@/components/AppShell';
 import { api, formatDate } from '@/lib/api';
+import useSubmit from '@/lib/useSubmit';
 
 const ROLES = ['admin', 'accountant', 'viewer'];
 const ROLE_HELP = [
@@ -33,14 +34,16 @@ function TeamApp() {
     load();
   }, []);
 
-  const run = async (action: () => Promise<unknown>) => {
+  const { busy, run: once } = useSubmit();
+  // One action at a time, so a double click cannot repeat it
+  const run = (action: () => Promise<unknown>) => once(async () => {
     try {
       await action();
       await load();
     } catch (err: any) {
       setError(err.message);
     }
-  };
+  });
 
   const invite = (event: FormEvent) => {
     event.preventDefault();
@@ -109,7 +112,7 @@ function TeamApp() {
                 </select>
               </label>
             </div>
-            <div className="form-actions"><button className="primary">Save invite</button></div>
+            <div className="form-actions"><button disabled={busy} className="primary">Save invite</button></div>
           </form>
           <p className="muted">No email is sent yet. Tell them to sign up with this address, and they'll be offered your company. Invites last 14 days.</p>
         </div>

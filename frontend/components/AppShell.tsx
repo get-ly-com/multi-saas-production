@@ -3,33 +3,34 @@ import { useRouter } from 'next/router';
 import { ReactNode, useEffect, useState } from 'react';
 import NotificationBell from '@/components/NotificationBell';
 import { api, openCompany, rememberCompany, savedCompanyId, setBaseCurrency } from '@/lib/api';
+import { PRODUCTS } from '@/lib/products';
 import { getSupabase } from '@/lib/supabase';
-
-const PRODUCTS = [
-  { name: 'Accounting', path: '/saas/accounting' },
-  { name: 'CRM', path: '/saas/crm' },
-  { name: 'Inventory', path: '/saas/inventory' },
-  { name: 'HR', path: '/saas/hr' },
-  { name: 'Scheduler', path: '/saas/scheduler' },
-  { name: 'Meetings', path: '/saas/video' },
-  { name: 'Chat', path: '/saas/chat' },
-  { name: 'Social', path: '/saas/social' },
-  { name: 'Analytics', path: '/saas/analytics' },
-  { name: 'Integrations', path: '/saas/integrations' }
-];
 
 type Company = { id: string; name: string; role: string };
 type Me = { user: { email: string }; tenant: Company; tenants: Company[] };
 
+// Each page wraps itself in the shell, so the account is kept here between pages.
+// A page shown after the first then draws at once and checks the account again quietly.
+// Switching company reloads the page, which clears this.
+let cached: { userId: string; me: Me } | null = null;
+
 export default function AppShell({ children }: { children: ReactNode }) {
   const router = useRouter();
-  const [me, setMe] = useState<Me | null>(null);
+  const [me, setMe] = useState<Me | null>(() => cached?.me || null);
   const [error, setError] = useState('');
 
   useEffect(() => {
     const load = async () => {
       const { data } = await getSupabase().auth.getSession();
-      if (!data.session) return router.replace('/login');
+      if (!data.session) {
+        cached = null;
+        return router.replace('/login');
+      }
+      // Never show one person's account to another who signed in on the same tab
+      if (cached && cached.userId !== data.session.user.id) {
+        cached = null;
+        setMe(null);
+      }
 
       try {
         // Both start at once; the currency is only kept if it was for the company shown
@@ -38,22 +39,31 @@ export default function AppShell({ children }: { children: ReactNode }) {
           api.get('/api/me'),
           asked ? api.get('/api/accounting/currencies').catch(() => null) : Promise.resolve(null)
         ]);
-        if (!account.tenant) return router.replace('/onboarding');
+        if (!account.tenant) {
+          cached = null;
+          return router.replace('/onboarding');
+        }
         rememberCompany(account.tenant.id);
         const currencies = early && asked === account.tenant.id
           ? early
           : await api.get('/api/accounting/currencies').catch(() => null);
         if (currencies) setBaseCurrency(currencies.base);
+        cached = { userId: data.session.user.id, me: account };
         setMe(account);
       } catch (err: any) {
-        if (err.status === 401) return router.replace('/login');
-        setError(err.message);
+        if (err.status === 401) {
+          cached = null;
+          return router.replace('/login');
+        }
+        // A failed quiet check leaves the page that is already shown
+        if (!cached) setError(err.message);
       }
     };
     load();
   }, []);
 
   const signOut = async () => {
+    cached = null;
     await getSupabase().auth.signOut();
     router.replace('/login');
   };

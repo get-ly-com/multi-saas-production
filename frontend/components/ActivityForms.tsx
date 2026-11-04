@@ -2,6 +2,7 @@ import { FormEvent, useState } from 'react';
 import { OwnerField, useTeam } from '@/components/CrmForms';
 import Modal from '@/components/Modal';
 import { api, formatDate, today } from '@/lib/api';
+import useSubmit from '@/lib/useSubmit';
 
 // Activities that can be planned for a date
 export const PLANNED_KINDS = [
@@ -67,19 +68,22 @@ export function FinishForm({ activity, onClose, onSaved }: { activity: any; onCl
   const [error, setError] = useState('');
   const linked = activity.deal_id || activity.lead_id || activity.contact_id || activity.company_id;
 
+  const { busy, run } = useSubmit();
   const submit = async (event: FormEvent) => {
     event.preventDefault();
-    try {
-      await api.post(`/api/crm/activities/${activity.id}/finish`, { feedback, next: planNext ? next : null });
-      await onSaved();
-      onClose();
-    } catch (err: any) {
-      setError(err.message);
-    }
+    return run(async () => {
+      try {
+        await api.post(`/api/crm/activities/${activity.id}/finish`, { feedback, next: planNext ? next : null });
+        await onSaved();
+        onClose();
+      } catch (err: any) {
+        setError(err.message);
+      }
+    });
   };
 
   return (
-    <Modal title={`Done: ${activity.subject}`}>
+    <Modal title={`Done: ${activity.subject}`} onClose={onClose}>
       <form onSubmit={submit} className="stack">
         <label>How did it go? (optional)<textarea rows={3} maxLength={4000} value={feedback} onChange={(e) => setFeedback(e.target.value)} /></label>
         {linked && (
@@ -88,7 +92,7 @@ export function FinishForm({ activity, onClose, onSaved }: { activity: any; onCl
         {planNext && <NextStepFields value={next} onChange={setNext} members={members} emptyOwner="Same person" />}
         {error && <p className="error">{error}</p>}
         <div className="form-actions">
-          <button className="primary">Mark done</button>
+          <button disabled={busy} className="primary">Mark done</button>
           <button type="button" onClick={onClose}>Cancel</button>
         </div>
       </form>
@@ -103,25 +107,28 @@ export function PlanForm({ links = {}, onClose, onSaved }: { links?: Record<stri
   const [body, setBody] = useState('');
   const [error, setError] = useState('');
 
+  const { busy, run } = useSubmit();
   const submit = async (event: FormEvent) => {
     event.preventDefault();
-    try {
-      await api.post('/api/crm/activities', { ...links, ...step, body });
-      await onSaved();
-      onClose();
-    } catch (err: any) {
-      setError(err.message);
-    }
+    return run(async () => {
+      try {
+        await api.post('/api/crm/activities', { ...links, ...step, body });
+        await onSaved();
+        onClose();
+      } catch (err: any) {
+        setError(err.message);
+      }
+    });
   };
 
   return (
-    <Modal title="Plan an activity">
+    <Modal title="Plan an activity" onClose={onClose}>
       <form onSubmit={submit} className="stack">
         <NextStepFields value={step} onChange={setStep} members={members} emptyOwner="Me" />
         <label>Details (optional)<textarea rows={2} value={body} onChange={(e) => setBody(e.target.value)} /></label>
         {error && <p className="error">{error}</p>}
         <div className="form-actions">
-          <button className="primary">Plan it</button>
+          <button disabled={busy} className="primary">Plan it</button>
           <button type="button" onClick={onClose}>Cancel</button>
         </div>
       </form>

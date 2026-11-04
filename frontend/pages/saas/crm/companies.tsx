@@ -7,7 +7,7 @@ import { useCustomFields } from '@/components/CustomFields';
 import SavedViews, { Filters, ListFilters, matchesFilters } from '@/components/SavedViews';
 import BulkBar, { useSelection } from '@/components/BulkBar';
 import { TagChips, TagFilter, tagNames, useTags } from '@/components/Tags';
-import { api } from '@/lib/api';
+import { api, today } from '@/lib/api';
 import { downloadCsv } from '@/lib/csv';
 
 export default function Companies() {
@@ -46,7 +46,7 @@ function CompaniesApp() {
 
   const exportCsv = () => {
     const rows = selection.selected.length ? visible.filter(({ id }) => selection.has(id)) : visible;
-    downloadCsv(`companies-${new Date().toISOString().slice(0, 10)}.csv`, [
+    downloadCsv(`companies-${today()}.csv`, [
       ['Name', 'Industry', 'Website', 'Phone', 'Owner', 'Tags', 'Contacts', 'Deals'],
       ...rows.map((row) => [row.name, row.industry, row.website, row.phone, ownerName(row.owner_id), tagNames(row.tags, tags), row.contacts?.[0]?.count ?? 0, row.deals?.[0]?.count ?? 0])
     ]);

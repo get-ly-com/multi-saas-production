@@ -4,6 +4,7 @@ import AppShell from '@/components/AppShell';
 import Modal from '@/components/Modal';
 import { dayLabel } from '@/components/SchedulerNav';
 import { api } from '@/lib/api';
+import useSubmit from '@/lib/useSubmit';
 
 export default function Meetings() {
   return <AppShell><MeetingsApp /></AppShell>;
@@ -15,6 +16,7 @@ function MeetingsApp() {
   const [past, setPast] = useState(false);
   const [editing, setEditing] = useState<any>(null);
   const [error, setError] = useState('');
+  const [copied, setCopied] = useState('');
 
   const load = async () => {
     try {
@@ -34,9 +36,12 @@ function MeetingsApp() {
     load();
   }, [past]);
 
-  // The tab opens straight away so the browser doesn't block it, then goes to the new room
-  const startNow = async () => {
+  const { busy, run: once } = useSubmit();
+  // The tab opens straight away so the browser doesn't block it, then goes to the new room.
+  // It is cut off from this page so the room's site cannot reach back into it.
+  const startNow = () => once(async () => {
     const tab = window.open('', '_blank');
+    if (tab) tab.opener = null;
     try {
       const meeting = await api.post('/api/video/meetings/now', {});
       if (tab) tab.location.href = meeting.room_url;
@@ -46,15 +51,25 @@ function MeetingsApp() {
       tab?.close();
       setError(err.message);
     }
-  };
+  });
 
-  const cancel = async (meeting: any) => {
+  const cancel = (meeting: any) => once(async () => {
     if (!window.confirm(`Cancel "${meeting.title}"?`)) return;
     try {
       await api.post(`/api/video/meetings/${meeting.id}/cancel`, {});
       load();
     } catch (err: any) {
       setError(err.message);
+    }
+  });
+
+  const copyLink = async (meeting: any) => {
+    try {
+      await navigator.clipboard.writeText(meeting.room_url);
+      setCopied(meeting.id);
+      setTimeout(() => setCopied((current) => (current === meeting.id ? '' : current)), 2000);
+    } catch {
+      window.prompt('Copy this link', meeting.room_url);
     }
   };
 
@@ -67,7 +82,7 @@ function MeetingsApp() {
         <h1>Meetings</h1>
         {setup?.can_edit && (
           <div className="row-actions">
-            <button className="primary" onClick={startNow}>Start now</button>
+            <button disabled={busy} className="primary" onClick={startNow}>Start now</button>
             <button onClick={() => setEditing({ title: '', date: setup.today, time: '', duration_minutes: '30', notes: '', contacts: [] })}>Schedule a meeting</button>
           </div>
         )}
@@ -105,11 +120,11 @@ function MeetingsApp() {
                   {meeting.status === 'scheduled' && (
                     <div className="meeting-actions">
                       <a className="button primary" href={meeting.room_url} target="_blank" rel="noopener noreferrer">Join</a>
-                      <a className="button" href="#" onClick={(e) => { e.preventDefault(); navigator.clipboard?.writeText(meeting.room_url).catch(() => null); }}>Copy link</a>
+                      <button type="button" onClick={() => copyLink(meeting)} aria-live="polite">{copied === meeting.id ? 'Copied' : 'Copy link'}</button>
                       {canChange(meeting) && !past && (
                         <>
-                          <a className="button" href="#" onClick={(e) => { e.preventDefault(); setEditing({ ...meeting, date: meeting.local_date, time: meeting.start_time, duration_minutes: String(meeting.duration_minutes) }); }}>Edit</a>
-                          <a className="button danger" href="#" onClick={(e) => { e.preventDefault(); cancel(meeting); }}>Cancel</a>
+                          <button type="button" onClick={() => setEditing({ ...meeting, date: meeting.local_date, time: meeting.start_time, duration_minutes: String(meeting.duration_minutes) })}>Edit</button>
+                          <button type="button" className="danger" disabled={busy} onClick={() => cancel(meeting)}>Cancel</button>
                         </>
                       )}
                     </div>
@@ -141,21 +156,24 @@ function MeetingForm({ initial, timeZone, onClose, onSaved }: { initial: any; ti
     return () => clearTimeout(timer);
   }, [search]);
 
+  const { busy, run } = useSubmit();
   const submit = async (event: FormEvent) => {
     event.preventDefault();
-    try {
-      const body = { ...form, contact_ids: form.contacts.map((contact: any) => contact.id) };
-      if (form.id) await api.put(`/api/video/meetings/${form.id}`, body);
-      else await api.post('/api/video/meetings', body);
-      await onSaved();
-      onClose();
-    } catch (err: any) {
-      setError(err.message);
-    }
+    return run(async () => {
+      try {
+        const body = { ...form, contact_ids: form.contacts.map((contact: any) => contact.id) };
+        if (form.id) await api.put(`/api/video/meetings/${form.id}`, body);
+        else await api.post('/api/video/meetings', body);
+        await onSaved();
+        onClose();
+      } catch (err: any) {
+        setError(err.message);
+      }
+    });
   };
 
   return (
-    <Modal title={form.id ? 'Edit meeting' : 'Schedule a meeting'}>
+    <Modal title={form.id ? 'Edit meeting' : 'Schedule a meeting'} onClose={onClose}>
       <form onSubmit={submit}>
         <div className="form-grid">
           <label>Title<input required maxLength={200} value={form.title} onChange={(e) => set('title', e.target.value)} /></label>
@@ -166,7 +184,7 @@ function MeetingForm({ initial, timeZone, onClose, onSaved }: { initial: any; ti
         <div style={{ marginTop: 12 }}>
           <div className="stat-label">Invite CRM contacts</div>
           <div className="crm-search" style={{ width: '100%' }}>
-            <input placeholder="Search contacts" value={search} onChange={(e) => setSearch(e.target.value)} />
+            <input aria-label="Search contacts" placeholder="Search contacts" value={search} onChange={(e) => setSearch(e.target.value)} />
             {found.length > 0 && (
               <div className="crm-results">
                 {found.filter((contact) => !form.contacts.some((c: any) => c.id === contact.id)).map((contact) => (
@@ -188,7 +206,7 @@ function MeetingForm({ initial, timeZone, onClose, onSaved }: { initial: any; ti
         <label style={{ marginTop: 12 }}>Notes<textarea rows={2} maxLength={2000} value={form.notes || ''} onChange={(e) => set('notes', e.target.value)} /></label>
         {error && <p className="error">{error}</p>}
         <div className="form-actions">
-          <button className="primary">{form.id ? 'Save' : 'Schedule'}</button>
+          <button disabled={busy} className="primary">{form.id ? 'Save' : 'Schedule'}</button>
           <button type="button" onClick={onClose}>Cancel</button>
         </div>
       </form>

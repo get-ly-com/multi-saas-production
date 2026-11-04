@@ -4,6 +4,7 @@ import AccountingNav from '@/components/AccountingNav';
 import AppShell from '@/components/AppShell';
 import Modal from '@/components/Modal';
 import { api } from '@/lib/api';
+import useSubmit from '@/lib/useSubmit';
 
 const TYPES = ['asset', 'liability', 'equity', 'revenue', 'expense'];
 const blankAccount = { code: '', name: '', type: 'expense', is_cash: false };
@@ -33,14 +34,15 @@ function AccountsApp() {
     load();
   }, []);
 
-  const setActive = async (account: any, is_active: boolean) => {
+  const { busy, run: once } = useSubmit();
+  const setActive = (account: any, is_active: boolean) => once(async () => {
     try {
       await api.put(`/api/accounting/accounts/${account.id}`, { is_active });
       await load();
     } catch (err: any) {
       setError(err.message);
     }
-  };
+  });
 
   return (
     <div className="stack">
@@ -67,7 +69,7 @@ function AccountsApp() {
                     <div className="row-actions">
                       <button onClick={() => setForm(account)}>Rename</button>
                       {!account.is_system && (
-                        <button onClick={() => setActive(account, !account.is_active)}>{account.is_active ? 'Deactivate' : 'Activate'}</button>
+                        <button disabled={busy} onClick={() => setActive(account, !account.is_active)}>{account.is_active ? 'Deactivate' : 'Activate'}</button>
                       )}
                     </div>
                   </td>
@@ -88,21 +90,24 @@ function AccountForm({ initial, onClose, onSaved }: { initial: any; onClose: () 
   const [error, setError] = useState('');
   const set = (field: string, value: unknown) => setForm({ ...form, [field]: value });
 
+  const { busy, run } = useSubmit();
   const submit = async (event: FormEvent) => {
     event.preventDefault();
-    const { code, name, type, is_cash } = form;
-    try {
-      if (form.id) await api.put(`/api/accounting/accounts/${form.id}`, { name });
-      else await api.post('/api/accounting/accounts', { code, name, type, is_cash: type === 'asset' && is_cash });
-      await onSaved();
-      onClose();
-    } catch (err: any) {
-      setError(err.message);
-    }
+    return run(async () => {
+      const { code, name, type, is_cash } = form;
+      try {
+        if (form.id) await api.put(`/api/accounting/accounts/${form.id}`, { name });
+        else await api.post('/api/accounting/accounts', { code, name, type, is_cash: type === 'asset' && is_cash });
+        await onSaved();
+        onClose();
+      } catch (err: any) {
+        setError(err.message);
+      }
+    });
   };
 
   return (
-    <Modal title={form.id ? `Rename ${form.code}` : 'New account'}>
+    <Modal title={form.id ? `Rename ${form.code}` : 'New account'} onClose={onClose}>
       <form onSubmit={submit}>
         <div className="form-grid">
           {!form.id && (
@@ -125,7 +130,7 @@ function AccountForm({ initial, onClose, onSaved }: { initial: any; onClose: () 
         )}
         {error && <p className="error">{error}</p>}
         <div className="form-actions">
-          <button className="primary">Save</button>
+          <button disabled={busy} className="primary">Save</button>
           <button type="button" onClick={onClose}>Cancel</button>
         </div>
       </form>

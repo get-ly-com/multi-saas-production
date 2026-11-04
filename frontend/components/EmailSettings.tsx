@@ -2,6 +2,7 @@ import { FormEvent, useEffect, useState } from 'react';
 import { MERGE_FIELDS } from '@/components/EmailForm';
 import Modal from '@/components/Modal';
 import { api } from '@/lib/api';
+import useSubmit from '@/lib/useSubmit';
 
 const blankTemplate = { name: '', subject: '', body: '' };
 
@@ -26,7 +27,8 @@ export default function EmailSettings() {
     load();
   }, []);
 
-  const remove = async (template: any) => {
+  const { busy, run: once } = useSubmit();
+  const remove = (template: any) => once(async () => {
     if (!window.confirm(`Delete the template ${template.name}?`)) return;
     try {
       await api.delete(`/api/crm/email-templates/${template.id}`);
@@ -34,7 +36,7 @@ export default function EmailSettings() {
     } catch (err: any) {
       setError(err.message);
     }
-  };
+  });
 
   return (
     <div className="card table-wrap">
@@ -62,7 +64,7 @@ export default function EmailSettings() {
               <td>
                 <div className="row-actions">
                   <button onClick={() => setEditing(template)}>Edit</button>
-                  <button className="danger" onClick={() => remove(template)}>Delete</button>
+                  <button disabled={busy} className="danger" onClick={() => remove(template)}>Delete</button>
                 </div>
               </td>
             </tr>
@@ -79,21 +81,24 @@ function TemplateForm({ initial, onClose, onSaved }: { initial: any; onClose: ()
   const [error, setError] = useState('');
   const set = (field: string, value: string) => setForm({ ...form, [field]: value });
 
+  const { busy, run } = useSubmit();
   const submit = async (event: FormEvent) => {
     event.preventDefault();
-    const { name, subject, body } = form;
-    try {
-      if (form.id) await api.put(`/api/crm/email-templates/${form.id}`, { name, subject, body });
-      else await api.post('/api/crm/email-templates', { name, subject, body });
-      await onSaved();
-      onClose();
-    } catch (err: any) {
-      setError(err.message);
-    }
+    return run(async () => {
+      const { name, subject, body } = form;
+      try {
+        if (form.id) await api.put(`/api/crm/email-templates/${form.id}`, { name, subject, body });
+        else await api.post('/api/crm/email-templates', { name, subject, body });
+        await onSaved();
+        onClose();
+      } catch (err: any) {
+        setError(err.message);
+      }
+    });
   };
 
   return (
-    <Modal title={form.id ? `Edit ${initial.name}` : 'New email template'}>
+    <Modal title={form.id ? `Edit ${initial.name}` : 'New email template'} onClose={onClose}>
       <form onSubmit={submit}>
         <div className="form-grid">
           <label>Name<input required maxLength={100} value={form.name} onChange={(e) => set('name', e.target.value)} /></label>
@@ -103,7 +108,7 @@ function TemplateForm({ initial, onClose, onSaved }: { initial: any; onClose: ()
         <p className="muted">Fill in from the record: {MERGE_FIELDS.map(({ tag, name }) => `${tag} ${name.toLowerCase()}`).join(', ')}.</p>
         {error && <p className="error">{error}</p>}
         <div className="form-actions">
-          <button className="primary">Save</button>
+          <button disabled={busy} className="primary">Save</button>
           <button type="button" onClick={onClose}>Cancel</button>
         </div>
       </form>

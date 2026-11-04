@@ -2,7 +2,7 @@ import { useRouter } from 'next/router';
 import { useEffect, useState } from 'react';
 import AccountingNav from '@/components/AccountingNav';
 import AppShell from '@/components/AppShell';
-import { api, formatDate, money } from '@/lib/api';
+import { api, formatDate, money, isUuid } from '@/lib/api';
 
 export default function Ledger() {
   return <AppShell><LedgerApp /></AppShell>;
@@ -14,7 +14,7 @@ function LedgerApp() {
   const [rows, setRows] = useState<any[]>([]);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState('');
-  const accountId = (router.query.account as string) || '';
+  const accountId = isUuid(router.query.account) ? router.query.account : '';
 
   useEffect(() => {
     api.get('/api/accounting/accounts').then(setAccounts).catch((err) => setError(err.message));

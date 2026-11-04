@@ -79,7 +79,7 @@ export default function AutomationForm({ initial, onClose, onSaved }: { initial:
   };
 
   return (
-    <Modal title={rule.id ? `Edit ${rule.name}` : 'New rule'}>
+    <Modal title={rule.id ? `Edit ${rule.name}` : 'New rule'} onClose={onClose}>
       <form onSubmit={submit}>
         <div className="form-grid">
           <label>Name<input required maxLength={80} value={rule.name} onChange={(e) => set('name', e.target.value)} /></label>

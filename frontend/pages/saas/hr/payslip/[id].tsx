@@ -3,7 +3,7 @@ import { useEffect, useState } from 'react';
 import AppShell from '@/components/AppShell';
 import { monthName } from '@/components/HrForms';
 import HrNav from '@/components/HrNav';
-import { api, formatDate, money } from '@/lib/api';
+import { api, formatDate, money, queryId } from '@/lib/api';
 
 export default function PayslipPage() {
   return <AppShell><PayslipApp /></AppShell>;
@@ -11,7 +11,7 @@ export default function PayslipPage() {
 
 function PayslipApp() {
   const router = useRouter();
-  const id = router.query.id as string | undefined;
+  const id = queryId(router.query.id);
   const [slip, setSlip] = useState<any>(null);
   const [error, setError] = useState('');
 

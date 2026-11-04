@@ -4,6 +4,7 @@ import AppShell from '@/components/AppShell';
 import IntegrationsNav, { OnlyManagers, ShowOnce, dateTime } from '@/components/IntegrationsNav';
 import Modal from '@/components/Modal';
 import { api } from '@/lib/api';
+import useSubmit from '@/lib/useSubmit';
 
 export default function Inbound() {
   return <AppShell><InboundApp /></AppShell>;
@@ -44,7 +45,9 @@ function InboundApp() {
     load();
   }, []);
 
-  const run = async (work: () => Promise<unknown>, done = '') => {
+  const { busy, run: once } = useSubmit();
+  // One action at a time, so a double click cannot repeat it
+  const run = (work: () => Promise<unknown>, done = '') => once(async () => {
     setNotice('');
     setError('');
     try {
@@ -54,7 +57,7 @@ function InboundApp() {
     } catch (err: any) {
       setError(err.message);
     }
-  };
+  });
 
   if (!data) return <div className="stack"><IntegrationsNav />{error ? <p className="error">{error}</p> : <p className="empty">Loading…</p>}</div>;
   if (!data.is_manager) return <div className="stack"><IntegrationsNav /><h1>Incoming webhooks</h1><OnlyManagers /></div>;
@@ -177,7 +180,7 @@ function InboundApp() {
       )}
 
       {log && (
-        <Modal title={`Log: ${log.hook.name}`}>
+        <Modal title={`Log: ${log.hook.name}`} onClose={() => setLog(null)}>
           <div className="table-wrap">
             <table>
               <thead><tr><th>When</th><th>Result</th><th>Fields sent</th></tr></thead>
@@ -213,7 +216,7 @@ function InboundForm({ hook, onClose, onSave }: {
     onSave(form);
   };
   return (
-    <Modal title={hook ? 'Edit incoming webhook' : 'Add incoming webhook'}>
+    <Modal title={hook ? 'Edit incoming webhook' : 'Add incoming webhook'} onClose={onClose}>
       <form onSubmit={submit}>
         <div className="form-grid">
           <label>Name<input required maxLength={80} placeholder="Like Website form or Facebook ads" value={form.name} onChange={(e) => setForm({ ...form, name: e.target.value })} /></label>

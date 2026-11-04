@@ -24,14 +24,27 @@ const DUPLICATES = {
   categories_name_key: 'A category with that name already exists'
 };
 
+// Only our own messages and the ones our database functions raise (P0001) reach people
 const sendError = (res, error) => {
-  if (error.code === '23505') {
+  const code = error?.code || '';
+  if (error?.status) return res.status(error.status).json({ error: error.message });
+  if (!code && error?.constructor === Error) return res.status(400).json({ error: error.message });
+  if (code === 'P0001') return res.status(400).json({ error: error.message });
+  if (/^PT[45]\d\d$/.test(code)) return res.status(Number(code.slice(2))).json({ error: error.message });
+
+  console.error('Inventory error:', error);
+  if (code === '42501') return res.status(403).json({ error: 'You don’t have access to that' });
+  if (code === '22P02') return res.status(404).json({ error: 'Not found' });
+  if (code === '23503') return res.status(409).json({ error: 'That is still in use' });
+  if (code === '23505') {
     const key = Object.keys(DUPLICATES).find((name) => (error.message || '').includes(name));
     return res.status(409).json({ error: key ? DUPLICATES[key] : 'That already exists' });
   }
-  if (error.code === '23514') return res.status(400).json({ error: 'Not enough stock' });
-  if (error.code === '23503') return res.status(409).json({ error: 'That is still in use' });
-  res.status(400).json({ error: error.message });
+  // items_quantity_check and stock_levels_quantity_check stop stock going below zero
+  if (code === '23514') {
+    return res.status(400).json({ error: /quantity/.test(error.message || '') ? 'Not enough stock' : 'That value isn’t allowed' });
+  }
+  res.status(400).json({ error: 'That didn’t work. Please check and try again.' });
 };
 
 const parseWhole = (value, label) => {
@@ -43,7 +56,7 @@ const parseWhole = (value, label) => {
 const parsePrice = (value) => {
   if (value === '' || value === null || value === undefined) return null;
   const parsed = Number(value);
-  if (!(parsed >= 0) || parsed >= 1e10) throw new Error('Enter a valid price');
+  if (!Number.isFinite(parsed) || parsed < 0 || parsed >= 1e10) throw new Error('Enter a valid price');
   return parsed;
 };
 
@@ -51,7 +64,7 @@ const parsePrice = (value) => {
 const parseCost = (value) => {
   if (value === '' || value === null || value === undefined) return null;
   const parsed = Number(value);
-  if (!(parsed >= 0) || parsed >= 1e10) throw new Error('Enter a valid unit cost');
+  if (!Number.isFinite(parsed) || parsed < 0 || parsed >= 1e10) throw new Error('Enter a valid unit cost');
   return parsed;
 };
 
@@ -179,10 +192,15 @@ app.post('/items', async (req, res) => {
       .select();
 
     if (error) throw error;
-    const item = opening > 0
-      ? await adjustStock(req, data[0].id, opening, 'Opening stock', cost, true, location)
-      : data[0];
-    res.status(201).json(item);
+    if (opening === 0) return res.status(201).json(data[0]);
+    try {
+      res.status(201).json(await adjustStock(req, data[0].id, opening, 'Opening stock', cost, true, location));
+    } catch (stockError) {
+      // Take the new item back out, so trying again doesn't say the SKU already exists
+      const { error: undoError } = await items(req).delete().eq('id', data[0].id).eq('tenant_id', req.tenantId);
+      if (undoError) console.error('Inventory error: could not remove an item whose opening stock failed:', undoError);
+      throw stockError;
+    }
   } catch (error) {
     sendError(res, error);
   }
@@ -599,5 +617,17 @@ app.post('/reorder', async (req, res) => {
     sendError(res, error);
   }
 });
+
+app.use((err, req, res, next) => {
+  if (res.headersSent) return next(err);
+  // Bad JSON and too-large bodies are the sender's mistake, not ours
+  if (err.status >= 400 && err.status < 500) {
+    return res.status(err.status).json({ error: err.status === 413 ? 'That is too large to send' : 'That request could not be read' });
+  }
+  console.error('Error:', err);
+  res.status(500).json({ error: 'Internal server error' });
+});
+
+process.on('unhandledRejection', (reason) => console.error('Unhandled rejection:', reason));
 
 app.listen(PORT, () => console.log(`📦 Inventory Service on ${PORT}`));

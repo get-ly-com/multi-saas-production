@@ -3,6 +3,7 @@ import { FormEvent, useEffect, useState } from 'react';
 import Modal from '@/components/Modal';
 import { LOCATIONS, dayLabel, googleCalendarLink, placesText } from '@/components/SchedulerNav';
 import { api, money } from '@/lib/api';
+import useSubmit from '@/lib/useSubmit';
 
 // Leave (from HR) and company holidays block a day. Staff can still book after this warning.
 const AWAY = /away on leave|closed that day/i;
@@ -72,7 +73,7 @@ function ContactSearch({ onPick }: { onPick: (contact: any) => void }) {
 
   return (
     <div className="crm-search" style={{ width: '100%' }}>
-      <input placeholder="Find a CRM contact (optional)" value={search} onChange={(e) => setSearch(e.target.value)} />
+      <input aria-label="Find a CRM contact" placeholder="Find a CRM contact (optional)" value={search} onChange={(e) => setSearch(e.target.value)} />
       {found.length > 0 && (
         <div className="crm-results">
           {found.map((contact) => (
@@ -153,7 +154,8 @@ export function NewBooking({ data, date, onClose, onSaved }: {
 
   useEffect(() => setAway(''), [form.date, form.time, form.staff_id]);
 
-  const send = async (overrideAway: boolean) => {
+  const { busy: sending, run: once } = useSubmit();
+  const send = (overrideAway: boolean) => once(async () => {
     try {
       const saved = await api.post('/api/scheduler/bookings', {
         ...form, override_away: overrideAway, ...(repeat.every_weeks ? { repeat } : {})
@@ -174,7 +176,7 @@ export function NewBooking({ data, date, onClose, onSaved }: {
         setError(err.message);
       }
     }
-  };
+  });
 
   const submit = (event: FormEvent) => {
     event.preventDefault();
@@ -183,7 +185,7 @@ export function NewBooking({ data, date, onClose, onSaved }: {
 
   if (result) {
     return (
-      <Modal title="Repeat bookings made">
+      <Modal title="Repeat bookings made" onClose={onClose}>
         <p>{result.made.length} booking{result.made.length === 1 ? '' : 's'} made: {result.made.map((row: any) => dayLabel(row.local_date)).join(', ')}.</p>
         {result.skipped.length > 0 && (
           <>
@@ -198,7 +200,7 @@ export function NewBooking({ data, date, onClose, onSaved }: {
 
   if (!services.length || !staff.length) {
     return (
-      <Modal title="New booking">
+      <Modal title="New booking" onClose={onClose}>
         <p>{!services.length ? 'Add a service first.' : 'Someone needs to set up their opening hours first.'}</p>
         <div className="form-actions">
           <Link className="primary" href={!services.length ? '/saas/scheduler/services' : '/saas/scheduler/hours'}>
@@ -211,7 +213,7 @@ export function NewBooking({ data, date, onClose, onSaved }: {
   }
 
   return (
-    <Modal title="New booking">
+    <Modal title="New booking" onClose={onClose}>
       <form onSubmit={submit}>
         <div className="form-grid">
           <label>Service
@@ -261,7 +263,7 @@ export function NewBooking({ data, date, onClose, onSaved }: {
         {away && <AwayWarning message={away} action="Book" onConfirm={() => send(true)} onBack={() => { setAway(''); set('time', ''); }} />}
         {error && <p className="error">{error}</p>}
         <div className="form-actions">
-          <button className="primary" disabled={!form.time || !form.staff_id}>{repeat.every_weeks ? `Book ${repeat.times} times` : 'Book'}</button>
+          <button className="primary" disabled={sending || !form.time || !form.staff_id}>{repeat.every_weeks ? `Book ${repeat.times} times` : 'Book'}</button>
           <button type="button" onClick={onClose}>Cancel</button>
         </div>
       </form>
@@ -280,7 +282,9 @@ export function BookingDetails({ booking, data, onClose, onSaved }: {
   const staff = data.staff.filter((row: any) => row.set_up && (!service?.staff_ids?.length || service.staff_ids.includes(row.user_id)));
   const live = booking.status === 'booked';
 
-  const act = async (work: () => Promise<any>, warnAway = false) => {
+  const { busy, run: guard } = useSubmit();
+  // One action at a time, so a double click cannot repeat it
+  const act = (work: () => Promise<any>, warnAway = false) => guard(async () => {
     try {
       await work();
       onSaved();
@@ -293,7 +297,7 @@ export function BookingDetails({ booking, data, onClose, onSaved }: {
         setError(err.message);
       }
     }
-  };
+  });
 
   useEffect(() => setAway(''), [form.date, form.time, form.staff_id]);
 
@@ -316,7 +320,7 @@ export function BookingDetails({ booking, data, onClose, onSaved }: {
   const remind = (done: boolean) => act(() => api.post(`/api/scheduler/bookings/${booking.id}/reminded`, { done }));
 
   return (
-    <Modal title={`${booking.service_name} with ${booking.customer_name}`}>
+    <Modal title={`${booking.service_name} with ${booking.customer_name}`} onClose={onClose}>
       <div className="facts">
         <div><div className="stat-label">When</div>{dayLabel(booking.local_date, true)}, {booking.start_time} to {booking.end_time}</div>
         <div><div className="stat-label">With</div>{booking.staff_name}</div>
@@ -383,7 +387,7 @@ export function BookingDetails({ booking, data, onClose, onSaved }: {
           <TimePicker service={booking.service_id} staff={form.staff_id} date={form.date} booking={booking.id} time={form.time}
             onPick={(time) => setForm({ ...form, time })} />
           <div className="form-actions">
-            <button className="primary" disabled={!form.time} onClick={() => move(false)}>Move booking</button>
+            <button className="primary" disabled={busy || !form.time} onClick={() => move(false)}>Move booking</button>
             <button type="button" onClick={() => setMoving(false)}>Back</button>
           </div>
           {away && <AwayWarning message={away} action="Move" onConfirm={() => move(true)} onBack={() => { setAway(''); setForm({ ...form, time: '' }); }} />}
@@ -393,8 +397,8 @@ export function BookingDetails({ booking, data, onClose, onSaved }: {
       {error && <p className="error">{error}</p>}
       <div className="form-actions">
         {live && data.can_edit && !moving && <button className="primary" onClick={() => setMoving(true)}>Reschedule</button>}
-        {live && data.can_edit && <button className="danger" onClick={cancel}>Cancel booking</button>}
-        {live && data.can_edit && booking.repeat_group && <button className="danger" onClick={cancelRepeats}>Cancel this and later repeats</button>}
+        {live && data.can_edit && <button className="danger" disabled={busy} onClick={cancel}>Cancel booking</button>}
+        {live && data.can_edit && booking.repeat_group && <button className="danger" disabled={busy} onClick={cancelRepeats}>Cancel this and later repeats</button>}
         <button type="button" onClick={onClose}>Close</button>
       </div>
     </Modal>

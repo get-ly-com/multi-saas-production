@@ -6,6 +6,7 @@ import EmailSettings from '@/components/EmailSettings';
 import LeadSettings from '@/components/LeadSettings';
 import { LostReasonSettings, TagSettings } from '@/components/TagSettings';
 import { api } from '@/lib/api';
+import useSubmit from '@/lib/useSubmit';
 
 const blankPipeline = {
   name: '',
@@ -55,20 +56,23 @@ function SettingsApp() {
     setEditing({ ...editing, stages });
   };
 
+  const { busy, run } = useSubmit();
   const save = async (event: FormEvent) => {
     event.preventDefault();
-    try {
-      const stages = editing.stages.map((stage: any) => ({ ...stage, rot_days: stage.kind === 'open' ? stage.rot_days ?? '' : '' }));
-      await api.post('/api/crm/pipelines', { id: editing.id, name: editing.name, stages });
-      setEditing(null);
-      setNotice('Pipeline saved.');
-      await load();
-    } catch (err: any) {
-      setError(err.message);
-    }
+    return run(async () => {
+      try {
+        const stages = editing.stages.map((stage: any) => ({ ...stage, rot_days: stage.kind === 'open' ? stage.rot_days ?? '' : '' }));
+        await api.post('/api/crm/pipelines', { id: editing.id, name: editing.name, stages });
+        setEditing(null);
+        setNotice('Pipeline saved.');
+        await load();
+      } catch (err: any) {
+        setError(err.message);
+      }
+    });
   };
 
-  const remove = async (pipeline: any) => {
+  const remove = (pipeline: any) => run(async () => {
     if (!window.confirm(`Delete ${pipeline.name}?`)) return;
     try {
       await api.delete(`/api/crm/pipelines/${pipeline.id}`);
@@ -77,7 +81,7 @@ function SettingsApp() {
     } catch (err: any) {
       setError(err.message);
     }
-  };
+  });
 
   return (
     <div className="stack">
@@ -98,7 +102,7 @@ function SettingsApp() {
             <h2>{pipeline.name}{pipeline.is_default && <span className="badge"> default</span>}</h2>
             <div className="row-actions">
               <button onClick={() => open(pipeline)}>Edit</button>
-              {!pipeline.is_default && <button className="danger" onClick={() => remove(pipeline)}>Delete</button>}
+              {!pipeline.is_default && <button disabled={busy} className="danger" onClick={() => remove(pipeline)}>Delete</button>}
             </div>
           </div>
           <table>
@@ -136,7 +140,7 @@ function SettingsApp() {
           </div>
           <button type="button" onClick={() => setEditing({ ...editing, stages: [...editing.stages, { name: '', probability: 50, kind: 'open' }] })}>Add stage</button>
           <div className="form-actions">
-            <button className="primary">Save pipeline</button>
+            <button disabled={busy} className="primary">Save pipeline</button>
             <button type="button" onClick={() => setEditing(null)}>Cancel</button>
           </div>
         </form>

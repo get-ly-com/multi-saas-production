@@ -1,6 +1,7 @@
 import { FormEvent, useEffect, useState } from 'react';
 import Modal from '@/components/Modal';
 import { api, money, today } from '@/lib/api';
+import useSubmit from '@/lib/useSubmit';
 
 type Props = { invoice: any; onClose: () => void; onSaved: () => void };
 
@@ -23,19 +24,22 @@ export default function WriteOffForm({ invoice, onClose, onSaved }: Props) {
       .catch((err) => setError(err.message));
   }, []);
 
+  const { busy, run } = useSubmit();
   const submit = async (event: FormEvent) => {
     event.preventDefault();
-    try {
-      await api.post(`/api/accounting/invoices/${invoice.id}/write-off`, form);
-      await onSaved();
-      onClose();
-    } catch (err: any) {
-      setError(err.message);
-    }
+    return run(async () => {
+      try {
+        await api.post(`/api/accounting/invoices/${invoice.id}/write-off`, form);
+        await onSaved();
+        onClose();
+      } catch (err: any) {
+        setError(err.message);
+      }
+    });
   };
 
   return (
-    <Modal title={`Write off ${invoice.invoice_number}`}>
+    <Modal title={`Write off ${invoice.invoice_number}`} onClose={onClose}>
       <form onSubmit={submit}>
         <p className="muted">
           Marks the remaining {money(balance, invoice.currency)} as never to be paid and moves it to an expense account.
@@ -52,7 +56,7 @@ export default function WriteOffForm({ invoice, onClose, onSaved }: Props) {
         <label style={{ marginTop: 12 }}>Reason<input required maxLength={200} placeholder="For example: customer closed down, small difference" value={form.reason} onChange={(e) => set('reason', e.target.value)} /></label>
         {error && <p className="error">{error}</p>}
         <div className="form-actions">
-          <button className="primary" disabled={!form.account_id}>Write off {money(balance, invoice.currency)}</button>
+          <button className="primary" disabled={busy || !form.account_id}>Write off {money(balance, invoice.currency)}</button>
           <button type="button" onClick={onClose}>Cancel</button>
         </div>
       </form>

@@ -3,6 +3,7 @@ import Modal from '@/components/Modal';
 import { api } from '@/lib/api';
 import { withTracking } from '@/lib/campaign';
 import { getSupabase } from '@/lib/supabase';
+import useSubmit from '@/lib/useSubmit';
 
 // Nothing here posts for you. Each platform needs its own approved developer app to post
 // automatically, so people post from the platform and record the live link here.
@@ -200,7 +201,7 @@ export function PostForm({ overview, accounts, post, startDate, onClose, onSaved
   };
 
   return (
-    <Modal title={post ? 'Edit post' : 'New post'}>
+    <Modal title={post ? 'Edit post' : 'New post'} onClose={onClose}>
       <form onSubmit={submit}>
         <div className="form-grid">
           <label>Name (only your team sees this)<input required maxLength={200} value={form.title} onChange={(e) => set('title', e.target.value)} /></label>
@@ -258,7 +259,7 @@ export function PostForm({ overview, accounts, post, startDate, onClose, onSaved
             <button type="button" onClick={() => setKeepImage(false)}>Remove image</button>
           </div>
         ) : (
-          <input type="file" accept="image/jpeg,image/png,image/gif,image/webp" onChange={(e) => choose(e.target.files?.[0] || null)} />
+          <input type="file" aria-label="Image" accept="image/jpeg,image/png,image/gif,image/webp" onChange={(e) => choose(e.target.files?.[0] || null)} />
         )}
         <p className="muted">JPEG, PNG, GIF or WebP up to 5 MB. Images are public to anyone who has the link, so platforms can show them.</p>
 
@@ -297,6 +298,8 @@ export function PostView({ post, overview, onClose, onEdit, onChanged }: {
     loadComments();
   }, [post.id]);
 
+  const { busy, run } = useSubmit();
+  // act allows one action at a time
   const addComment = (event: FormEvent) => {
     event.preventDefault();
     if (!comment.trim()) return;
@@ -327,7 +330,8 @@ export function PostView({ post, overview, onClose, onEdit, onChanged }: {
   const canEdit = overview.can_edit;
   const waiting = approvalOn && ['draft', 'needs_approval'].includes(post.status);
 
-  const act = async (work: () => Promise<any>, done?: string) => {
+  // One action at a time, so a double click cannot repeat it
+  const act = (work: () => Promise<any>, done?: string) => run(async () => {
     setError('');
     setNotice('');
     try {
@@ -337,7 +341,7 @@ export function PostView({ post, overview, onClose, onEdit, onChanged }: {
     } catch (err: any) {
       setError(err.message);
     }
-  };
+  });
 
   const submitLabel = approvalOn && !overview.is_manager ? 'Send for approval' : post.scheduled_at ? 'Schedule' : 'Mark ready';
 
@@ -362,7 +366,7 @@ export function PostView({ post, overview, onClose, onEdit, onChanged }: {
     act(() => api.post(`/api/social-media/posts/${post.id}/decide`, { approve: false, note }), 'Sent back to draft.');
   };
 
-  const remove = async () => {
+  const remove = () => run(async () => {
     if (!window.confirm(`Delete “${post.title}”? This can’t be undone. Anything already on the platforms stays there.`)) return;
     setError('');
     try {
@@ -373,10 +377,10 @@ export function PostView({ post, overview, onClose, onEdit, onChanged }: {
     } catch (err: any) {
       setError(err.message);
     }
-  };
+  });
 
   return (
-    <Modal title={post.title}>
+    <Modal title={post.title} onClose={onClose}>
       <div className="stack">
         <div className="facts">
           <div><div className="stat-label">Status</div><span className={`badge ${statusClass(post.status)}`}>{statusLabel(post.status, approvalOn)}</span></div>
@@ -430,7 +434,7 @@ export function PostView({ post, overview, onClose, onEdit, onChanged }: {
                 {opened === target.id && <p className="muted">{POST_HINT[target.platform]}</p>}
                 <div className="social-mark">
                   <button className="primary" type="button" onClick={() => postNow(target)}>Post now</button>
-                  <input type="url" placeholder="Paste the live post link" value={links[target.id] || ''}
+                  <input type="url" aria-label="Live post link" placeholder="Paste the live post link" value={links[target.id] || ''}
                     onChange={(e) => setLinks({ ...links, [target.id]: e.target.value })} />
                   <button type="button" disabled={!links[target.id]}
                     onClick={() => act(() => api.post(`/api/social-media/targets/${target.id}/posted`, { post_url: links[target.id] }), 'Marked as posted.')}>
@@ -457,7 +461,7 @@ export function PostView({ post, overview, onClose, onEdit, onChanged }: {
         {canEdit && (
           <form onSubmit={addComment} className="social-comment-form">
             <textarea rows={2} maxLength={1000} placeholder="Write a comment for the team" value={comment} onChange={(e) => setComment(e.target.value)} aria-label="Comment" />
-            <div><button type="submit" disabled={!comment.trim()}>Add comment</button></div>
+            <div><button type="submit" disabled={busy || !comment.trim()}>Add comment</button></div>
           </form>
         )}
 
@@ -501,7 +505,7 @@ export function PostView({ post, overview, onClose, onEdit, onChanged }: {
           )}
           {canEdit && <button onClick={() => copy(null, 1)}>Copy</button>}
           {canEdit && !repeat.open && <button onClick={() => setRepeat({ ...repeat, open: true })}>Repeat…</button>}
-          {canEdit && <button className="danger" onClick={remove}>Delete</button>}
+          {canEdit && <button disabled={busy} className="danger" onClick={remove}>Delete</button>}
           <button onClick={onClose}>Close</button>
         </div>
       </div>

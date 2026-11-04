@@ -3,6 +3,7 @@ import AccountingNav from '@/components/AccountingNav';
 import AppShell from '@/components/AppShell';
 import Modal from '@/components/Modal';
 import { api } from '@/lib/api';
+import useSubmit from '@/lib/useSubmit';
 
 export default function CostCenters() {
   return <AppShell><CostCentersApp /></AppShell>;
@@ -29,14 +30,15 @@ function CostCentersApp() {
     load();
   }, []);
 
-  const setActive = async (center: any, is_active: boolean) => {
+  const { busy, run: once } = useSubmit();
+  const setActive = (center: any, is_active: boolean) => once(async () => {
     try {
       await api.put(`/api/accounting/cost-centers/${center.id}`, { is_active });
       await load();
     } catch (err: any) {
       setError(err.message);
     }
-  };
+  });
 
   return (
     <div className="stack">
@@ -63,7 +65,7 @@ function CostCentersApp() {
                   <td><span className="badge">{center.is_active ? 'active' : 'inactive'}</span></td>
                   <td>
                     <div className="row-actions">
-                      <button onClick={() => setActive(center, !center.is_active)}>{center.is_active ? 'Deactivate' : 'Activate'}</button>
+                      <button disabled={busy} onClick={() => setActive(center, !center.is_active)}>{center.is_active ? 'Deactivate' : 'Activate'}</button>
                     </div>
                   </td>
                 </tr>
@@ -82,19 +84,22 @@ function CenterForm({ onClose, onSaved }: { onClose: () => void; onSaved: () => 
   const [form, setForm] = useState({ code: '', name: '' });
   const [error, setError] = useState('');
 
+  const { busy, run } = useSubmit();
   const submit = async (event: FormEvent) => {
     event.preventDefault();
-    try {
-      await api.post('/api/accounting/cost-centers', form);
-      await onSaved();
-      onClose();
-    } catch (err: any) {
-      setError(err.message);
-    }
+    return run(async () => {
+      try {
+        await api.post('/api/accounting/cost-centers', form);
+        await onSaved();
+        onClose();
+      } catch (err: any) {
+        setError(err.message);
+      }
+    });
   };
 
   return (
-    <Modal title="New cost center">
+    <Modal title="New cost center" onClose={onClose}>
       <form onSubmit={submit}>
         <div className="form-grid">
           <label>Code<input required value={form.code} onChange={(e) => setForm({ ...form, code: e.target.value })} /></label>
@@ -102,7 +107,7 @@ function CenterForm({ onClose, onSaved }: { onClose: () => void; onSaved: () => 
         </div>
         {error && <p className="error">{error}</p>}
         <div className="form-actions">
-          <button className="primary">Save</button>
+          <button disabled={busy} className="primary">Save</button>
           <button type="button" onClick={onClose}>Cancel</button>
         </div>
       </form>

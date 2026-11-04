@@ -8,7 +8,7 @@ import { LeadForm, SOURCES, scoreBadge, scoreLabel, statusBadge, statusLabel } f
 import SavedViews, { Filters, ListFilters, matchesFilters } from '@/components/SavedViews';
 import BulkBar, { useSelection } from '@/components/BulkBar';
 import { TagChips, TagFilter, tagNames, useTags } from '@/components/Tags';
-import { api, formatDate } from '@/lib/api';
+import { api, formatDate, today } from '@/lib/api';
 import { downloadCsv, readPeople } from '@/lib/csv';
 
 export default function Leads() {
@@ -72,7 +72,7 @@ function LeadsApp() {
 
   const exportCsv = () => {
     const rows = selection.selected.length ? visible.filter(({ id }) => selection.has(id)) : visible;
-    downloadCsv(`leads-${new Date().toISOString().slice(0, 10)}.csv`, [
+    downloadCsv(`leads-${today()}.csv`, [
       ['Name', 'Company', 'Job title', 'Email', 'Phone', 'Score', 'Status', 'Source', 'Campaign', 'Owner', 'Tags', 'Added'],
       ...rows.map((row) => [row.name, row.company_name, row.job_title, row.email, row.phone, row.score, statusLabel[row.status], row.source, row.campaign, ownerName(row.owner_id), tagNames(row.tags, tags), formatDate(row.created_at)])
     ]);

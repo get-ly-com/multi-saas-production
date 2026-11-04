@@ -3,6 +3,7 @@ import AccountingNav from '@/components/AccountingNav';
 import AppShell from '@/components/AppShell';
 import Modal from '@/components/Modal';
 import { api, money, today } from '@/lib/api';
+import useSubmit from '@/lib/useSubmit';
 
 const MONTHS = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
 
@@ -53,7 +54,8 @@ function BudgetsApp() {
 
   const selected = budgets.find((budget) => budget.id === budgetId);
 
-  const remove = async () => {
+  const { busy, run: once } = useSubmit();
+  const remove = () => once(async () => {
     if (!window.confirm(`Delete ${selected.name}? This can't be undone.`)) return;
     try {
       await api.delete(`/api/accounting/budgets/${budgetId}`);
@@ -62,7 +64,7 @@ function BudgetsApp() {
     } catch (err: any) {
       setError(err.message);
     }
-  };
+  });
 
   return (
     <div className="stack">
@@ -96,7 +98,7 @@ function BudgetsApp() {
 
           <div className="form-actions">
             <button onClick={() => setForm(selected)}>Edit budget</button>
-            <button className="danger" onClick={remove}>Delete budget</button>
+            <button disabled={busy} className="danger" onClick={remove}>Delete budget</button>
           </div>
 
           <div className="card table-wrap">
@@ -156,7 +158,8 @@ function BudgetForm({ initial, accounts, onClose, onSaved }: { initial: any; acc
     setCells(filled);
   };
 
-  const save = async () => {
+  const { busy, run: once } = useSubmit();
+  const save = () => once(async () => {
     const lines = Object.entries(cells)
       .filter(([, value]) => Number(value) > 0)
       .map(([key, value]) => {
@@ -171,10 +174,10 @@ function BudgetForm({ initial, accounts, onClose, onSaved }: { initial: any; acc
     } catch (err: any) {
       setError(err.message);
     }
-  };
+  });
 
   return (
-    <Modal title={initial.id ? `Edit ${initial.name}` : 'New budget'}>
+    <Modal title={initial.id ? `Edit ${initial.name}` : 'New budget'} onClose={onClose}>
       <div className="form-grid">
         <label>Name<input required value={name} onChange={(e) => setName(e.target.value)} /></label>
         <label>Year<input required type="number" min="2000" max="2100" value={year} onChange={(e) => setYear(Number(e.target.value))} /></label>

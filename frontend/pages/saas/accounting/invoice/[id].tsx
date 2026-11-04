@@ -4,7 +4,8 @@ import { FormEvent, useEffect, useState } from 'react';
 import AppShell from '@/components/AppShell';
 import Modal from '@/components/Modal';
 import WriteOffForm from '@/components/WriteOffForm';
-import { api, formatDate, money, today } from '@/lib/api';
+import { api, formatDate, money, today, queryId } from '@/lib/api';
+import useSubmit from '@/lib/useSubmit';
 
 export default function Invoice() {
   return <AppShell><InvoiceDocument /></AppShell>;
@@ -12,7 +13,7 @@ export default function Invoice() {
 
 function InvoiceDocument() {
   const router = useRouter();
-  const id = router.query.id as string | undefined;
+  const id = queryId(router.query.id);
   const [invoice, setInvoice] = useState<any>(null);
   const [company, setCompany] = useState('');
   const [error, setError] = useState('');
@@ -34,7 +35,9 @@ function InvoiceDocument() {
     api.get('/api/me').then((me) => setCompany(me.tenant.name)).catch((err) => setError(err.message));
   }, [id]);
 
-  const run = async (question: string, action: () => Promise<unknown>) => {
+  const { busy, run: once } = useSubmit();
+  // One action at a time, so a double click cannot repeat it
+  const run = (question: string, action: () => Promise<unknown>) => once(async () => {
     if (!window.confirm(question)) return;
     try {
       await action();
@@ -42,7 +45,7 @@ function InvoiceDocument() {
     } catch (err: any) {
       setError(err.message);
     }
-  };
+  });
 
   if (error && !invoice) return <p className="error">{error}</p>;
   if (!invoice) return <p className="empty">Loading…</p>;
@@ -61,7 +64,7 @@ function InvoiceDocument() {
           )}
           {Number(invoice.amount_paid) > 0 && <button onClick={() => setRefunding(true)}>Refund</button>}
           {invoice.status === 'sent' && (
-            <button className="danger" onClick={() => run(
+            <button className="danger" disabled={busy} onClick={() => run(
               `Void ${invoice.invoice_number}? Its ledger entry will be reversed.`,
               () => api.put(`/api/accounting/invoices/${invoice.id}`, { status: 'void' })
             )}>Void invoice</button>
@@ -153,7 +156,7 @@ function InvoiceDocument() {
                   <td className="num">
                     {payment.voided_at
                       ? <span className="badge void">void</span>
-                      : <button className="danger" onClick={() => run(
+                      : <button className="danger" disabled={busy} onClick={() => run(
                           payment.is_write_off
                             ? 'Undo this write-off? Its ledger entry will be reversed and the balance will be owed again.'
                             : 'Void this payment? Its ledger entry will be reversed.',
@@ -182,7 +185,7 @@ function InvoiceDocument() {
                   <td className="num">
                     {credit.voided_at
                       ? <span className="badge void">void</span>
-                      : <button className="danger" onClick={() => run(
+                      : <button className="danger" disabled={busy} onClick={() => run(
                           `Void ${credit.credit_number}? Its ledger entry will be reversed.`,
                           () => api.post(`/api/accounting/credit-notes/${credit.id}/void`, {})
                         )}>Void</button>}
@@ -226,19 +229,22 @@ function RefundForm({ invoice, onClose, onSaved }: { invoice: any; onClose: () =
       .catch((err) => setError(err.message));
   }, []);
 
+  const { busy, run } = useSubmit();
   const submit = async (event: FormEvent) => {
     event.preventDefault();
-    try {
-      await api.post('/api/accounting/refunds', { invoice_id: invoice.id, ...form });
-      await onSaved();
-      onClose();
-    } catch (err: any) {
-      setError(err.message);
-    }
+    return run(async () => {
+      try {
+        await api.post('/api/accounting/refunds', { invoice_id: invoice.id, ...form });
+        await onSaved();
+        onClose();
+      } catch (err: any) {
+        setError(err.message);
+      }
+    });
   };
 
   return (
-    <Modal title={`Refund on ${invoice.invoice_number}`}>
+    <Modal title={`Refund on ${invoice.invoice_number}`} onClose={onClose}>
       <form onSubmit={submit}>
         <p className="muted">Paid so far {money(paid, invoice.currency)}</p>
         <div className="form-grid">
@@ -258,7 +264,7 @@ function RefundForm({ invoice, onClose, onSaved }: { invoice: any; onClose: () =
         <label style={{ marginTop: 12 }}>Reason<textarea required rows={2} value={form.reason} onChange={(e) => set('reason', e.target.value)} /></label>
         {error && <p className="error">{error}</p>}
         <div className="form-actions">
-          <button className="primary">Record refund</button>
+          <button disabled={busy} className="primary">Record refund</button>
           <button type="button" onClick={onClose}>Cancel</button>
         </div>
       </form>

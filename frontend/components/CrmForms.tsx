@@ -3,6 +3,7 @@ import { CustomInputs, useCustomFields } from '@/components/CustomFields';
 import Modal from '@/components/Modal';
 import { TagPicker, useTags } from '@/components/Tags';
 import { api } from '@/lib/api';
+import useSubmit from '@/lib/useSubmit';
 import { CATEGORIES } from '@/lib/forecast';
 
 export const useTeam = () => {
@@ -29,27 +30,31 @@ export function OwnerField({ value, members, onChange, empty = 'Unassigned' }: {
 export function useForm(initial: any, save: (form: any) => Promise<unknown>, onClose: () => void, onSaved: (result?: any) => void) {
   const [form, setForm] = useState<any>(initial);
   const [error, setError] = useState('');
+  const { busy, run } = useSubmit();
   const set = (field: string, value: unknown) => setForm((current: any) => ({ ...current, [field]: value }));
 
-  const submit = async (event: FormEvent) => {
+  const submit = (event: FormEvent) => {
     event.preventDefault();
-    try {
-      const result = await save(form);
-      await onSaved(result);
-      onClose();
-    } catch (err: any) {
-      setError(err.message);
-    }
+    return run(async () => {
+      setError('');
+      try {
+        const result = await save(form);
+        await onSaved(result);
+        onClose();
+      } catch (err: any) {
+        setError(err.message);
+      }
+    });
   };
 
-  return { form, set, error, submit };
+  return { form, set, error, submit, busy };
 }
 
-export const Actions = ({ error, onClose }: { error: string; onClose: () => void }) => (
+export const Actions = ({ error, onClose, busy = false }: { error: string; onClose: () => void; busy?: boolean }) => (
   <>
     {error && <p className="error">{error}</p>}
     <div className="form-actions">
-      <button className="primary">Save</button>
+      <button className="primary" disabled={busy}>{busy ? 'Saving…' : 'Save'}</button>
       <button type="button" onClick={onClose}>Cancel</button>
     </div>
   </>
@@ -61,7 +66,7 @@ export function CompanyForm({ initial, onClose, onSaved }: FormProps) {
   const members = useTeam();
   const fields = useCustomFields('company');
   const tags = useTags();
-  const { form, set, error, submit } = useForm(
+  const { form, set, error, submit, busy } = useForm(
     { name: '', website: '', industry: '', phone: '', notes: '', owner_id: '', custom: {}, tags: [], ...initial },
     ({ id, name, website, industry, phone, notes, owner_id, custom, tags }) => {
       const body = { name, website, industry, phone, notes, owner_id, custom, tags: tags || [] };
@@ -72,7 +77,7 @@ export function CompanyForm({ initial, onClose, onSaved }: FormProps) {
   );
 
   return (
-    <Modal title={form.id ? `Edit ${form.name}` : 'New company'}>
+    <Modal title={form.id ? `Edit ${form.name}` : 'New company'} onClose={onClose}>
       <form onSubmit={submit}>
         <div className="form-grid">
           <label>Name<input required value={form.name} onChange={(e) => set('name', e.target.value)} /></label>
@@ -84,7 +89,7 @@ export function CompanyForm({ initial, onClose, onSaved }: FormProps) {
         </div>
         <TagPicker value={form.tags} onChange={(ids) => set('tags', ids)} tags={tags} />
         <label style={{ marginTop: 12 }}>Notes<textarea rows={3} value={form.notes || ''} onChange={(e) => set('notes', e.target.value)} /></label>
-        <Actions error={error} onClose={onClose} />
+        <Actions error={error} onClose={onClose} busy={busy} />
       </form>
     </Modal>
   );
@@ -95,7 +100,7 @@ export function ContactForm({ initial, onClose, onSaved }: FormProps) {
   const fields = useCustomFields('contact');
   const tags = useTags();
   const [companies, setCompanies] = useState<any[]>([]);
-  const { form, set, error, submit } = useForm(
+  const { form, set, error, submit, busy } = useForm(
     { name: '', email: '', phone: '', job_title: '', company_id: '', notes: '', owner_id: '', custom: {}, tags: [], ...initial },
     ({ id, name, email, phone, job_title, company_id, notes, owner_id, custom, tags }) => {
       const body = { name, email, phone, job_title, company_id, notes, owner_id, custom, tags: tags || [] };
@@ -110,7 +115,7 @@ export function ContactForm({ initial, onClose, onSaved }: FormProps) {
   }, []);
 
   return (
-    <Modal title={form.id ? `Edit ${form.name}` : 'New contact'}>
+    <Modal title={form.id ? `Edit ${form.name}` : 'New contact'} onClose={onClose}>
       <form onSubmit={submit}>
         <div className="form-grid">
           <label>Name<input required value={form.name} onChange={(e) => set('name', e.target.value)} /></label>
@@ -128,7 +133,7 @@ export function ContactForm({ initial, onClose, onSaved }: FormProps) {
         </div>
         <TagPicker value={form.tags} onChange={(ids) => set('tags', ids)} tags={tags} />
         <label style={{ marginTop: 12 }}>Notes<textarea rows={3} value={form.notes || ''} onChange={(e) => set('notes', e.target.value)} /></label>
-        <Actions error={error} onClose={onClose} />
+        <Actions error={error} onClose={onClose} busy={busy} />
       </form>
     </Modal>
   );
@@ -141,7 +146,7 @@ export function DealForm({ initial, onClose, onSaved }: FormProps) {
   const [pipelines, setPipelines] = useState<any[]>([]);
   const [contacts, setContacts] = useState<any[]>([]);
   const [companies, setCompanies] = useState<any[]>([]);
-  const { form, set, error, submit } = useForm(
+  const { form, set, error, submit, busy } = useForm(
     { title: '', value: '', stage_id: '', contact_id: '', company_id: '', owner_id: '', expected_close: '', forecast_category: '', custom: {}, tags: [], ...initial },
     ({ id, title, value, stage_id, contact_id, company_id, owner_id, expected_close, forecast_category, custom, tags }) => {
       const body = { title, value, stage_id, contact_id, company_id, owner_id, expected_close, forecast_category: forecast_category || '', custom, tags: tags || [] };
@@ -163,7 +168,7 @@ export function DealForm({ initial, onClose, onSaved }: FormProps) {
   }, []);
 
   return (
-    <Modal title={form.id ? `Edit ${form.title}` : 'New deal'}>
+    <Modal title={form.id ? `Edit ${form.title}` : 'New deal'} onClose={onClose}>
       <form onSubmit={submit}>
         <div className="form-grid">
           <label>Title<input required value={form.title} onChange={(e) => set('title', e.target.value)} /></label>
@@ -200,7 +205,7 @@ export function DealForm({ initial, onClose, onSaved }: FormProps) {
           <CustomInputs fields={fields} values={form.custom} onChange={(custom) => set('custom', custom)} />
         </div>
         <TagPicker value={form.tags} onChange={(ids) => set('tags', ids)} tags={tags} />
-        <Actions error={error} onClose={onClose} />
+        <Actions error={error} onClose={onClose} busy={busy} />
       </form>
     </Modal>
   );
@@ -214,7 +219,7 @@ export function LostForm({ deal, stageId, onClose, onSaved }: { deal: any; stage
     api.get('/api/crm/lost-reasons').then(setReasons).catch(() => setReasons([]));
   }, []);
 
-  const { form, set, error, submit } = useForm(
+  const { form, set, error, submit, busy } = useForm(
     { lost_reason: '' },
     ({ lost_reason }) => api.put(`/api/crm/deals/${deal.id}`, { stage_id: stageId, lost_reason }),
     onClose,
@@ -222,7 +227,7 @@ export function LostForm({ deal, stageId, onClose, onSaved }: { deal: any; stage
   );
 
   return (
-    <Modal title={`Why was ${deal.title} lost?`}>
+    <Modal title={`Why was ${deal.title} lost?`} onClose={onClose}>
       <form onSubmit={submit}>
         {reasons.length > 0 && !other ? (
           <label>Reason
@@ -235,7 +240,7 @@ export function LostForm({ deal, stageId, onClose, onSaved }: { deal: any; stage
         ) : (
           <label>Reason<input required maxLength={200} value={form.lost_reason} onChange={(e) => set('lost_reason', e.target.value)} /></label>
         )}
-        <Actions error={error} onClose={onClose} />
+        <Actions error={error} onClose={onClose} busy={busy} />
       </form>
     </Modal>
   );

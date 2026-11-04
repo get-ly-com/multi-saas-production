@@ -4,6 +4,7 @@ import AppShell from '@/components/AppShell';
 import AutomationForm, { Starters, blankRule, eventFor } from '@/components/AutomationForm';
 import CrmNav from '@/components/CrmNav';
 import { api, formatDate } from '@/lib/api';
+import useSubmit from '@/lib/useSubmit';
 
 const ACTION_NAMES: Record<string, string> = { task: 'Task', alert: 'Alert', assign: 'Assign' };
 const statusBadge: Record<string, string> = { done: 'won', failed: 'lost', skipped: '' };
@@ -32,7 +33,9 @@ function AutomationApp() {
     load();
   }, []);
 
-  const run = async (action: () => Promise<unknown>, done = '') => {
+  const { busy, run: once } = useSubmit();
+  // One action at a time, so a double click cannot repeat it
+  const run = (action: () => Promise<unknown>, done = '') => once(async () => {
     try {
       await action();
       await load();
@@ -41,7 +44,7 @@ function AutomationApp() {
       setNotice('');
       setError(err.message);
     }
-  };
+  });
 
   const remove = (rule: any) => {
     if (window.confirm(`Delete ${rule.name}? Tasks it already created stay.`)) {
@@ -49,7 +52,7 @@ function AutomationApp() {
     }
   };
 
-  const runNow = async () => {
+  const runNow = () => once(async () => {
     try {
       const { handled } = await api.post('/api/crm/automations/run', {});
       await load();
@@ -58,7 +61,7 @@ function AutomationApp() {
       setNotice('');
       setError(err.message);
     }
-  };
+  });
 
   return (
     <div className="stack">
@@ -66,7 +69,7 @@ function AutomationApp() {
       <div className="page-head">
         <h1>Automation</h1>
         <div className="row-actions">
-          <button onClick={runNow}>Check now</button>
+          <button disabled={busy} onClick={runNow}>Check now</button>
           <button className="primary" onClick={() => setEditing(blankRule)}>New rule</button>
         </div>
       </div>

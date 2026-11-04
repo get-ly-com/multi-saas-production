@@ -3,6 +3,7 @@ import AccountingNav from '@/components/AccountingNav';
 import AppShell from '@/components/AppShell';
 import Modal from '@/components/Modal';
 import { api, formatDate, money, today } from '@/lib/api';
+import useSubmit from '@/lib/useSubmit';
 
 const blankAsset = { name: '', cost: '', salvage: '0', life_months: '60', start_date: '', paid_from: '' };
 
@@ -40,7 +41,8 @@ function AssetsApp() {
     load();
   }, []);
 
-  const depreciate = async () => {
+  const { busy, run: once } = useSubmit();
+  const depreciate = () => once(async () => {
     try {
       const result = await api.post('/api/accounting/assets/depreciate', { through });
       setNotice(result.months_posted ? `Posted depreciation for ${result.months_posted} month(s).` : 'Nothing new to post. Only finished months are depreciated.');
@@ -49,7 +51,7 @@ function AssetsApp() {
       setNotice('');
       setError(err.message);
     }
-  };
+  });
 
   return (
     <div className="stack">
@@ -111,19 +113,22 @@ function AssetForm({ banks, onClose, onSaved }: { banks: any[]; onClose: () => v
   const [error, setError] = useState('');
   const set = (field: string, value: string) => setForm({ ...form, [field]: value });
 
+  const { busy, run } = useSubmit();
   const submit = async (event: FormEvent) => {
     event.preventDefault();
-    try {
-      await api.post('/api/accounting/assets', form);
-      await onSaved();
-      onClose();
-    } catch (err: any) {
-      setError(err.message);
-    }
+    return run(async () => {
+      try {
+        await api.post('/api/accounting/assets', form);
+        await onSaved();
+        onClose();
+      } catch (err: any) {
+        setError(err.message);
+      }
+    });
   };
 
   return (
-    <Modal title="New fixed asset">
+    <Modal title="New fixed asset" onClose={onClose}>
       <form onSubmit={submit}>
         <div className="form-grid">
           <label>Name<input required value={form.name} onChange={(e) => set('name', e.target.value)} /></label>
@@ -140,7 +145,7 @@ function AssetForm({ banks, onClose, onSaved }: { banks: any[]; onClose: () => v
         </div>
         {error && <p className="error">{error}</p>}
         <div className="form-actions">
-          <button className="primary">Save</button>
+          <button disabled={busy} className="primary">Save</button>
           <button type="button" onClick={onClose}>Cancel</button>
         </div>
       </form>
@@ -153,19 +158,22 @@ function DisposeForm({ asset, banks, onClose, onSaved }: { asset: any; banks: an
   const [error, setError] = useState('');
   const set = (field: string, value: string) => setForm({ ...form, [field]: value });
 
+  const { busy, run } = useSubmit();
   const submit = async (event: FormEvent) => {
     event.preventDefault();
-    try {
-      await api.post(`/api/accounting/assets/${asset.id}/dispose`, form);
-      await onSaved();
-      onClose();
-    } catch (err: any) {
-      setError(err.message);
-    }
+    return run(async () => {
+      try {
+        await api.post(`/api/accounting/assets/${asset.id}/dispose`, form);
+        await onSaved();
+        onClose();
+      } catch (err: any) {
+        setError(err.message);
+      }
+    });
   };
 
   return (
-    <Modal title={`Dispose of ${asset.name}`}>
+    <Modal title={`Dispose of ${asset.name}`} onClose={onClose}>
       <form onSubmit={submit}>
         <p className="muted">Book value {money(asset.book_value)}. Run depreciation first if any finished months are missing. The gain or loss posts automatically.</p>
         <div className="form-grid">
@@ -179,7 +187,7 @@ function DisposeForm({ asset, banks, onClose, onSaved }: { asset: any; banks: an
         </div>
         {error && <p className="error">{error}</p>}
         <div className="form-actions">
-          <button className="primary">Dispose</button>
+          <button disabled={busy} className="primary">Dispose</button>
           <button type="button" onClick={onClose}>Cancel</button>
         </div>
       </form>

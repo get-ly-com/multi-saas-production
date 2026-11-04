@@ -2,7 +2,7 @@ import { useRouter } from 'next/router';
 import { FormEvent, useEffect, useState } from 'react';
 import AppShell from '@/components/AppShell';
 import InventoryNav from '@/components/InventoryNav';
-import { api, formatDate, money } from '@/lib/api';
+import { api, formatDate, money, queryId } from '@/lib/api';
 import { downloadCsv } from '@/lib/csv';
 
 export default function CountSheet() {
@@ -13,7 +13,7 @@ const blankOrWhole = (value: string) => value === '' || /^\d{1,9}$/.test(value);
 
 function CountSheetApp() {
   const router = useRouter();
-  const id = typeof router.query.id === 'string' ? router.query.id : '';
+  const id = queryId(router.query.id) || '';
   const [sheet, setSheet] = useState<any>(null);
   const [counted, setCounted] = useState<Record<string, string>>({});
   const [filter, setFilter] = useState('');

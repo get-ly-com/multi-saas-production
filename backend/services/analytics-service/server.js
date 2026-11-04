@@ -18,10 +18,24 @@ const DATE = /^\d{4}-\d{2}-\d{2}$/;
 
 const analytics = (req) => req.db.schema('analytics');
 
+// Only our own messages and the ones our database functions raise (P0001) reach people
 const sendError = (res, error) => {
-  if (error.status) return res.status(error.status).json({ error: error.message });
-  if (error.message === 'Not found') return res.status(404).json({ error: 'Company not found' });
-  res.status(400).json({ error: error.message });
+  const code = error?.code || '';
+  if (error?.status) return res.status(error.status).json({ error: error.message });
+  if (!code && error?.constructor === Error) return res.status(400).json({ error: error.message });
+  if (code === 'P0001') {
+    if (error.message === 'Not found') return res.status(404).json({ error: 'Company not found' });
+    return res.status(400).json({ error: error.message });
+  }
+  if (/^PT[45]\d\d$/.test(code)) return res.status(Number(code.slice(2))).json({ error: error.message });
+
+  console.error('Analytics error:', error);
+  if (code === '42501') return res.status(403).json({ error: 'You don’t have access to that' });
+  if (code === '22P02') return res.status(404).json({ error: 'Not found' });
+  if (code === '23503') return res.status(409).json({ error: 'That is still in use' });
+  if (code === '23505') return res.status(409).json({ error: 'That is already saved' });
+  if (code === '23514') return res.status(400).json({ error: 'That value isn’t allowed' });
+  res.status(400).json({ error: 'That didn’t work. Please check and try again.' });
 };
 
 const date = (value, message) => {
@@ -122,7 +136,7 @@ app.get('/goals', callAnalytics('goal_progress', (req) => ({
 })));
 app.post('/goals', callAnalytics('set_goal', (req) => {
   const target = req.body?.target === null || req.body?.target === '' ? null : Number(req.body?.target);
-  if (target !== null && !Number.isFinite(target)) throw new Error('Enter a goal of 0 or more');
+  if (target !== null && !(Number.isFinite(target) && target >= 0)) throw new Error('Enter a goal of 0 or more');
   const months = Number(req.body?.months || 1);
   if (!Number.isInteger(months)) throw new Error('Set a goal for 1 to 12 months at a time');
   return {
@@ -137,5 +151,17 @@ app.post('/goals', callAnalytics('set_goal', (req) => {
 app.get('/history', callAnalytics('snapshot_history', (req) => ({
   p_days: Math.min(Math.max(Number.parseInt(req.query.days, 10) || 90, 7), 400)
 })));
+
+app.use((err, req, res, next) => {
+  if (res.headersSent) return next(err);
+  // Bad JSON and too-large bodies are the sender's mistake, not ours
+  if (err.status >= 400 && err.status < 500) {
+    return res.status(err.status).json({ error: err.status === 413 ? 'That is too large to send' : 'That request could not be read' });
+  }
+  console.error('Error:', err);
+  res.status(500).json({ error: 'Internal server error' });
+});
+
+process.on('unhandledRejection', (reason) => console.error('Unhandled rejection:', reason));
 
 app.listen(PORT, () => console.log(`Analytics Service on ${PORT}`));

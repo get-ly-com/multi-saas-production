@@ -2,6 +2,7 @@ import { FormEvent, useEffect, useState } from 'react';
 import AppShell from '@/components/AppShell';
 import SchedulerNav, { timeZones } from '@/components/SchedulerNav';
 import { api } from '@/lib/api';
+import useSubmit from '@/lib/useSubmit';
 
 export default function Settings() {
   return <AppShell><SettingsApp /></AppShell>;
@@ -41,20 +42,23 @@ function SettingsApp() {
 
   const set = (field: string, value: any) => setForm({ ...form, [field]: value });
 
+  const { busy, run } = useSubmit();
   const submit = async (event: FormEvent) => {
     event.preventDefault();
-    try {
-      const saved = await api.put('/api/scheduler/settings', form);
-      setForm({ ...saved, welcome: saved.welcome || '' });
-      setNotice('Saved');
-      setError('');
-    } catch (err: any) {
-      setError(err.message);
-      setNotice('');
-    }
+    return run(async () => {
+      try {
+        const saved = await api.put('/api/scheduler/settings', form);
+        setForm({ ...saved, welcome: saved.welcome || '' });
+        setNotice('Saved');
+        setError('');
+      } catch (err: any) {
+        setError(err.message);
+        setNotice('');
+      }
+    });
   };
 
-  const newLink = async () => {
+  const newLink = () => run(async () => {
     if (!window.confirm('Make a new booking link? The old link will stop working.')) return;
     try {
       const { booking_key } = await api.post('/api/scheduler/settings/new-key', {});
@@ -63,7 +67,7 @@ function SettingsApp() {
     } catch (err: any) {
       setError(err.message);
     }
-  };
+  });
 
   const copy = async () => {
     try {
@@ -93,7 +97,7 @@ function SettingsApp() {
           <button type="button" className="always" onClick={copy}>Copy</button>
           <a className="button" href={link} target="_blank" rel="noopener noreferrer">Open</a>
         </div>
-        {manager && <p><button type="button" className="link" onClick={newLink}>Make a new link</button> <span className="muted">if the old one was shared by mistake.</span></p>}
+        {manager && <p><button disabled={busy} type="button" className="link" onClick={newLink}>Make a new link</button> <span className="muted">if the old one was shared by mistake.</span></p>}
       </div>
 
       <CalendarFeed canEdit={data.can_edit} onNotice={setNotice} onError={setError} />
@@ -126,7 +130,7 @@ function SettingsApp() {
           <p className="muted">The draft goes to Accounting for the customer's CRM contact, at the service price. Nothing is sent until you send it. If the booking is cancelled, the draft is deleted.</p>
           <label style={{ marginTop: 12 }}>Welcome message on the booking page<textarea rows={3} maxLength={1000} value={form.welcome} onChange={(e) => set('welcome', e.target.value)} /></label>
           <p className="muted">Opening hours and booking times all use this time zone. Visitors see times in it too.</p>
-          {manager && <div className="form-actions"><button className="primary">Save</button></div>}
+          {manager && <div className="form-actions"><button disabled={busy} className="primary">Save</button></div>}
         </fieldset>
         {!manager && <p className="muted">Only owners and admins can change these.</p>}
       </form>
@@ -147,7 +151,8 @@ function CalendarFeed({ canEdit, onNotice, onError }: {
 
   const url = token ? `${process.env.NEXT_PUBLIC_API_BASE_URL}/api/book/feed/${token}.ics` : '';
 
-  const make = async () => {
+  const { busy, run: once } = useSubmit();
+  const make = () => once(async () => {
     if (token && !window.confirm('Make a new link? Calendars using the old link will stop updating.')) return;
     try {
       const result = await api.post('/api/scheduler/feed', {});
@@ -156,9 +161,9 @@ function CalendarFeed({ canEdit, onNotice, onError }: {
     } catch (err: any) {
       onError(err.message);
     }
-  };
+  });
 
-  const stop = async () => {
+  const stop = () => once(async () => {
     if (!window.confirm('Turn off your calendar link? Calendars using it will stop updating.')) return;
     try {
       await api.delete('/api/scheduler/feed');
@@ -167,7 +172,7 @@ function CalendarFeed({ canEdit, onNotice, onError }: {
     } catch (err: any) {
       onError(err.message);
     }
-  };
+  });
 
   const copy = async () => {
     try {
@@ -184,7 +189,7 @@ function CalendarFeed({ canEdit, onNotice, onError }: {
       <p className="muted">Subscribe to this link in Google Calendar ("Other calendars", then "From URL"), Outlook ("Add calendar", then "Subscribe from web") or Apple Calendar. It shows your bookings from the last 60 days and the next year, and your video meetings. Calendar apps check it every few hours. It is read-only: changes are made here.</p>
       {token === undefined && <p>Loading…</p>}
       {token === null && (canEdit
-        ? <button type="button" className="primary" onClick={make}>Make my calendar link</button>
+        ? <button disabled={busy} type="button" className="primary" onClick={make}>Make my calendar link</button>
         : <p className="muted">Viewers don't take bookings, so there's no calendar link.</p>)}
       {token && (
         <>
@@ -194,8 +199,8 @@ function CalendarFeed({ canEdit, onNotice, onError }: {
           </div>
           <p className="muted">Anyone with this link can see your bookings, including customer names and phone numbers. Keep it private.</p>
           <p className="row-actions">
-            {canEdit && <button type="button" onClick={make}>Make a new link</button>}
-            <button type="button" className="danger" onClick={stop}>Turn off</button>
+            {canEdit && <button disabled={busy} type="button" onClick={make}>Make a new link</button>}
+            <button disabled={busy} type="button" className="danger" onClick={stop}>Turn off</button>
           </p>
         </>
       )}

@@ -4,7 +4,7 @@ import { FormEvent, useCallback, useEffect, useState } from 'react';
 import AppShell from '@/components/AppShell';
 import ChatNav, { PRIORITY, TICKET_STATUS, TICKET_STATUS_STYLES, dueText, timeText } from '@/components/ChatNav';
 import Modal from '@/components/Modal';
-import { api } from '@/lib/api';
+import { api, isUuid } from '@/lib/api';
 
 export default function ChatTickets() {
   return <AppShell><Tickets /></AppShell>;
@@ -37,7 +37,7 @@ function Tickets() {
   const [loading, setLoading] = useState(true);
   const [adding, setAdding] = useState(false);
   const [error, setError] = useState('');
-  const selected = typeof router.query.t === 'string' ? router.query.t : '';
+  const selected = isUuid(router.query.t) ? router.query.t : '';
 
   useEffect(() => {
     if (router.query.overdue === '1') setOverdue(true);
@@ -162,7 +162,7 @@ function TicketForm({ team, title, start, onClose, onSave }: {
   };
 
   return (
-    <Modal title={title}>
+    <Modal title={title} onClose={onClose}>
       <form onSubmit={submit}>
         <div className="form-grid">
           <label>Subject<input required maxLength={200} value={form.subject} onChange={(e) => set('subject', e.target.value)} /></label>

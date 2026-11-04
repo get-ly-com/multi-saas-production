@@ -2,6 +2,7 @@ import { FormEvent, useEffect, useState } from 'react';
 import AppShell from '@/components/AppShell';
 import ChatNav, { PRIORITY } from '@/components/ChatNav';
 import { api } from '@/lib/api';
+import useSubmit from '@/lib/useSubmit';
 
 export default function ChatSettingsPage() {
   return <AppShell><ChatSettings /></AppShell>;
@@ -20,15 +21,19 @@ const timeZones = (): string[] => {
 
 const linkFor = (key: string) => (typeof window === 'undefined' ? '' : `${window.location.origin}/chat/${key}`);
 
-const iframeSnippet = (url: string) =>
-  `<iframe src="${url}?embed=1" title="Chat with us" style="width:100%;max-width:400px;height:560px;border:0;border-radius:12px"></iframe>`;
+// A browser only tells an embedded page the bare site it sits on, so a tiny script writes the chat box
+// with the host page (address without its query) and its campaign (utm_campaign) added to the link.
+const IFRAME_STYLE = 'width:100%;max-width:400px;height:560px;border:0;border-radius:12px';
+const iframeSnippet = (url: string) => `<!-- Chat box -->
+<script>(function(s){var c=new URLSearchParams(location.search).get('utm_campaign'),f=document.createElement('iframe');f.src='${url}?embed=1&page='+encodeURIComponent(location.origin+location.pathname)+(c?'&utm_campaign='+encodeURIComponent(c):'');f.title='Chat with us';f.style.cssText='${IFRAME_STYLE}';s.parentNode.insertBefore(f,s)})(document.currentScript);</script>
+<noscript><iframe src="${url}?embed=1" title="Chat with us" style="${IFRAME_STYLE}"></iframe></noscript>`;
 
 // A floating button that opens the chat. The chat only loads when someone clicks it, and takes the
-// campaign (utm_campaign) from the page's link so the chat is counted for it.
+// page and its campaign (utm_campaign) from the page's link so the chat is counted for it.
 const buttonSnippet = (url: string, colour: string) => `<!-- Chat button -->
 <div style="position:fixed;right:20px;bottom:20px;z-index:2147483000;text-align:right;font-family:sans-serif">
   <iframe id="chat-frame" data-src="${url}?embed=1" title="Chat with us" style="display:none;width:360px;height:520px;max-width:calc(100vw - 40px);max-height:calc(100vh - 110px);border:0;border-radius:12px;box-shadow:0 8px 30px rgba(0,0,0,.25);margin-bottom:12px;background:#fff"></iframe>
-  <button type="button" onclick="var f=document.getElementById('chat-frame');if(!f.src){var c=new URLSearchParams(location.search).get('utm_campaign');f.src=f.dataset.src+(c?'&amp;utm_campaign='+encodeURIComponent(c):'')}f.style.display=f.style.display==='none'?'block':'none'" style="background:${colour};color:#fff;border:0;border-radius:24px;padding:12px 18px;font-size:15px;cursor:pointer;box-shadow:0 4px 14px rgba(0,0,0,.2)">Chat with us</button>
+  <button type="button" onclick="var f=document.getElementById('chat-frame');if(!f.src){var c=new URLSearchParams(location.search).get('utm_campaign');f.src=f.dataset.src+'&amp;page='+encodeURIComponent(location.origin+location.pathname)+(c?'&amp;utm_campaign='+encodeURIComponent(c):'')}f.style.display=f.style.display==='none'?'block':'none'" style="background:${colour};color:#fff;border:0;border-radius:24px;padding:12px 18px;font-size:15px;cursor:pointer;box-shadow:0 4px 14px rgba(0,0,0,.2)">Chat with us</button>
 </div>`;
 
 function ChatSettings() {
@@ -48,36 +53,39 @@ function ChatSettings() {
       .catch((err) => setError(err.message));
   }, []);
 
+  const { busy, run } = useSubmit();
   const save = async (event: FormEvent) => {
     event.preventDefault();
-    setSaving(true);
-    setError('');
-    setNotice('');
-    try {
-      const saved = await api.put('/api/chatbot/settings', {
-        enabled: form.enabled,
-        bot_enabled: form.bot_enabled,
-        welcome_message: form.welcome_message,
-        handoff_message: form.handoff_message,
-        opening_hours: form.opening_hours,
-        colour: form.colour,
-        hours_enabled: form.hours_enabled,
-        hours_timezone: form.hours_timezone,
-        weekly_hours: form.weekly_hours,
-        offline_message: form.offline_message,
-        ask_rating: form.ask_rating,
-        sla_hours: form.sla_hours
-      });
-      setForm(saved);
-      setNotice('Saved');
-    } catch (err: any) {
-      setError(err.message);
-    } finally {
-      setSaving(false);
-    }
+    return run(async () => {
+      setSaving(true);
+      setError('');
+      setNotice('');
+      try {
+        const saved = await api.put('/api/chatbot/settings', {
+          enabled: form.enabled,
+          bot_enabled: form.bot_enabled,
+          welcome_message: form.welcome_message,
+          handoff_message: form.handoff_message,
+          opening_hours: form.opening_hours,
+          colour: form.colour,
+          hours_enabled: form.hours_enabled,
+          hours_timezone: form.hours_timezone,
+          weekly_hours: form.weekly_hours,
+          offline_message: form.offline_message,
+          ask_rating: form.ask_rating,
+          sla_hours: form.sla_hours
+        });
+        setForm(saved);
+        setNotice('Saved');
+      } catch (err: any) {
+        setError(err.message);
+      } finally {
+        setSaving(false);
+      }
+    });
   };
 
-  const newKey = async () => {
+  const newKey = () => run(async () => {
     if (!window.confirm('Get a new chat address? The old link and every embedded chat stop working, and visitors lose access to their earlier chats. You will need to update your website.')) return;
     try {
       const { public_key } = await api.post('/api/chatbot/settings/key', {});
@@ -86,7 +94,7 @@ function ChatSettings() {
     } catch (err: any) {
       setError(err.message);
     }
-  };
+  });
 
   const copy = async (value: string) => {
     try {
@@ -166,7 +174,7 @@ function ChatSettings() {
         </fieldset>
         {error && <p className="error">{error}</p>}
         {notice && <p className="notice">{notice}</p>}
-        {manager && <div className="form-actions"><button className="primary" disabled={saving}>{saving ? 'Saving…' : 'Save'}</button></div>}
+        {manager && <div className="form-actions"><button className="primary" disabled={busy || saving}>{saving ? 'Saving…' : 'Save'}</button></div>}
       </form>
 
       <div className="card stack">
@@ -176,7 +184,7 @@ function ChatSettings() {
           <div className="chat-try"><input readOnly value={url} onFocus={(e) => e.target.select()} /><button type="button" className="always" onClick={() => copy(url)}>Copy</button></div>
         </label>
         <label>Chat box inside a page (paste where it should appear)
-          <textarea readOnly rows={3} value={iframeSnippet(url)} onFocus={(e) => e.target.select()} />
+          <textarea readOnly rows={5} value={iframeSnippet(url)} onFocus={(e) => e.target.select()} />
         </label>
         <div><button type="button" className="always" onClick={() => copy(iframeSnippet(url))}>Copy chat box code</button></div>
         <label>Floating "Chat with us" button (paste just before &lt;/body&gt;)
@@ -184,7 +192,7 @@ function ChatSettings() {
         </label>
         <div><button type="button" className="always" onClick={() => copy(buttonSnippet(url, form.colour))}>Copy button code</button></div>
         <p className="muted">Anyone with this address can chat with you. If it is being misused, get a new address.</p>
-        {manager && <div><button type="button" className="danger" onClick={newKey}>Get a new address</button></div>}
+        {manager && <div><button disabled={busy} type="button" className="danger" onClick={newKey}>Get a new address</button></div>}
       </div>
     </div>
   );

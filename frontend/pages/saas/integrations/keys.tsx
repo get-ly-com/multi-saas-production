@@ -4,6 +4,7 @@ import AppShell from '@/components/AppShell';
 import IntegrationsNav, { OnlyManagers, ShowOnce, dateTime } from '@/components/IntegrationsNav';
 import Modal from '@/components/Modal';
 import { api } from '@/lib/api';
+import useSubmit from '@/lib/useSubmit';
 
 export default function ApiKeys() {
   return <AppShell><KeysApp /></AppShell>;
@@ -16,6 +17,7 @@ function KeysApp() {
   const [scope, setScope] = useState<'read' | 'write'>('read');
   const [created, setCreated] = useState<{ name: string; key: string; scope: string } | null>(null);
   const [log, setLog] = useState<any>(null);
+  const { busy, run } = useSubmit();
 
   const load = async () => {
     try {
@@ -33,17 +35,19 @@ function KeysApp() {
   if (!data) return <div className="stack"><IntegrationsNav />{error ? <p className="error">{error}</p> : <p className="empty">Loading…</p>}</div>;
   if (!data.is_manager) return <div className="stack"><IntegrationsNav /><h1>API keys</h1><OnlyManagers /></div>;
 
-  const create = async (event: FormEvent) => {
+  const create = (event: FormEvent) => {
     event.preventDefault();
-    try {
-      const result = await api.post('/api/integration/api-keys/scoped', { name, scope });
-      setCreated({ name, key: result.key, scope });
-      setName('');
-      setScope('read');
-      await load();
-    } catch (err: any) {
-      setError(err.message);
-    }
+    return run(async () => {
+      try {
+        const result = await api.post('/api/integration/api-keys/scoped', { name, scope });
+        setCreated({ name, key: result.key, scope });
+        setName('');
+        setScope('read');
+        await load();
+      } catch (err: any) {
+        setError(err.message);
+      }
+    });
   };
 
   const showLog = async (row: any) => {
@@ -54,7 +58,7 @@ function KeysApp() {
     }
   };
 
-  const revoke = async (row: any) => {
+  const revoke = (row: any) => run(async () => {
     if (!window.confirm(`Revoke ${row.name}? Anything using it stops working straight away.`)) return;
     try {
       await api.delete(`/api/integration/api-keys/${row.id}`);
@@ -62,7 +66,7 @@ function KeysApp() {
     } catch (err: any) {
       setError(err.message);
     }
-  };
+  });
 
   return (
     <div className="stack">
@@ -80,7 +84,7 @@ function KeysApp() {
           <option value="read">Read only</option>
           <option value="write">Read, and add contacts and leads</option>
         </select>
-        <button className="primary">Make a key</button>
+        <button className="primary" disabled={busy}>Make a key</button>
       </form>
 
       <div className="card table-wrap">
@@ -99,7 +103,7 @@ function KeysApp() {
                 <td>
                   <div className="row-actions">
                     <button onClick={() => showLog(row)}>Requests</button>
-                    {!row.revoked_at && <button className="danger" onClick={() => revoke(row)}>Revoke</button>}
+                    {!row.revoked_at && <button className="danger" disabled={busy} onClick={() => revoke(row)}>Revoke</button>}
                   </div>
                 </td>
               </tr>
@@ -123,7 +127,7 @@ function KeysApp() {
       )}
 
       {log && (
-        <Modal title={`Requests: ${log.key.name}`}>
+        <Modal title={`Requests: ${log.key.name}`} onClose={() => setLog(null)}>
           <p className="muted">
             Last day: {log.last_day.requests} requests, {log.last_day.ok} worked, {log.last_day.refused} refused, {log.last_day.writes} added a record.
             Only the method, address and result are kept, never what was sent.

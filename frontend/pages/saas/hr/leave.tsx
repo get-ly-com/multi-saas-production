@@ -4,6 +4,7 @@ import AppShell from '@/components/AppShell';
 import { LEAVE_STATUSES, LeaveForm, fullName, leaveDates } from '@/components/HrForms';
 import HrNav from '@/components/HrNav';
 import { api, today } from '@/lib/api';
+import useSubmit from '@/lib/useSubmit';
 
 export default function Leave() {
   return <AppShell><LeaveApp /></AppShell>;
@@ -54,14 +55,16 @@ function LeaveApp() {
     load();
   }, [filter]);
 
-  const act = async (path: string, body: unknown = {}) => {
+  const { busy, run: once } = useSubmit();
+  // One action at a time, so a double click cannot repeat it
+  const act = (path: string, body: unknown = {}) => once(async () => {
     try {
       await api.post(path, body);
       await load();
     } catch (err: any) {
       setError(err.message);
     }
-  };
+  });
 
   const decide = (row: any, status: string) => {
     const note = status === 'rejected' ? window.prompt('Reason for saying no (optional)') : '';

@@ -8,7 +8,8 @@ import { useTeam } from '@/components/CrmForms';
 import { CustomValues } from '@/components/CustomFields';
 import { ConvertForm, DisqualifyForm, LeadForm, scoreBadge, scoreLabel, statusBadge, statusLabel } from '@/components/LeadForms';
 import Timeline from '@/components/Timeline';
-import { api, formatDate } from '@/lib/api';
+import { api, formatDate, queryId } from '@/lib/api';
+import useSubmit from '@/lib/useSubmit';
 
 export default function Lead() {
   return <AppShell><LeadApp /></AppShell>;
@@ -16,7 +17,7 @@ export default function Lead() {
 
 function LeadApp() {
   const router = useRouter();
-  const id = router.query.id as string | undefined;
+  const id = queryId(router.query.id);
   const members = useTeam();
   const [lead, setLead] = useState<any>(null);
   const [matches, setMatches] = useState<any>({ contacts: [], leads: [] });
@@ -39,18 +40,20 @@ function LeadApp() {
     if (id) load();
   }, [id]);
 
-  const run = async (action: () => Promise<unknown>) => {
+  const { busy, run: once } = useSubmit();
+  // One action at a time, so a double click cannot repeat it
+  const run = (action: () => Promise<unknown>) => once(async () => {
     try {
       await action();
       await load();
     } catch (err: any) {
       setError(err.message);
     }
-  };
+  });
 
   const setStatus = (status: string) => run(() => api.put(`/api/crm/leads/${id}`, { status }));
 
-  const remove = async () => {
+  const remove = () => once(async () => {
     if (!window.confirm(`Delete ${lead.name}? This can't be undone.`)) return;
     try {
       await api.delete(`/api/crm/leads/${id}`);
@@ -58,7 +61,7 @@ function LeadApp() {
     } catch (err: any) {
       setError(err.message);
     }
-  };
+  });
 
   const merge = (other: any) => {
     if (window.confirm(`Merge ${other.name} into ${lead.name}? ${other.name} is removed and its timeline moves here.`)) {
@@ -88,7 +91,7 @@ function LeadApp() {
               {open && <button onClick={() => setForm('disqualify')}>Disqualify</button>}
               {lead.status === 'disqualified' && <button onClick={() => setStatus('working')}>Reopen</button>}
               {lead.status !== 'converted' && <button onClick={() => setForm('edit')}>Edit</button>}
-              <button className="danger" onClick={remove}>Delete</button>
+              <button disabled={busy} className="danger" onClick={remove}>Delete</button>
             </div>
           </div>
 

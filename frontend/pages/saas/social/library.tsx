@@ -104,7 +104,7 @@ function SnippetForm({ row, onClose, onSaved }: { row: Snippet; onClose: () => v
   };
 
   return (
-    <Modal title={row.id ? `Edit ${KINDS[row.kind].toLowerCase()}` : `New ${KINDS[row.kind].toLowerCase()}`}>
+    <Modal title={row.id ? `Edit ${KINDS[row.kind].toLowerCase()}` : `New ${KINDS[row.kind].toLowerCase()}`} onClose={onClose}>
       <form onSubmit={submit}>
         <label>Name (only your team sees this)<input required maxLength={100} value={form.name} onChange={(e) => setForm({ ...form, name: e.target.value })} /></label>
         <label>{form.kind === 'hashtags' ? 'Hashtags, separated by spaces or commas (up to 30)' : 'Text'}

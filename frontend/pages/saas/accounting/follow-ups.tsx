@@ -4,6 +4,7 @@ import AccountingNav from '@/components/AccountingNav';
 import AppShell from '@/components/AppShell';
 import Modal from '@/components/Modal';
 import { api, formatDate, money, today } from '@/lib/api';
+import useSubmit from '@/lib/useSubmit';
 
 const addDays = (days: number) => {
   const date = new Date(`${today()}T00:00:00`);
@@ -142,19 +143,22 @@ function FollowUpPanel({ row, company, currency, onClose, onSaved }: { row: any;
     ? `mailto:${encodeURIComponent(row.email)}?subject=${encodeURIComponent(subjectFor(row, company))}&body=${encodeURIComponent(message)}`
     : '';
 
+  const { busy, run } = useSubmit();
   const save = async (event: FormEvent) => {
     event.preventDefault();
-    try {
-      await api.post('/api/accounting/follow-ups', { customer_id: row.customer_id, level_name: row.level_name, note, next_date: nextDate || null });
-      await onSaved();
-      onClose();
-    } catch (err: any) {
-      setError(err.message);
-    }
+    return run(async () => {
+      try {
+        await api.post('/api/accounting/follow-ups', { customer_id: row.customer_id, level_name: row.level_name, note, next_date: nextDate || null });
+        await onSaved();
+        onClose();
+      } catch (err: any) {
+        setError(err.message);
+      }
+    });
   };
 
   return (
-    <Modal title={`Follow up with ${row.name}`}>
+    <Modal title={`Follow up with ${row.name}`} onClose={onClose}>
       <div className="stack">
         <div className="table-wrap">
           <table>
@@ -195,7 +199,7 @@ function FollowUpPanel({ row, company, currency, onClose, onSaved }: { row: any;
           </div>
           {error && <p className="error">{error}</p>}
           <div className="form-actions">
-            <button className="primary">Save follow-up</button>
+            <button disabled={busy} className="primary">Save follow-up</button>
             <button type="button" onClick={onClose}>Close</button>
           </div>
         </form>
@@ -230,19 +234,22 @@ function StepsForm({ levels, usingDefaults, onClose, onSaved }: { levels: any[];
   const set = (index: number, field: string, value: string) =>
     setSteps(steps.map((step, position) => (position === index ? { ...step, [field]: value } : step)));
 
+  const { busy, run } = useSubmit();
   const save = async (event: FormEvent) => {
     event.preventDefault();
-    try {
-      await api.put('/api/accounting/follow-ups/levels', { levels: steps });
-      await onSaved();
-      onClose();
-    } catch (err: any) {
-      setError(err.message);
-    }
+    return run(async () => {
+      try {
+        await api.put('/api/accounting/follow-ups/levels', { levels: steps });
+        await onSaved();
+        onClose();
+      } catch (err: any) {
+        setError(err.message);
+      }
+    });
   };
 
   return (
-    <Modal title="Reminder steps">
+    <Modal title="Reminder steps" onClose={onClose}>
       <form onSubmit={save}>
         <p className="muted">
           Each step starts once a customer's oldest invoice is that many days overdue.
@@ -270,7 +277,7 @@ function StepsForm({ levels, usingDefaults, onClose, onSaved }: { levels: any[];
         )}
         {error && <p className="error">{error}</p>}
         <div className="form-actions">
-          <button className="primary">Save steps</button>
+          <button disabled={busy} className="primary">Save steps</button>
           <button type="button" onClick={onClose}>Cancel</button>
         </div>
       </form>

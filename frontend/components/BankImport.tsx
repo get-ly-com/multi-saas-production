@@ -2,6 +2,7 @@ import { ChangeEvent, useMemo, useState } from 'react';
 import Modal from '@/components/Modal';
 import { api, money } from '@/lib/api';
 import { DATE_FORMATS, guessDateFormat, parseCsv, parseStatementAmount, parseStatementDate } from '@/lib/csv';
+import useSubmit from '@/lib/useSubmit';
 
 type Props = { accountId: string; onClose: () => void; onSaved: (message: string) => void };
 
@@ -60,7 +61,8 @@ export default function BankImport({ accountId, onClose, onSaved }: Props) {
     return { lines: good, bad: failed };
   }, [rows, map, format]);
 
-  const importLines = async () => {
+  const { busy, run: once } = useSubmit();
+  const importLines = () => once(async () => {
     try {
       const result = await api.post('/api/accounting/bank/import', { account_id: accountId, lines });
       await onSaved(`Imported ${result.imported} lines, skipped ${result.skipped} already imported or empty`);
@@ -68,7 +70,7 @@ export default function BankImport({ accountId, onClose, onSaved }: Props) {
     } catch (err: any) {
       setError(err.message);
     }
-  };
+  });
 
   const columnSelect = (field: 'date' | 'description' | 'amount' | 'out', label: string, optional = false) => (
     <label>{label}
@@ -80,7 +82,7 @@ export default function BankImport({ accountId, onClose, onSaved }: Props) {
   );
 
   return (
-    <Modal title="Import a bank statement">
+    <Modal title="Import a bank statement" onClose={onClose}>
       <p className="muted">Download a CSV statement from your bank's website and choose it here.</p>
       <label>Statement file<input type="file" accept=".csv,text/csv" onChange={readFile} /></label>
 

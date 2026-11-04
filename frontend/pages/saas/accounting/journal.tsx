@@ -2,10 +2,10 @@ import { FormEvent, useEffect, useState } from 'react';
 import AccountingNav from '@/components/AccountingNav';
 import AppShell from '@/components/AppShell';
 import Modal from '@/components/Modal';
-import { api, formatDate, money } from '@/lib/api';
+import { api, formatDate, money, today } from '@/lib/api';
+import useSubmit from '@/lib/useSubmit';
 
 const blankLine = { account_id: '', cost_center_id: '', debit: '', credit: '' };
-const today = () => new Date().toISOString().slice(0, 10);
 
 const SOURCE_LABELS: Record<string, string> = {
   invoice_payment: 'payment', invoice_cost: 'cost of sales', payroll_payment: 'wages paid', payroll_tax: 'payroll tax paid'
@@ -46,7 +46,8 @@ function JournalApp() {
     load();
   }, []);
 
-  const reverse = async (entry: any) => {
+  const { busy, run: once } = useSubmit();
+  const reverse = (entry: any) => once(async () => {
     if (!window.confirm(`Reverse entry #${entry.entry_number}? A new entry will cancel it out.`)) return;
     try {
       await api.post(`/api/accounting/journal/${entry.id}/reverse`, {});
@@ -54,7 +55,7 @@ function JournalApp() {
     } catch (err: any) {
       setError(err.message);
     }
-  };
+  });
 
   return (
     <div className="stack">
@@ -87,7 +88,7 @@ function JournalApp() {
                   <td className="num">{Number(line.credit) ? money(line.credit) : ''}</td>
                   <td>
                     {index === 0 && entry.source_type === 'manual' && !entry.reversal_of && !entry.reversed && (
-                      <div className="row-actions"><button onClick={() => reverse(entry)}>Reverse</button></div>
+                      <div className="row-actions"><button disabled={busy} onClick={() => reverse(entry)}>Reverse</button></div>
                     )}
                   </td>
                 </tr>
@@ -116,28 +117,31 @@ function EntryForm({ accounts, costCenters, onClose, onSaved }: { accounts: any[
 
   const balanced = total('debit') === total('credit') && total('debit') > 0;
 
+  const { busy, run } = useSubmit();
   const submit = async (event: FormEvent) => {
     event.preventDefault();
-    try {
-      await api.post('/api/accounting/journal', {
-        entry_date: date,
-        memo,
-        lines: lines.map(({ account_id, cost_center_id, debit, credit }) => ({
-          account_id,
-          cost_center_id: cost_center_id || null,
-          debit: Number(debit || 0),
-          credit: Number(credit || 0)
-        }))
-      });
-      await onSaved();
-      onClose();
-    } catch (err: any) {
-      setError(err.message);
-    }
+    return run(async () => {
+      try {
+        await api.post('/api/accounting/journal', {
+          entry_date: date,
+          memo,
+          lines: lines.map(({ account_id, cost_center_id, debit, credit }) => ({
+            account_id,
+            cost_center_id: cost_center_id || null,
+            debit: Number(debit || 0),
+            credit: Number(credit || 0)
+          }))
+        });
+        await onSaved();
+        onClose();
+      } catch (err: any) {
+        setError(err.message);
+      }
+    });
   };
 
   return (
-    <Modal title="New journal entry">
+    <Modal title="New journal entry" onClose={onClose}>
       <form onSubmit={submit}>
         <div className="form-grid">
           <label>Date<input required type="date" value={date} onChange={(e) => setDate(e.target.value)} /></label>
@@ -164,7 +168,7 @@ function EntryForm({ accounts, costCenters, onClose, onSaved }: { accounts: any[
         <p>Debits {money(total('debit'))} · Credits {money(total('credit'))}</p>
         {error && <p className="error">{error}</p>}
         <div className="form-actions">
-          <button className="primary" disabled={!balanced}>Post entry</button>
+          <button className="primary" disabled={busy || !balanced}>Post entry</button>
           <button type="button" onClick={onClose}>Cancel</button>
         </div>
       </form>

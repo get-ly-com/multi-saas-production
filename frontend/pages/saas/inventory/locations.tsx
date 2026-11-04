@@ -3,6 +3,7 @@ import AppShell from '@/components/AppShell';
 import InventoryNav from '@/components/InventoryNav';
 import Modal from '@/components/Modal';
 import { api, formatDate, money } from '@/lib/api';
+import useSubmit from '@/lib/useSubmit';
 
 export default function Locations() {
   return <AppShell><LocationsApp /></AppShell>;
@@ -38,14 +39,15 @@ function LocationsApp() {
     load();
   }, []);
 
-  const save = async (place: any, changes: any) => {
+  const { busy, run: once } = useSubmit();
+  const save = (place: any, changes: any) => once(async () => {
     try {
       await api.put(`/api/inventory/locations/${place.id}`, { name: place.name, active: place.active, is_main: false, ...changes });
       await load();
     } catch (err: any) {
       setError(err.message);
     }
-  };
+  });
 
   const active = places.filter((place) => place.active);
 
@@ -83,10 +85,10 @@ function LocationsApp() {
                   <div className="row-actions">
                     <button onClick={() => setViewing(place)}>Stock</button>
                     <button onClick={() => setEditing(place)}>Rename</button>
-                    {place.active && !place.is_main && <button onClick={() => save(place, { is_main: true })}>Make main</button>}
+                    {place.active && !place.is_main && <button disabled={busy} onClick={() => save(place, { is_main: true })}>Make main</button>}
                     {!place.is_main && (place.active
-                      ? <button onClick={() => save(place, { active: false })}>Archive</button>
-                      : <button onClick={() => save(place, { active: true })}>Restore</button>)}
+                      ? <button disabled={busy} onClick={() => save(place, { active: false })}>Archive</button>
+                      : <button disabled={busy} onClick={() => save(place, { active: true })}>Restore</button>)}
                   </div>
                 </td>
               </tr>
@@ -132,20 +134,23 @@ function PlaceForm({ place, onClose, onSaved }: { place: any; onClose: () => voi
   const [name, setName] = useState(place.name);
   const [error, setError] = useState('');
 
+  const { busy, run } = useSubmit();
   const submit = async (event: FormEvent) => {
     event.preventDefault();
-    try {
-      if (place.id) await api.put(`/api/inventory/locations/${place.id}`, { name, active: place.active, is_main: false });
-      else await api.post('/api/inventory/locations', { name });
-      await onSaved();
-      onClose();
-    } catch (err: any) {
-      setError(err.message);
-    }
+    return run(async () => {
+      try {
+        if (place.id) await api.put(`/api/inventory/locations/${place.id}`, { name, active: place.active, is_main: false });
+        else await api.post('/api/inventory/locations', { name });
+        await onSaved();
+        onClose();
+      } catch (err: any) {
+        setError(err.message);
+      }
+    });
   };
 
   return (
-    <Modal title={place.id ? `Rename ${place.name}` : 'New place'}>
+    <Modal title={place.id ? `Rename ${place.name}` : 'New place'} onClose={onClose}>
       <form onSubmit={submit}>
         <div className="form-grid">
           <label>Name<input required maxLength={80} placeholder="e.g. High Street shop" value={name} onChange={(e) => setName(e.target.value)} /></label>
@@ -153,7 +158,7 @@ function PlaceForm({ place, onClose, onSaved }: { place: any; onClose: () => voi
         <p className="muted">Only owners and admins can add or change places.</p>
         {error && <p className="error">{error}</p>}
         <div className="form-actions">
-          <button className="primary">Save</button>
+          <button disabled={busy} className="primary">Save</button>
           <button type="button" onClick={onClose}>Cancel</button>
         </div>
       </form>
@@ -177,20 +182,23 @@ function TransferForm({ places, items, from, onClose, onSaved }: {
   const setLine = (index: number, field: string, value: string) =>
     setLines(lines.map((line, i) => (i === index ? { ...line, [field]: value } : line)));
 
+  const { busy, run } = useSubmit();
   const submit = async (event: FormEvent) => {
     event.preventDefault();
-    try {
-      const chosen = lines.filter((line) => line.item_id);
-      const result = await api.post('/api/inventory/transfers', { from_location: source, to_location: target, lines: chosen, note });
-      await onSaved(result);
-      onClose();
-    } catch (err: any) {
-      setError(err.message);
-    }
+    return run(async () => {
+      try {
+        const chosen = lines.filter((line) => line.item_id);
+        const result = await api.post('/api/inventory/transfers', { from_location: source, to_location: target, lines: chosen, note });
+        await onSaved(result);
+        onClose();
+      } catch (err: any) {
+        setError(err.message);
+      }
+    });
   };
 
   return (
-    <Modal title="Move stock">
+    <Modal title="Move stock" onClose={onClose}>
       <form onSubmit={submit}>
         <div className="form-grid">
           <label>From
@@ -223,7 +231,7 @@ function TransferForm({ places, items, from, onClose, onSaved }: {
         <label>Note<input maxLength={500} placeholder="Optional" value={note} onChange={(e) => setNote(e.target.value)} /></label>
         {error && <p className="error">{error}</p>}
         <div className="form-actions">
-          <button className="primary">Move</button>
+          <button disabled={busy} className="primary">Move</button>
           <button type="button" onClick={onClose}>Cancel</button>
         </div>
       </form>
@@ -240,7 +248,7 @@ function PlaceStock({ place, onClose, onMove }: { place: any; onClose: () => voi
   }, []);
 
   return (
-    <Modal title={`Stock at ${place.name}`}>
+    <Modal title={`Stock at ${place.name}`} onClose={onClose}>
       {error && <p className="error">{error}</p>}
       {rows && rows.length === 0 && <p className="empty">Nothing here</p>}
       {rows && rows.length > 0 && (

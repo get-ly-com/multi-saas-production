@@ -1,6 +1,7 @@
 import { FormEvent, useEffect, useState } from 'react';
 import Modal from '@/components/Modal';
 import { api, money, today } from '@/lib/api';
+import useSubmit from '@/lib/useSubmit';
 
 const blankLine = { item_id: '', description: '', quantity: '1', unit_price: '', discount: '0', tax_rate_id: '' };
 
@@ -62,20 +63,23 @@ export default function QuoteForm({ initial, onClose, onSaved }: { initial?: any
     return item && Number(line.quantity) > item.quantity ? item : null;
   };
 
+  const { busy, run } = useSubmit();
   const submit = async (event: FormEvent) => {
     event.preventDefault();
-    const { id, deal_id, contact_id, company_id, issue_date, valid_until, due_days, notes, line_items } = form;
-    try {
-      const saved = await api.post('/api/crm/quotes', { id, deal_id, contact_id, company_id, issue_date, valid_until, due_days, notes, line_items });
-      await onSaved(saved);
-      onClose();
-    } catch (err: any) {
-      setError(err.message);
-    }
+    return run(async () => {
+      const { id, deal_id, contact_id, company_id, issue_date, valid_until, due_days, notes, line_items } = form;
+      try {
+        const saved = await api.post('/api/crm/quotes', { id, deal_id, contact_id, company_id, issue_date, valid_until, due_days, notes, line_items });
+        await onSaved(saved);
+        onClose();
+      } catch (err: any) {
+        setError(err.message);
+      }
+    });
   };
 
   return (
-    <Modal title={form.id ? `Edit ${form.quote_number}` : 'New quote'}>
+    <Modal title={form.id ? `Edit ${form.quote_number}` : 'New quote'} onClose={onClose}>
       <form onSubmit={submit}>
         <div className="form-grid">
           {!form.deal_id && (
@@ -126,7 +130,7 @@ export default function QuoteForm({ initial, onClose, onSaved }: { initial?: any
         <label>Notes for the customer<textarea rows={2} value={form.notes || ''} onChange={(e) => set('notes', e.target.value)} /></label>
         {error && <p className="error">{error}</p>}
         <div className="form-actions">
-          <button className="primary">Save</button>
+          <button disabled={busy} className="primary">Save</button>
           <button type="button" onClick={onClose}>Cancel</button>
         </div>
       </form>

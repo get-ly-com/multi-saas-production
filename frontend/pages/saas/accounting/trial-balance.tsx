@@ -2,14 +2,14 @@ import Link from 'next/link';
 import { useEffect, useState } from 'react';
 import AccountingNav from '@/components/AccountingNav';
 import AppShell from '@/components/AppShell';
-import { api, money } from '@/lib/api';
+import { api, money, today } from '@/lib/api';
 
 export default function TrialBalance() {
   return <AppShell><TrialBalanceApp /></AppShell>;
 }
 
 function TrialBalanceApp() {
-  const [asOf, setAsOf] = useState(new Date().toISOString().slice(0, 10));
+  const [asOf, setAsOf] = useState(today);
   const [rows, setRows] = useState<any[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState('');

@@ -3,7 +3,7 @@ import { useRouter } from 'next/router';
 import { FormEvent, KeyboardEvent, useCallback, useEffect, useRef, useState } from 'react';
 import AppShell from '@/components/AppShell';
 import ChatNav, { ChatMessage, STATUS_LABELS, STATUS_STYLES, stars, timeText } from '@/components/ChatNav';
-import { api } from '@/lib/api';
+import { api, isUuid } from '@/lib/api';
 
 export default function ChatInbox() {
   return <AppShell><Inbox /></AppShell>;
@@ -57,7 +57,7 @@ function Inbox() {
   const [list, setList] = useState<Conversation[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState('');
-  const selected = typeof router.query.c === 'string' ? router.query.c : '';
+  const selected = isUuid(router.query.c) ? router.query.c : '';
 
   const loadList = useCallback(async () => {
     try {

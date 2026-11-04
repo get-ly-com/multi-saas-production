@@ -5,8 +5,9 @@ import AppShell from '@/components/AppShell';
 import { fullName, monthName } from '@/components/HrForms';
 import HrNav from '@/components/HrNav';
 import Modal from '@/components/Modal';
-import { api, formatDate, money, today } from '@/lib/api';
+import { api, formatDate, money, today, queryId } from '@/lib/api';
 import { downloadCsv } from '@/lib/csv';
+import useSubmit from '@/lib/useSubmit';
 
 export default function PayRunPage() {
   return <AppShell><PayRunApp /></AppShell>;
@@ -16,7 +17,7 @@ const deductions = (line: any) => Number(line.income_tax) + Number(line.employee
 
 function PayRunApp() {
   const router = useRouter();
-  const id = router.query.id as string | undefined;
+  const id = queryId(router.query.id);
   const [run, setRun] = useState<any>(null);
   const [editing, setEditing] = useState<any>(null);
   const [paying, setPaying] = useState(false);
@@ -171,24 +172,27 @@ function LineForm({ line, onClose, onSaved }: { line: any; onClose: () => void; 
   });
   const [error, setError] = useState('');
 
+  const { busy, run } = useSubmit();
   const submit = async (event: FormEvent) => {
     event.preventDefault();
-    // Only changed amounts are sent, so a new bonus still has its tax worked out from the rates
-    const body: any = { note: form.note };
-    for (const field of ['hours', ...LINE_FIELDS.map(({ field }) => field)]) {
-      if (String(form[field]) !== String(line[field] ?? '')) body[field] = form[field];
-    }
-    try {
-      await api.put(`/api/hr/pay-lines/${line.id}`, body);
-      await onSaved();
-      onClose();
-    } catch (err: any) {
-      setError(err.message);
-    }
+    return run(async () => {
+      // Only changed amounts are sent, so a new bonus still has its tax worked out from the rates
+      const body: any = { note: form.note };
+      for (const field of ['hours', ...LINE_FIELDS.map(({ field }) => field)]) {
+        if (String(form[field]) !== String(line[field] ?? '')) body[field] = form[field];
+      }
+      try {
+        await api.put(`/api/hr/pay-lines/${line.id}`, body);
+        await onSaved();
+        onClose();
+      } catch (err: any) {
+        setError(err.message);
+      }
+    });
   };
 
   return (
-    <Modal title={`Change pay for ${fullName(line.employee)}`}>
+    <Modal title={`Change pay for ${fullName(line.employee)}`} onClose={onClose}>
       <form onSubmit={submit}>
         <div className="form-grid">
           {line.pay_type === 'hourly' && (
@@ -202,7 +206,7 @@ function LineForm({ line, onClose, onSaved }: { line: any; onClose: () => void; 
         <p className="muted">If you change hours or additions and leave the taxes as they are, the taxes are worked out again from your rates.</p>
         {error && <p className="error">{error}</p>}
         <div className="form-actions">
-          <button className="primary">Save</button>
+          <button disabled={busy} className="primary">Save</button>
           <button type="button" onClick={onClose}>Cancel</button>
         </div>
       </form>
@@ -223,19 +227,22 @@ function PayForm({ run, onClose, onSaved }: { run: any; onClose: () => void; onS
     }).catch((err) => setError(err.message));
   }, []);
 
+  const { busy, run: once } = useSubmit();
   const submit = async (event: FormEvent) => {
     event.preventDefault();
-    try {
-      await api.post(`/api/hr/pay-runs/${run.id}/pay`, form);
-      await onSaved();
-      onClose();
-    } catch (err: any) {
-      setError(err.message);
-    }
+    return once(async () => {
+      try {
+        await api.post(`/api/hr/pay-runs/${run.id}/pay`, form);
+        await onSaved();
+        onClose();
+      } catch (err: any) {
+        setError(err.message);
+      }
+    });
   };
 
   return (
-    <Modal title="Mark as paid">
+    <Modal title="Mark as paid" onClose={onClose}>
       <form onSubmit={submit}>
         <div className="form-grid">
           <label>Paid from
@@ -251,7 +258,7 @@ function PayForm({ run, onClose, onSaved }: { run: any; onClose: () => void; onS
         </p>
         {error && <p className="error">{error}</p>}
         <div className="form-actions">
-          <button className="primary">Mark as paid</button>
+          <button disabled={busy} className="primary">Mark as paid</button>
           <button type="button" onClick={onClose}>Cancel</button>
         </div>
       </form>

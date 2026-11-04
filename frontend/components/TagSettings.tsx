@@ -1,6 +1,7 @@
 import { FormEvent, useEffect, useState } from 'react';
 import { TAG_COLORS } from '@/components/Tags';
 import { api } from '@/lib/api';
+import useSubmit from '@/lib/useSubmit';
 
 // Tags: anyone who can edit can add or rename; owners and admins can delete
 export function TagSettings() {
@@ -21,7 +22,9 @@ export function TagSettings() {
     load();
   }, []);
 
-  const run = async (action: () => Promise<unknown>) => {
+  const { busy, run: once } = useSubmit();
+  // One action at a time, so a double click cannot repeat it
+  const run = (action: () => Promise<unknown>) => once(async () => {
     try {
       await action();
       setError('');
@@ -29,7 +32,7 @@ export function TagSettings() {
     } catch (err: any) {
       setError(err.message);
     }
-  };
+  });
 
   const add = (event: FormEvent) => {
     event.preventDefault();
@@ -68,7 +71,7 @@ export function TagSettings() {
             {TAG_COLORS.map((option) => <option key={option} value={option}>{option}</option>)}
           </select>
         </label>
-        <div className="row-actions"><button>Add tag</button></div>
+        <div className="row-actions"><button disabled={busy}>Add tag</button></div>
       </form>
       {error && <p className="error">{error}</p>}
     </div>
@@ -95,7 +98,9 @@ export function LostReasonSettings() {
     load();
   }, []);
 
-  const run = async (action: () => Promise<unknown>) => {
+  const { busy, run: once } = useSubmit();
+  // One action at a time, so a double click cannot repeat it
+  const run = (action: () => Promise<unknown>) => once(async () => {
     try {
       await action();
       setError('');
@@ -103,7 +108,7 @@ export function LostReasonSettings() {
     } catch (err: any) {
       setError(err.message);
     }
-  };
+  });
 
   const add = (event: FormEvent) => {
     event.preventDefault();
@@ -136,7 +141,7 @@ export function LostReasonSettings() {
       <form className="saved-views" onSubmit={add}>
         <label>New reason<input required maxLength={80} value={name} onChange={(e) => setName(e.target.value)} /></label>
         <div className="row-actions">
-          <button>Add reason</button>
+          <button disabled={busy}>Add reason</button>
           {reasons.length < USUAL_REASONS.length && <button type="button" onClick={addUsual}>Add the usual reasons</button>}
         </div>
       </form>

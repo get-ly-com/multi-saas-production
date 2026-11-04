@@ -3,6 +3,7 @@ import AppShell from '@/components/AppShell';
 import ChatNav from '@/components/ChatNav';
 import Modal from '@/components/Modal';
 import { api } from '@/lib/api';
+import useSubmit from '@/lib/useSubmit';
 
 export default function ChatReplies() {
   return <AppShell><Replies /></AppShell>;
@@ -33,7 +34,8 @@ function Replies() {
     load();
   }, []);
 
-  const remove = async (row: Reply) => {
+  const { busy, run: once } = useSubmit();
+  const remove = (row: Reply) => once(async () => {
     if (!window.confirm(`Delete the saved reply /${row.shortcut}?`)) return;
     try {
       await api.delete(`/api/chatbot/canned/${row.id}`);
@@ -41,7 +43,7 @@ function Replies() {
     } catch (err: any) {
       setError(err.message);
     }
-  };
+  });
 
   const query = search.trim().toLowerCase();
   const shown = rows.filter((row) => `${row.shortcut} ${row.body}`.toLowerCase().includes(query));
@@ -68,7 +70,7 @@ function Replies() {
                 <td>{canEdit && (
                   <div className="row-actions">
                     <button onClick={() => setEditing(row)}>Edit</button>
-                    <button className="danger" onClick={() => remove(row)}>Delete</button>
+                    <button disabled={busy} className="danger" onClick={() => remove(row)}>Delete</button>
                   </div>
                 )}</td>
               </tr>
@@ -101,7 +103,7 @@ function ReplyForm({ row, onClose, onSaved }: { row: Reply; onClose: () => void;
   };
 
   return (
-    <Modal title={row.id ? 'Edit saved reply' : 'New saved reply'}>
+    <Modal title={row.id ? 'Edit saved reply' : 'New saved reply'} onClose={onClose}>
       <form onSubmit={submit}>
         <label>Shortcut (letters, numbers, - or _)
           <input required maxLength={31} pattern="/?[A-Za-z0-9][A-Za-z0-9_-]{0,29}" placeholder="refund" value={form.shortcut}

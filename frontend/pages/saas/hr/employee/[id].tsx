@@ -5,8 +5,9 @@ import AppShell from '@/components/AppShell';
 import { EMPLOYMENT_TYPES, EmployeeForm, LeaveForm, employeeForm, fullName, leaveDates } from '@/components/HrForms';
 import HrNav from '@/components/HrNav';
 import { EmployeeChecklists } from '@/components/HrWork';
-import { api, formatDate, money } from '@/lib/api';
+import { api, formatDate, money, queryId } from '@/lib/api';
 import { getSupabase } from '@/lib/supabase';
+import useSubmit from '@/lib/useSubmit';
 
 export default function EmployeePage() {
   return <AppShell><EmployeeApp /></AppShell>;
@@ -14,7 +15,7 @@ export default function EmployeePage() {
 
 function EmployeeApp() {
   const router = useRouter();
-  const id = router.query.id as string | undefined;
+  const id = queryId(router.query.id);
   const [person, setPerson] = useState<any>(null);
   const [people, setPeople] = useState<any[]>([]);
   const [manager, setManager] = useState(false);
@@ -47,7 +48,8 @@ function EmployeeApp() {
     load();
   }, [id]);
 
-  const remove = async () => {
+  const { busy, run: once } = useSubmit();
+  const remove = () => once(async () => {
     if (!window.confirm(`Delete ${fullName(person)} and their leave history? This can't be undone.`)) return;
     try {
       await api.delete(`/api/hr/employees/${person.id}`);
@@ -55,11 +57,11 @@ function EmployeeApp() {
     } catch (err: any) {
       setError(err.message);
     }
-  };
+  });
 
   if (!person) return <div className="stack"><HrNav />{error ? <p className="error">{error}</p> : <p className="empty">Loading…</p>}</div>;
 
-  const setProbation = async () => {
+  const setProbation = () => once(async () => {
     const value = window.prompt('Probation ends on (YYYY-MM-DD). Leave empty for no probation.', person.terms?.probation_end_date || '');
     if (value === null) return;
     try {
@@ -68,9 +70,9 @@ function EmployeeApp() {
     } catch (err: any) {
       setError(err.message);
     }
-  };
+  });
 
-  const setPin = async () => {
+  const setPin = () => once(async () => {
     const value = window.prompt(`New kiosk PIN for ${fullName(person)} (4 to 8 numbers). Tell them in person.`, '');
     if (!value) return;
     try {
@@ -79,7 +81,7 @@ function EmployeeApp() {
     } catch (err: any) {
       setError(err.message);
     }
-  };
+  });
 
   const pay = person.pay;
   const reports = people.filter((row) => row.manager_id === person.id);
@@ -95,7 +97,7 @@ function EmployeeApp() {
         <div className="row-actions">
           {(manager || isMe) && <button onClick={() => setAsking(true)}>Request leave</button>}
           {manager && <button onClick={() => setEditing(true)}>Edit</button>}
-          {manager && <button className="danger" onClick={remove}>Delete</button>}
+          {manager && <button disabled={busy} className="danger" onClick={remove}>Delete</button>}
         </div>
       </div>
 
@@ -114,8 +116,8 @@ function EmployeeApp() {
           {person.end_date && <div>Leaves {formatDate(person.end_date)}</div>}
           {person.terms?.probation_end_date && <div>Probation ends {formatDate(person.terms.probation_end_date)}</div>}
           {manager && <div className="row-actions" style={{ justifyContent: 'flex-start' }}>
-            <button onClick={setProbation}>{person.terms?.probation_end_date ? 'Change probation' : 'Set probation'}</button>
-            <button onClick={setPin}>Set kiosk PIN</button>
+            <button disabled={busy} onClick={setProbation}>{person.terms?.probation_end_date ? 'Change probation' : 'Set probation'}</button>
+            <button disabled={busy} onClick={setPin}>Set kiosk PIN</button>
           </div>}
         </div>
         <div className="card">

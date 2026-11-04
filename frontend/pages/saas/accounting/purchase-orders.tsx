@@ -4,6 +4,7 @@ import AppShell from '@/components/AppShell';
 import CurrencyFields from '@/components/CurrencyFields';
 import Modal from '@/components/Modal';
 import { api, formatDate, money, today } from '@/lib/api';
+import useSubmit from '@/lib/useSubmit';
 
 const blankLine = { description: '', account_id: '', quantity: '1', unit_price: '', tax_rate_id: '', cost_center_id: '' };
 const blankOrder = { vendor_id: '', order_date: '', expected_date: '', notes: '', currency: '', exchange_rate: '1', line_items: [blankLine] };
@@ -53,7 +54,9 @@ function OrdersApp() {
     load();
   }, []);
 
-  const run = async (action: () => Promise<unknown>, done = '') => {
+  const { busy, run: once } = useSubmit();
+  // One action at a time, so a double click cannot repeat it
+  const run = (action: () => Promise<unknown>, done = '') => once(async () => {
     try {
       await action();
       setNotice(done);
@@ -62,7 +65,7 @@ function OrdersApp() {
       setNotice('');
       setError(err.message);
     }
-  };
+  });
 
   const reject = (order: any) => {
     const note = window.prompt(`Why are you rejecting ${order.po_number}?`);
@@ -162,20 +165,23 @@ function OrderForm({ initial, vendors, accounts, taxRates, costCenters, onClose,
     return sum + Math.round(net(line) * Number(rate?.rate || 0)) / 100;
   }, 0);
 
+  const { busy, run } = useSubmit();
   const submit = async (event: FormEvent) => {
     event.preventDefault();
-    const { id, vendor_id, order_date, expected_date, notes, currency, exchange_rate, line_items } = form;
-    try {
-      await api.post('/api/accounting/purchase-orders', { id, vendor_id, order_date, expected_date, notes, currency, exchange_rate, line_items });
-      await onSaved();
-      onClose();
-    } catch (err: any) {
-      setError(err.message);
-    }
+    return run(async () => {
+      const { id, vendor_id, order_date, expected_date, notes, currency, exchange_rate, line_items } = form;
+      try {
+        await api.post('/api/accounting/purchase-orders', { id, vendor_id, order_date, expected_date, notes, currency, exchange_rate, line_items });
+        await onSaved();
+        onClose();
+      } catch (err: any) {
+        setError(err.message);
+      }
+    });
   };
 
   return (
-    <Modal title={form.id ? `Edit ${form.po_number}` : 'New purchase order'}>
+    <Modal title={form.id ? `Edit ${form.po_number}` : 'New purchase order'} onClose={onClose}>
       <form onSubmit={submit}>
         <div className="form-grid">
           <label>Vendor
@@ -222,7 +228,7 @@ function OrderForm({ initial, vendors, accounts, taxRates, costCenters, onClose,
         <label>Notes<textarea rows={2} value={form.notes} onChange={(e) => set('notes', e.target.value)} /></label>
         {error && <p className="error">{error}</p>}
         <div className="form-actions">
-          <button className="primary">Save</button>
+          <button disabled={busy} className="primary">Save</button>
           <button type="button" onClick={onClose}>Cancel</button>
         </div>
       </form>

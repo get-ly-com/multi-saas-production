@@ -1,6 +1,7 @@
 import { FormEvent, useEffect, useState } from 'react';
 import Modal from '@/components/Modal';
 import { api, money } from '@/lib/api';
+import useSubmit from '@/lib/useSubmit';
 
 export const fullName = (person: any) => (person ? `${person.first_name} ${person.last_name || ''}`.trim() : '');
 
@@ -49,16 +50,19 @@ export function EmployeeForm({ initial, people, onClose, onSaved }: {
     api.get('/api/team').then((team) => setMembers(team.members || [])).catch(() => setMembers([]));
   }, []);
 
+  const { busy, run } = useSubmit();
   const submit = async (event: FormEvent) => {
     event.preventDefault();
-    const { id, ...body } = form;
-    try {
-      const saved = id ? await api.put(`/api/hr/employees/${id}`, body) : await api.post('/api/hr/employees', body);
-      await onSaved(saved);
-      onClose();
-    } catch (err: any) {
-      setError(err.message);
-    }
+    return run(async () => {
+      const { id, ...body } = form;
+      try {
+        const saved = id ? await api.put(`/api/hr/employees/${id}`, body) : await api.post('/api/hr/employees', body);
+        await onSaved(saved);
+        onClose();
+      } catch (err: any) {
+        setError(err.message);
+      }
+    });
   };
 
   const monthly = form.pay_type === 'salary'
@@ -66,7 +70,7 @@ export function EmployeeForm({ initial, people, onClose, onSaved }: {
     : Number(form.pay_amount) * Number(form.hours_per_week) * 52 / 12;
 
   return (
-    <Modal title={form.id ? `Edit ${fullName(initial)}` : 'New employee'}>
+    <Modal title={form.id ? `Edit ${fullName(initial)}` : 'New employee'} onClose={onClose}>
       <form onSubmit={submit}>
         <div className="form-grid">
           <label>First name<input required maxLength={100} value={form.first_name} onChange={(e) => set('first_name', e.target.value)} /></label>
@@ -135,7 +139,7 @@ export function EmployeeForm({ initial, people, onClose, onSaved }: {
 
         {error && <p className="error">{error}</p>}
         <div className="form-actions">
-          <button className="primary">Save</button>
+          <button disabled={busy} className="primary">Save</button>
           <button type="button" onClick={onClose}>Cancel</button>
         </div>
       </form>
@@ -166,21 +170,24 @@ export function LeaveForm({ people, employeeId, onClose, onSaved }: {
     api.get(`/api/hr/balances/${form.employee_id}?year=${year}`).then(setBalances).catch(() => setBalances(null));
   }, [form.employee_id, form.start_date.slice(0, 4)]);
 
+  const { busy, run } = useSubmit();
   const submit = async (event: FormEvent) => {
     event.preventDefault();
-    try {
-      await api.post('/api/hr/leave', { ...form, end_date: form.half_day ? form.start_date : form.end_date || form.start_date });
-      await onSaved();
-      onClose();
-    } catch (err: any) {
-      setError(err.message);
-    }
+    return run(async () => {
+      try {
+        await api.post('/api/hr/leave', { ...form, end_date: form.half_day ? form.start_date : form.end_date || form.start_date });
+        await onSaved();
+        onClose();
+      } catch (err: any) {
+        setError(err.message);
+      }
+    });
   };
 
   const balance = balances?.find((row) => row.leave_type_id === form.leave_type_id);
 
   return (
-    <Modal title="Request leave">
+    <Modal title="Request leave" onClose={onClose}>
       <form onSubmit={submit}>
         <div className="form-grid">
           {people.length > 1 || !employeeId ? (
@@ -211,7 +218,7 @@ export function LeaveForm({ people, employeeId, onClose, onSaved }: {
         <p className="muted">The reason is seen only by this person, their manager, owners and admins.</p>
         {error && <p className="error">{error}</p>}
         <div className="form-actions">
-          <button className="primary" disabled={!types.length}>Send request</button>
+          <button className="primary" disabled={busy || !types.length}>Send request</button>
           <button type="button" onClick={onClose}>Cancel</button>
         </div>
       </form>

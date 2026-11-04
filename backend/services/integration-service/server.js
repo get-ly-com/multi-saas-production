@@ -38,13 +38,30 @@ const webhookFields = (body) => {
   };
 };
 
+// Only our own messages and the ones our database functions raise (P0001) reach people
+const sendError = (res, error) => {
+  const code = error?.code || '';
+  if (error?.status) return res.status(error.status).json({ error: error.message });
+  if (!code && error?.constructor === Error) return res.status(400).json({ error: error.message });
+  if (code === 'P0001') return res.status(400).json({ error: error.message });
+  if (/^PT[45]\d\d$/.test(code)) return res.status(Number(code.slice(2))).json({ error: error.message });
+
+  console.error('Integration error:', error);
+  if (code === '42501') return res.status(403).json({ error: 'You don’t have access to that' });
+  if (code === '22P02') return res.status(404).json({ error: 'Not found' });
+  if (code === '23503') return res.status(409).json({ error: 'That is still in use' });
+  if (code === '23505') return res.status(409).json({ error: 'That is already saved' });
+  if (code === '23514') return res.status(400).json({ error: 'That value isn’t allowed' });
+  res.status(400).json({ error: 'That didn’t work. Please check and try again.' });
+};
+
 const call = (name, params, status = 200) => async (req, res) => {
   try {
     const { data, error } = await req.db.schema('integrations').rpc(name, { p_tenant: req.tenantId, ...params(req) });
-    if (error) return res.status(400).json({ error: error.message });
+    if (error) throw error;
     res.status(status).json(data ?? { success: true });
   } catch (error) {
-    res.status(error.status || 400).json({ error: error.message });
+    sendError(res, error);
   }
 };
 
@@ -77,7 +94,6 @@ app.delete('/webhooks/:id', call('delete_webhook', (req) => ({ p_webhook: id(req
 app.post('/deliveries/:id/retry', call('retry_delivery', (req) => ({ p_delivery: id(req.params.id, 'Delivery') })));
 
 // API keys. The key comes back once, in the reply to the POST; only its hash is kept.
-app.post('/api-keys', call('create_api_key', (req) => ({ p_name: text(req.body.name, 80).trim() }), 201));
 app.delete('/api-keys/:id', call('revoke_api_key', (req) => ({ p_key: id(req.params.id, 'API key') })));
 
 // A key that only reads, or one that can also add contacts and leads
@@ -106,5 +122,17 @@ app.post('/inbound/:id/enabled', call('set_inbound_enabled', (req) => ({
 app.post('/inbound/:id/token', call('roll_inbound_token', (req) => ({ p_hook: id(req.params.id, 'Incoming webhook') })));
 app.get('/inbound/:id/log', call('inbound_history', (req) => ({ p_hook: id(req.params.id, 'Incoming webhook') })));
 app.delete('/inbound/:id', call('delete_inbound', (req) => ({ p_hook: id(req.params.id, 'Incoming webhook') })));
+
+app.use((err, req, res, next) => {
+  if (res.headersSent) return next(err);
+  // Bad JSON and too-large bodies are the sender's mistake, not ours
+  if (err.status >= 400 && err.status < 500) {
+    return res.status(err.status).json({ error: err.status === 413 ? 'That is too large to send' : 'That request could not be read' });
+  }
+  console.error('Error:', err);
+  res.status(500).json({ error: 'Internal server error' });
+});
+
+process.on('unhandledRejection', (reason) => console.error('Unhandled rejection:', reason));
 
 app.listen(PORT, () => console.log(`Integration Service on ${PORT}`));

@@ -14,8 +14,11 @@ export const downloadCsv = (name: string, rows: Cell[][]) => {
   const link = document.createElement('a');
   link.href = url;
   link.download = name;
+  // Some browsers only follow a link that is in the page, and need the file a moment longer
+  document.body.appendChild(link);
   link.click();
-  URL.revokeObjectURL(url);
+  link.remove();
+  setTimeout(() => URL.revokeObjectURL(url), 1000);
 };
 
 // Handles quoted fields, including commas and line breaks inside them

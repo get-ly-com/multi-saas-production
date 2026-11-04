@@ -7,7 +7,7 @@ import { useCustomFields } from '@/components/CustomFields';
 import SavedViews, { Filters, ListFilters, matchesFilters } from '@/components/SavedViews';
 import BulkBar, { useSelection } from '@/components/BulkBar';
 import { TagChips, TagFilter, tagNames, useTags } from '@/components/Tags';
-import { api, formatDate } from '@/lib/api';
+import { api, formatDate, today } from '@/lib/api';
 import { downloadCsv, readPeople } from '@/lib/csv';
 
 export default function Contacts() {
@@ -60,7 +60,7 @@ function ContactsApp() {
 
   const exportCsv = () => {
     const rows = selection.selected.length ? visible.filter(({ id }) => selection.has(id)) : visible;
-    downloadCsv(`contacts-${new Date().toISOString().slice(0, 10)}.csv`, [
+    downloadCsv(`contacts-${today()}.csv`, [
       ['Name', 'Job title', 'Company', 'Email', 'Phone', 'Owner', 'Tags', 'Source', 'Added'],
       ...rows.map((row) => [row.name, row.job_title, row.company?.name, row.email, row.phone, ownerName(row.owner_id), tagNames(row.tags, tags), row.source, formatDate(row.created_at)])
     ]);

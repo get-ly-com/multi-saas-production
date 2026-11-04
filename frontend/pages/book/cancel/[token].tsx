@@ -3,14 +3,17 @@ import { useRouter } from 'next/router';
 import { FormEvent, useEffect, useState } from 'react';
 import { AddToCalendar, AnswerList } from '@/components/SchedulerForms';
 import { LOCATIONS, addDays, dayLabel, placesText } from '@/components/SchedulerNav';
+import useSubmit from '@/lib/useSubmit';
 
 const BASE_URL = process.env.NEXT_PUBLIC_API_BASE_URL;
 const WINDOW = 7;
+// How far ahead "Later" may go when the server doesn't say
+const MAX_DAYS_AHEAD = 60;
 
 const getJson = async (path: string, init?: RequestInit) => {
   const response = await fetch(`${BASE_URL}${path}`, init);
   const result = await response.json().catch(() => null);
-  if (!response.ok) throw new Error(result?.error || 'Too many tries. Please wait a minute and try again.');
+  if (!response.ok) throw new Error(result?.error || (response.status === 429 ? 'Too many tries. Please wait a minute and try again.' : 'Something went wrong. Please try again.'));
   return result;
 };
 
@@ -47,10 +50,15 @@ export default function ManageBooking() {
     if (moving && from) loadSlots(from);
   }, [moving, from]);
 
+  // The company's own today and booking horizon when the server sends them; otherwise the visitor's today and a 60 day cap
+  const firstDay = /^\d{4}-\d{2}-\d{2}$/.test(booking?.today || '') ? booking.today : todayIn();
+  const daysAhead = Number.isInteger(booking?.max_days_ahead) && booking.max_days_ahead > 0 ? booking.max_days_ahead : MAX_DAYS_AHEAD;
+  const lastDay = addDays(firstDay, daysAhead);
+
   const startMoving = () => {
     setError('');
     setNotice('');
-    setFrom(todayIn());
+    setFrom(firstDay);
     setMoving(true);
   };
 
@@ -75,24 +83,27 @@ export default function ManageBooking() {
     }
   };
 
+  const { busy, run } = useSubmit();
   const cancel = async (event: FormEvent) => {
     event.preventDefault();
-    if (!window.confirm('Cancel this booking?')) return;
-    setSending(true);
-    try {
-      const result = await getJson(path, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ reason })
-      });
-      setBooking(result);
-      setError('');
-      setNotice('');
-    } catch (err: any) {
-      setError(err.message);
-    } finally {
-      setSending(false);
-    }
+    return run(async () => {
+      if (!window.confirm('Cancel this booking?')) return;
+      setSending(true);
+      try {
+        const result = await getJson(path, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ reason })
+        });
+        setBooking(result);
+        setError('');
+        setNotice('');
+      } catch (err: any) {
+        setError(err.message);
+      } finally {
+        setSending(false);
+      }
+    });
   };
 
   const byDay: Record<string, any[]> = {};
@@ -130,8 +141,8 @@ export default function ManageBooking() {
               <div className="page-head" style={{ marginBottom: 0 }}>
                 <h2 style={{ margin: 0 }}>Pick a new time with {booking.with}</h2>
                 <div className="row-actions">
-                  <button type="button" disabled={from <= todayIn()} onClick={() => setFrom(addDays(from, -WINDOW) < todayIn() ? todayIn() : addDays(from, -WINDOW))}>Earlier</button>
-                  <button type="button" onClick={() => setFrom(addDays(from, WINDOW))}>Later</button>
+                  <button type="button" disabled={from <= firstDay} onClick={() => setFrom(addDays(from, -WINDOW) < firstDay ? firstDay : addDays(from, -WINDOW))}>Earlier</button>
+                  <button type="button" disabled={addDays(from, WINDOW) > lastDay} onClick={() => setFrom(addDays(from, WINDOW))}>Later</button>
                   <button type="button" onClick={() => setMoving(false)}>Keep my time</button>
                 </div>
               </div>
@@ -158,7 +169,7 @@ export default function ManageBooking() {
           {booking.can_cancel && !moving && (
             <form onSubmit={cancel} className="stack">
               <label>Reason for cancelling (optional)<textarea rows={2} maxLength={500} value={reason} onChange={(e) => setReason(e.target.value)} /></label>
-              <div><button className="danger" disabled={sending}>Cancel booking</button></div>
+              <div><button className="danger" disabled={busy || sending}>Cancel booking</button></div>
             </form>
           )}
           {booking.status === 'cancelled' && <p>This booking is cancelled. You can book again from the company's booking page.</p>}

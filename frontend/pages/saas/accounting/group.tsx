@@ -3,6 +3,7 @@ import AccountingNav from '@/components/AccountingNav';
 import AppShell from '@/components/AppShell';
 import Modal from '@/components/Modal';
 import { api, formatDate, money, today } from '@/lib/api';
+import useSubmit from '@/lib/useSubmit';
 
 const TABS = ['Companies', 'Intercompany', 'Profit and loss', 'Balance sheet'];
 const KINDS: Record<string, string> = { loan: 'Loan', charge: 'Charge for goods or services', repayment: 'Repayment' };
@@ -57,14 +58,17 @@ function CreateGroup({ overview, onSaved }: { overview: any; onSaved: () => void
   const [form, setForm] = useState({ name: '', currency: overview.base });
   const [error, setError] = useState('');
 
+  const { busy, run } = useSubmit();
   const submit = async (event: FormEvent) => {
     event.preventDefault();
-    try {
-      await api.post('/api/accounting/group', form);
-      await onSaved();
-    } catch (err: any) {
-      setError(err.message);
-    }
+    return run(async () => {
+      try {
+        await api.post('/api/accounting/group', form);
+        await onSaved();
+      } catch (err: any) {
+        setError(err.message);
+      }
+    });
   };
 
   return (
@@ -77,7 +81,7 @@ function CreateGroup({ overview, onSaved }: { overview: any; onSaved: () => void
           <label>Reporting currency<input required maxLength={3} value={form.currency} onChange={(e) => setForm({ ...form, currency: e.target.value.toUpperCase() })} /></label>
         </div>
         {error && <p className="error">{error}</p>}
-        <div className="form-actions"><button className="primary">Start group</button></div>
+        <div className="form-actions"><button disabled={busy} className="primary">Start group</button></div>
       </form>
     </div>
   );
@@ -90,7 +94,9 @@ function Companies({ overview, onSaved }: { overview: any; onSaved: () => void }
   const [notice, setNotice] = useState('');
   const { group, companies, rates, addable } = overview;
 
-  const run = async (action: () => Promise<unknown>, done: string) => {
+  const { busy, run: once } = useSubmit();
+  // One action at a time, so a double click cannot repeat it
+  const run = (action: () => Promise<unknown>, done: string) => once(async () => {
     try {
       await action();
       setNotice(done);
@@ -100,7 +106,7 @@ function Companies({ overview, onSaved }: { overview: any; onSaved: () => void }
       setNotice('');
       setError(err.message);
     }
-  };
+  });
 
   const remove = (company: any) => {
     if (window.confirm(`Take ${company.name} out of ${group.name}? Its books are not changed.`)) {
@@ -165,7 +171,7 @@ function Companies({ overview, onSaved }: { overview: any; onSaved: () => void }
             <label>Closing rate<input required type="number" min="0.00000001" step="any" value={rate.closing_rate} onChange={(e) => setRate({ ...rate, closing_rate: e.target.value })} /></label>
             <label>Average rate<input required type="number" min="0.00000001" step="any" value={rate.average_rate} onChange={(e) => setRate({ ...rate, average_rate: e.target.value })} /></label>
           </div>
-          <div className="form-actions"><button className="primary">Save rate</button></div>
+          <div className="form-actions"><button disabled={busy} className="primary">Save rate</button></div>
         </form>
         <table>
           <thead><tr><th>Currency</th><th>Date</th><th className="num">Closing</th><th className="num">Average</th></tr></thead>
@@ -193,7 +199,8 @@ function Intercompany({ overview, onSaved }: { overview: any; onSaved: () => voi
 
   const currencyOf = (id: string) => companies.find((company: any) => company.id === id)?.currency;
 
-  const voidEntry = async (entry: any) => {
+  const { busy, run: once } = useSubmit();
+  const voidEntry = (entry: any) => once(async () => {
     if (!window.confirm(`Void "${entry.memo}"? Both companies' ledger entries will be reversed.`)) return;
     try {
       await api.post(`/api/accounting/group/intercompany/${entry.id}/void`, {});
@@ -202,7 +209,7 @@ function Intercompany({ overview, onSaved }: { overview: any; onSaved: () => voi
     } catch (err: any) {
       setError(err.message);
     }
-  };
+  });
 
   return (
     <>
@@ -227,7 +234,7 @@ function Intercompany({ overview, onSaved }: { overview: any; onSaved: () => voi
                 <td>
                   {entry.voided_at
                     ? <span className="badge void">void</span>
-                    : <div className="row-actions"><button className="danger" onClick={() => voidEntry(entry)}>Void</button></div>}
+                    : <div className="row-actions"><button disabled={busy} className="danger" onClick={() => voidEntry(entry)}>Void</button></div>}
                 </td>
               </tr>
             ))}
@@ -253,19 +260,22 @@ function EntryForm({ companies, onClose, onSaved }: { companies: any[]; onClose:
   const toAccounts = (to?.accounts || []).filter((account: any) => (charge ? account.type === 'expense' : account.is_cash));
   const needsRate = from && to && from.currency !== to.currency;
 
+  const { busy, run } = useSubmit();
   const submit = async (event: FormEvent) => {
     event.preventDefault();
-    try {
-      await api.post('/api/accounting/group/intercompany', form);
-      await onSaved();
-      onClose();
-    } catch (err: any) {
-      setError(err.message);
-    }
+    return run(async () => {
+      try {
+        await api.post('/api/accounting/group/intercompany', form);
+        await onSaved();
+        onClose();
+      } catch (err: any) {
+        setError(err.message);
+      }
+    });
   };
 
   return (
-    <Modal title="New intercompany entry">
+    <Modal title="New intercompany entry" onClose={onClose}>
       <form onSubmit={submit}>
         <div className="form-grid">
           <label>Type
@@ -308,7 +318,7 @@ function EntryForm({ companies, onClose, onSaved }: { companies: any[]; onClose:
         <label style={{ marginTop: 12 }}>Description<input required value={form.memo} onChange={(e) => set('memo', e.target.value)} /></label>
         {error && <p className="error">{error}</p>}
         <div className="form-actions">
-          <button className="primary">Post to both companies</button>
+          <button disabled={busy} className="primary">Post to both companies</button>
           <button type="button" onClick={onClose}>Cancel</button>
         </div>
       </form>

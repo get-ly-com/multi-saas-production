@@ -2,6 +2,7 @@ import { FormEvent, ReactNode, useEffect, useState } from 'react';
 import { FinishForm, dueState, dueText } from '@/components/ActivityForms';
 import EmailForm from '@/components/EmailForm';
 import { CRM_SAVED, api, formatDate, today } from '@/lib/api';
+import useSubmit from '@/lib/useSubmit';
 
 const KINDS = [
   { id: 'note', name: 'Note' },
@@ -37,23 +38,26 @@ export default function Timeline({ links, extra = [], onChange }: { links: Links
     return () => window.removeEventListener(CRM_SAVED, load);
   }, [query]);
 
+  const { busy, run: once } = useSubmit();
   const add = async (event: FormEvent) => {
     event.preventDefault();
-    try {
-      // A call, meeting or email can be planned for a date; otherwise it is logged as done now
-      const planned = form.kind === 'task' || (form.later && form.kind !== 'note');
-      const { later, ...fields } = form;
-      await api.post('/api/crm/activities', {
-        ...links,
-        ...fields,
-        due_on: planned ? form.due_on || today() : '',
-        due_time: planned ? form.due_time : ''
-      });
-      setForm({ ...form, subject: '', body: '', due_on: '', due_time: '', later: false });
-      onChange?.();
-    } catch (err: any) {
-      setError(err.message);
-    }
+    return once(async () => {
+      try {
+        // A call, meeting or email can be planned for a date; otherwise it is logged as done now
+        const planned = form.kind === 'task' || (form.later && form.kind !== 'note');
+        const { later, ...fields } = form;
+        await api.post('/api/crm/activities', {
+          ...links,
+          ...fields,
+          due_on: planned ? form.due_on || today() : '',
+          due_time: planned ? form.due_time : ''
+        });
+        setForm({ ...form, subject: '', body: '', due_on: '', due_time: '', later: false });
+        onChange?.();
+      } catch (err: any) {
+        setError(err.message);
+      }
+    });
   };
 
   const run = async (action: () => Promise<unknown>) => {
@@ -100,7 +104,7 @@ export default function Timeline({ links, extra = [], onChange }: { links: Links
           <label style={{ marginTop: 12 }}>Details<textarea rows={2} value={form.body} onChange={(e) => setForm({ ...form, body: e.target.value })} /></label>
         )}
         {error && <p className="error">{error}</p>}
-        <div className="form-actions"><button className="primary">Save</button></div>
+        <div className="form-actions"><button disabled={busy} className="primary">Save</button></div>
       </form>
 
       <div className="timeline">

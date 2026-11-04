@@ -8,7 +8,8 @@ import { TagChips, useTags } from '@/components/Tags';
 import { CompanyForm, ContactForm, DealForm } from '@/components/CrmForms';
 import { CustomValues } from '@/components/CustomFields';
 import Timeline from '@/components/Timeline';
-import { api, money } from '@/lib/api';
+import { api, money, queryId } from '@/lib/api';
+import useSubmit from '@/lib/useSubmit';
 
 export default function Company() {
   return <AppShell><CompanyApp /></AppShell>;
@@ -16,7 +17,7 @@ export default function Company() {
 
 function CompanyApp() {
   const router = useRouter();
-  const id = router.query.id as string | undefined;
+  const id = queryId(router.query.id);
   const [company, setCompany] = useState<any>(null);
   const [contacts, setContacts] = useState<any[]>([]);
   const [deals, setDeals] = useState<any[]>([]);
@@ -44,7 +45,8 @@ function CompanyApp() {
     if (id) load();
   }, [id]);
 
-  const remove = async () => {
+  const { busy, run: once } = useSubmit();
+  const remove = () => once(async () => {
     if (!window.confirm(`Delete ${company.name}? Its contacts, deals and timeline stay.`)) return;
     try {
       await api.delete(`/api/crm/companies/${id}`);
@@ -52,7 +54,7 @@ function CompanyApp() {
     } catch (err: any) {
       setError(err.message);
     }
-  };
+  });
 
   const openValue = deals.filter((deal) => deal.stage?.kind === 'open').reduce((sum, deal) => sum + Number(deal.value || 0), 0);
   const wonValue = deals.filter((deal) => deal.stage?.kind === 'won').reduce((sum, deal) => sum + Number(deal.value || 0), 0);
@@ -73,7 +75,7 @@ function CompanyApp() {
               <button onClick={() => setForm('contact')}>New contact</button>
               <button onClick={() => setForm('deal')}>New deal</button>
               <button onClick={() => setForm('edit')}>Edit</button>
-              <button className="danger" onClick={remove}>Delete</button>
+              <button disabled={busy} className="danger" onClick={remove}>Delete</button>
             </div>
           </div>
           <div className="stats">

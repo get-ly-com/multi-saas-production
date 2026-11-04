@@ -3,6 +3,7 @@ import AccountingNav from '@/components/AccountingNav';
 import AppShell from '@/components/AppShell';
 import Modal from '@/components/Modal';
 import { api, formatDate, money, today } from '@/lib/api';
+import useSubmit from '@/lib/useSubmit';
 
 export default function Revenue() {
   return <AppShell><RevenueApp /></AppShell>;
@@ -38,7 +39,8 @@ function RevenueApp() {
     load();
   }, []);
 
-  const recognize = async () => {
+  const { busy, run: once } = useSubmit();
+  const recognize = () => once(async () => {
     try {
       const posted = await api.post('/api/accounting/revenue/run', { through });
       setNotice(posted ? `Posted ${posted} month(s) of revenue.` : 'Nothing new to post. Only finished months are earned.');
@@ -47,9 +49,9 @@ function RevenueApp() {
       setNotice('');
       setError(err.message);
     }
-  };
+  });
 
-  const cancel = async (schedule: any) => {
+  const cancel = (schedule: any) => once(async () => {
     if (!window.confirm(`Cancel the schedule for ${schedule.invoice_number}? Whatever is left is earned today.`)) return;
     try {
       await api.post(`/api/accounting/revenue/${schedule.id}/cancel`, {});
@@ -57,7 +59,7 @@ function RevenueApp() {
     } catch (err: any) {
       setError(err.message);
     }
-  };
+  });
 
   return (
     <div className="stack">
@@ -99,7 +101,7 @@ function RevenueApp() {
                   <td><span className="badge">{schedule.status}</span></td>
                   <td>
                     {schedule.status === 'active' && (
-                      <div className="row-actions"><button className="danger" onClick={() => cancel(schedule)}>Cancel</button></div>
+                      <div className="row-actions"><button disabled={busy} className="danger" onClick={() => cancel(schedule)}>Cancel</button></div>
                     )}
                   </td>
                 </tr>
@@ -119,19 +121,22 @@ function ScheduleForm({ invoices, onClose, onSaved }: { invoices: any[]; onClose
   const [error, setError] = useState('');
   const set = (field: string, value: string) => setForm({ ...form, [field]: value });
 
+  const { busy, run } = useSubmit();
   const submit = async (event: FormEvent) => {
     event.preventDefault();
-    try {
-      await api.post('/api/accounting/revenue', form);
-      await onSaved();
-      onClose();
-    } catch (err: any) {
-      setError(err.message);
-    }
+    return run(async () => {
+      try {
+        await api.post('/api/accounting/revenue', form);
+        await onSaved();
+        onClose();
+      } catch (err: any) {
+        setError(err.message);
+      }
+    });
   };
 
   return (
-    <Modal title="New revenue schedule">
+    <Modal title="New revenue schedule" onClose={onClose}>
       <form onSubmit={submit}>
         <div className="form-grid">
           <label>Invoice
@@ -147,7 +152,7 @@ function ScheduleForm({ invoices, onClose, onSaved }: { invoices: any[]; onClose
         </div>
         {error && <p className="error">{error}</p>}
         <div className="form-actions">
-          <button className="primary">Save</button>
+          <button disabled={busy} className="primary">Save</button>
           <button type="button" onClick={onClose}>Cancel</button>
         </div>
       </form>

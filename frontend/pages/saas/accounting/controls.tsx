@@ -2,6 +2,7 @@ import { useEffect, useState } from 'react';
 import AccountingNav from '@/components/AccountingNav';
 import AppShell from '@/components/AppShell';
 import { api, formatDate, money, today } from '@/lib/api';
+import useSubmit from '@/lib/useSubmit';
 
 const TABLE_NAMES: Record<string, string> = {
   invoices: 'Invoice',
@@ -81,7 +82,9 @@ function ControlsApp() {
     load();
   }, []);
 
-  const run = async (action: () => Promise<unknown>, done: string) => {
+  const { busy, run: once } = useSubmit();
+  // One action at a time, so a double click cannot repeat it
+  const run = (action: () => Promise<unknown>, done: string) => once(async () => {
     try {
       await action();
       setNotice(done);
@@ -90,7 +93,7 @@ function ControlsApp() {
       setNotice('');
       setError(err.message);
     }
-  };
+  });
 
   const closeYear = () => {
     const question = `Close the year to ${formatDate(yearEnd)}? Profit moves to Retained Earnings and everything up to that date is locked.`;

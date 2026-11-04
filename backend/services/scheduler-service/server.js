@@ -20,12 +20,22 @@ const LOCATIONS = ['in_person', 'phone', 'video'];
 
 const scheduler = (req) => req.db.schema('scheduler');
 
+// Only our own messages and the ones our database functions raise (P0001) reach people
 const sendError = (res, error) => {
-  if (error.status) return res.status(error.status).json({ error: error.message });
-  if (error.code === '23505') return res.status(409).json({ error: 'That is already saved' });
-  if (error.code === '23503') return res.status(409).json({ error: 'This is in use. Turn it off instead of deleting it.' });
-  if (error.code === '23P01') return res.status(409).json({ error: 'That time is already booked. Please pick another time.' });
-  res.status(400).json({ error: error.message });
+  const code = error?.code || '';
+  if (error?.status) return res.status(error.status).json({ error: error.message });
+  if (!code && error?.constructor === Error) return res.status(400).json({ error: error.message });
+  if (code === 'P0001') return res.status(400).json({ error: error.message });
+  if (/^PT[45]\d\d$/.test(code)) return res.status(Number(code.slice(2))).json({ error: error.message });
+
+  console.error('Scheduler error:', error);
+  if (code === '42501') return res.status(403).json({ error: 'You don’t have access to that' });
+  if (code === '22P02') return res.status(404).json({ error: 'Not found' });
+  if (code === '23503') return res.status(409).json({ error: 'This is in use. Turn it off instead of deleting it.' });
+  if (code === '23505') return res.status(409).json({ error: 'That is already saved' });
+  if (code === '23P01') return res.status(409).json({ error: 'That time is already booked. Please pick another time.' });
+  if (code === '23514') return res.status(400).json({ error: 'That value isn’t allowed' });
+  res.status(400).json({ error: 'That didn’t work. Please check and try again.' });
 };
 
 const id = (value, label) => {
@@ -240,7 +250,8 @@ app.get('/free-times', callScheduler('free_times', (req) => ({
 
 // CRM contacts to link a booking to
 app.get('/contacts', handle((req) => {
-  const search = text(req.query.search, 100).replace(/[%_,()]/g, ' ').trim();
+  // Characters that would change the .or() filter or act as wildcards
+  const search = text(req.query.search, 100).replace(/[%_,()*\\"]/g, ' ').trim();
   let query = req.db.schema('crm').from('contacts').select('id, name, email, phone').eq('tenant_id', req.tenantId);
   if (search) query = query.or(`name.ilike.%${search}%,email.ilike.%${search}%`);
   return rows(query.order('name').limit(20));
@@ -321,5 +332,17 @@ app.get('/stats', callScheduler('stats', (req) => ({
 app.get('/feed', callScheduler('feed_link', () => ({})));
 app.post('/feed', callScheduler('new_feed_link', () => ({})));
 app.delete('/feed', callScheduler('stop_feed_link', () => ({})));
+
+app.use((err, req, res, next) => {
+  if (res.headersSent) return next(err);
+  // Bad JSON and too-large bodies are the sender's mistake, not ours
+  if (err.status >= 400 && err.status < 500) {
+    return res.status(err.status).json({ error: err.status === 413 ? 'That is too large to send' : 'That request could not be read' });
+  }
+  console.error('Error:', err);
+  res.status(500).json({ error: 'Internal server error' });
+});
+
+process.on('unhandledRejection', (reason) => console.error('Unhandled rejection:', reason));
 
 app.listen(PORT, () => console.log(`📅 Scheduler Service on ${PORT}`));
