@@ -1,8 +1,13 @@
-import { FormEvent, useEffect, useState } from 'react';
+import { FormEvent, useEffect, useRef, useState } from 'react';
+import { Amount, PageHead, StatusPill, styles } from '@/components/AccountingKit';
 import AccountingNav from '@/components/AccountingNav';
-import AppShell from '@/components/AppShell';
+import AppShell, { useAccount } from '@/components/AppShell';
 import BankImport from '@/components/BankImport';
+import { celebrate } from '@/components/Celebrate';
+import EmptyState from '@/components/EmptyState';
 import Modal from '@/components/Modal';
+import { SkeletonStats, SkeletonTable } from '@/components/Skeleton';
+import { toast } from '@/components/Toast';
 import { api, formatDate, money, today } from '@/lib/api';
 import useSubmit from '@/lib/useSubmit';
 
@@ -15,6 +20,7 @@ function BankingApp() {
   const [accountId, setAccountId] = useState('');
   const [tab, setTab] = useState<'lines' | 'reconcile' | 'rules'>('lines');
   const [error, setError] = useState('');
+  const [ready, setReady] = useState(false);
 
   useEffect(() => {
     api.get('/api/accounting/accounts')
@@ -23,21 +29,26 @@ function BankingApp() {
         setAccounts(rows.filter((account: any) => account.is_active));
         if (banks[0]) setAccountId(banks[0].id);
       })
-      .catch((err) => setError(err.message));
+      .catch((err) => setError(err.message))
+      .finally(() => setReady(true));
   }, []);
+
+  const banks = accounts.filter((account) => account.is_cash);
 
   return (
     <div className="stack">
       <AccountingNav />
-      <div className="page-head"><h1>Banking</h1></div>
+      <PageHead title="Banking" line="Match your bank statement to your books, then reconcile to lock it in." />
 
-      <label>Account
-        <select value={accountId} onChange={(e) => setAccountId(e.target.value)}>
-          {accounts.filter((account) => account.is_cash).map((account) => (
-            <option key={account.id} value={account.id}>{account.code} {account.name}</option>
-          ))}
-        </select>
-      </label>
+      <div className="report-filters">
+        <label>Account
+          <select value={accountId} onChange={(e) => setAccountId(e.target.value)}>
+            {banks.map((account) => (
+              <option key={account.id} value={account.id}>{account.code} {account.name}</option>
+            ))}
+          </select>
+        </label>
+      </div>
 
       <div className="tabs">
         <button className={tab === 'lines' ? 'active' : ''} onClick={() => setTab('lines')}>Statement lines</button>
@@ -47,6 +58,17 @@ function BankingApp() {
 
       {error && <p className="error">{error}</p>}
 
+      {!ready && <SkeletonTable rows={6} columns={4} />}
+      {ready && !accountId && tab !== 'rules' && (
+        <div className="card">
+          <EmptyState
+            icon="bank"
+            title="No bank account yet"
+            line="Add a bank or cash account to your chart of accounts, then import its statement here."
+            action={{ label: 'Open chart of accounts', href: '/saas/accounting/accounts' }}
+          />
+        </div>
+      )}
       {accountId && tab === 'lines' && <StatementLines key={accountId} accountId={accountId} accounts={accounts} />}
       {accountId && tab === 'reconcile' && <Reconcile key={accountId} accountId={accountId} />}
       {tab === 'rules' && <Rules accounts={accounts} />}
@@ -54,14 +76,18 @@ function BankingApp() {
   );
 }
 
+const unmatchedIn = (rows: any[]) => rows.filter((line) => line.status === 'unmatched').length;
+
 function StatementLines({ accountId, accounts }: { accountId: string; accounts: any[] }) {
+  const account = useAccount();
+  const canEdit = account?.canEdit !== false;
   const [lines, setLines] = useState<any[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState('');
-  const [notice, setNotice] = useState('');
   const [importing, setImporting] = useState(false);
   const [posting, setPosting] = useState<any>(null);
   const [ruleHits, setRuleHits] = useState<Record<string, any>>({});
+  const head = useRef<HTMLDivElement>(null);
 
   const load = async () => {
     try {
@@ -72,8 +98,10 @@ function StatementLines({ accountId, accounts }: { accountId: string; accounts: 
       setLines(lineRows);
       setRuleHits(Object.fromEntries(hits.map((hit: any) => [hit.line_id, hit])));
       setError('');
+      return lineRows as any[];
     } catch (err: any) {
       setError(err.message);
+      return null;
     } finally {
       setLoading(false);
     }
@@ -83,75 +111,119 @@ function StatementLines({ accountId, accounts }: { accountId: string; accounts: 
     load();
   }, []);
 
+  // The last line to sort out is a real win: the statement and the books agree
+  const cheerIfDone = (before: number, after: any[] | null) => {
+    if (!after || before === 0 || after.length === 0 || unmatchedIn(after) > 0) return false;
+    celebrate({ from: head.current });
+    toast.success('Statement fully matched', { detail: 'Every line is matched or sorted. Your books agree with the bank.' });
+    return true;
+  };
+
   const { busy, run: once } = useSubmit();
   // One action at a time, so a double click cannot repeat it
-  const run = (action: () => Promise<unknown>) => once(async () => {
+  const run = (action: () => Promise<unknown>, title?: string, detail?: string, undo?: () => void) => once(async () => {
+    const before = unmatchedIn(lines);
     try {
       await action();
-      await load();
+      const after = await load();
+      if (cheerIfDone(before, after)) return;
+      if (title) toast.success(title, { detail, action: undo ? { label: 'Undo', onClick: undo } : undefined });
     } catch (err: any) {
       setError(err.message);
     }
   });
 
+  const match = (line: any) => run(
+    () => api.post(`/api/accounting/bank/lines/${line.id}/match`, { journal_line_id: line.suggested_line_id }),
+    'Matched', `${money(line.amount)} on ${formatDate(line.line_date)} now ties to ${line.suggested_memo || 'its entry'}.`,
+    () => run(() => api.post(`/api/accounting/bank/lines/${line.id}/unmatch`, {}), 'Match undone')
+  );
+  const ignore = (line: any) => run(
+    () => api.post(`/api/accounting/bank/lines/${line.id}/ignore`, { ignored: true }),
+    'Line ignored', 'It stays out of matching. Restore it any time.',
+    () => run(() => api.post(`/api/accounting/bank/lines/${line.id}/ignore`, { ignored: false }), 'Line restored')
+  );
+
+  const toReview = unmatchedIn(lines);
+  const hitCount = Object.keys(ruleHits).length;
+
   return (
     <>
-      <div className="page-head">
-        <span className="muted">{lines.filter((line) => line.status === 'unmatched').length} lines to review</span>
+      <div className="page-head" ref={head}>
+        <span className="muted">
+          {loading ? '' : lines.length === 0 ? 'No lines yet' : toReview === 0 ? 'All caught up' : `${toReview} ${toReview === 1 ? 'line' : 'lines'} to review`}
+        </span>
         <div className="row-actions">
-          {Object.keys(ruleHits).length > 0 && (
-            <button onClick={() => {
-              if (window.confirm(`Post ${Object.keys(ruleHits).length} lines using your bank rules?`)) {
-                run(async () => {
-                  const result = await api.post('/api/accounting/bank/rules/apply', { account_id: accountId });
-                  setNotice(`Posted ${result.posted} lines${result.skipped ? `. ${result.skipped} could not be posted, for example because their date is locked.` : '.'}`);
+          {hitCount > 0 && (
+            <button disabled={busy} onClick={() => {
+              if (window.confirm(`Post ${hitCount} lines using your bank rules?`)) {
+                const before = unmatchedIn(lines);
+                once(async () => {
+                  try {
+                    const result = await api.post('/api/accounting/bank/rules/apply', { account_id: accountId });
+                    const after = await load();
+                    if (cheerIfDone(before, after) && !result.skipped) return;
+                    toast.success(`Posted ${result.posted} ${result.posted === 1 ? 'line' : 'lines'}`, {
+                      detail: result.skipped ? `${result.skipped} could not be posted, for example because their date is locked.` : 'Your rules did the sorting.'
+                    });
+                  } catch (err: any) {
+                    setError(err.message);
+                  }
                 });
               }
-            }}>Post {Object.keys(ruleHits).length} with rules</button>
+            }}>Post {hitCount} with rules</button>
           )}
           <button className="primary" onClick={() => setImporting(true)}>Import statement</button>
         </div>
       </div>
 
       {error && <p className="error">{error}</p>}
-      {notice && <p className="notice">{notice}</p>}
 
-      <div className="card table-wrap">
-        {loading ? <p className="empty">Loading…</p> : (
+      {loading ? <SkeletonTable rows={6} columns={4} /> : lines.length === 0 ? (
+        <div className="card">
+          <EmptyState
+            icon="bank"
+            title="No statement lines yet"
+            line="Download a CSV statement from your bank and import it. We suggest a match for each line."
+            action={canEdit ? { label: 'Import statement', onClick: () => setImporting(true) } : undefined}
+          />
+        </div>
+      ) : (
+        <div className="card table-wrap">
           <table>
             <thead><tr><th>Date</th><th>Description</th><th className="num">Amount</th><th>Status</th><th /></tr></thead>
             <tbody>
-              {lines.length === 0 && <tr><td colSpan={5} className="empty">No statement lines yet</td></tr>}
               {lines.map((line) => (
                 <tr key={line.id}>
                   <td>{formatDate(line.line_date)}</td>
                   <td className="wrap">
                     {line.description}
-                    {line.status === 'matched' && <div className="muted">{line.matched_memo}</div>}
-                    {line.suggested_line_id && <div className="muted">Looks like: {line.suggested_memo}, {formatDate(line.suggested_date)}</div>}
-                    {ruleHits[line.id] && <div className="muted">Rule “{ruleHits[line.id].rule_name}”: post to {ruleHits[line.id].account_label}</div>}
+                    {line.status === 'matched' && <span className={styles.rowSub}>{line.matched_memo}</span>}
+                    {line.suggested_line_id && <span className={styles.rowSub}>Looks like: {line.suggested_memo}, {formatDate(line.suggested_date)}</span>}
+                    {ruleHits[line.id] && <span className={styles.rowSub}>Rule “{ruleHits[line.id].rule_name}”: post to {ruleHits[line.id].account_label}</span>}
                   </td>
-                  <td className="num">{money(line.amount)}</td>
-                  <td><span className={`badge ${line.status === 'matched' ? 'paid' : ''}`}>{line.reconciled ? 'reconciled' : line.status}</span></td>
+                  <td className="num"><Amount value={line.amount} /></td>
+                  <td><StatusPill status={line.reconciled ? 'reconciled' : line.status} /></td>
                   <td>
                     <div className="row-actions">
-                      {line.suggested_line_id && (
-                        <button onClick={() => run(() => api.post(`/api/accounting/bank/lines/${line.id}/match`, { journal_line_id: line.suggested_line_id }))}>Match</button>
-                      )}
+                      {line.suggested_line_id && <button className="small" disabled={busy} onClick={() => match(line)}>Match</button>}
                       {ruleHits[line.id] && (
-                        <button onClick={() => run(() => api.post('/api/accounting/bank/rules/apply', { account_id: accountId, line_ids: [line.id] }))}>Use rule</button>
+                        <button className="small" disabled={busy} onClick={() => run(
+                          () => api.post('/api/accounting/bank/rules/apply', { account_id: accountId, line_ids: [line.id] }),
+                          'Posted with your rule', `${money(line.amount)} went to ${ruleHits[line.id].account_label}.`
+                        )}>Use rule</button>
                       )}
                       {line.status === 'unmatched' && (
                         <>
-                          <button onClick={() => setPosting(line)}>Post</button>
-                          <button onClick={() => run(() => api.post(`/api/accounting/bank/lines/${line.id}/ignore`, { ignored: true }))}>Ignore</button>
+                          <button className="small" onClick={() => setPosting(line)}>Post</button>
+                          <button className="small" disabled={busy} onClick={() => ignore(line)}>Ignore</button>
                         </>
                       )}
                       {line.status === 'ignored' && (
-                        <button onClick={() => run(() => api.post(`/api/accounting/bank/lines/${line.id}/ignore`, { ignored: false }))}>Restore</button>
+                        <button className="small" disabled={busy} onClick={() => run(() => api.post(`/api/accounting/bank/lines/${line.id}/ignore`, { ignored: false }), 'Line restored', 'It is back in the list to review.')}>Restore</button>
                       )}
                       {line.status === 'matched' && !line.reconciled && (
-                        <button onClick={() => run(() => api.post(`/api/accounting/bank/lines/${line.id}/unmatch`, {}))}>Unmatch</button>
+                        <button className="small" disabled={busy} onClick={() => run(() => api.post(`/api/accounting/bank/lines/${line.id}/unmatch`, {}), 'Match undone', 'The line is back in the list to review.')}>Unmatch</button>
                       )}
                     </div>
                   </td>
@@ -159,15 +231,15 @@ function StatementLines({ accountId, accounts }: { accountId: string; accounts: 
               ))}
             </tbody>
           </table>
-        )}
-      </div>
+        </div>
+      )}
 
       {importing && (
         <BankImport
           accountId={accountId}
           onClose={() => setImporting(false)}
           onSaved={async (message) => {
-            setNotice(message);
+            toast.success('Statement imported', { detail: message });
             await load();
           }}
         />
@@ -177,7 +249,11 @@ function StatementLines({ accountId, accounts }: { accountId: string; accounts: 
           line={posting}
           accounts={accounts.filter((account) => account.id !== accountId && !['1200', '2000'].includes(account.code))}
           onClose={() => setPosting(null)}
-          onSaved={load}
+          onSaved={async () => {
+            const before = unmatchedIn(lines);
+            const after = await load();
+            if (!cheerIfDone(before, after)) toast.success('Posted to the books', { detail: `${money(posting.amount)} on ${formatDate(posting.line_date)} is recorded.` });
+          }}
         />
       )}
     </>
@@ -214,7 +290,7 @@ function PostForm({ line, accounts, onClose, onSaved }: { line: any; accounts: a
       </div>
       {error && <p className="error">{error}</p>}
       <div className="form-actions">
-        <button className="primary" disabled={!accountId} onClick={save}>Post</button>
+        <button className="primary" disabled={busy || !accountId} onClick={save}>Post</button>
         <button type="button" onClick={onClose}>Cancel</button>
       </div>
     </Modal>
@@ -226,7 +302,7 @@ function Reconcile({ accountId }: { accountId: string }) {
   const [balance, setBalance] = useState('');
   const [status, setStatus] = useState<any>(null);
   const [error, setError] = useState('');
-  const [notice, setNotice] = useState('');
+  const finishButton = useRef<HTMLButtonElement>(null);
 
   const load = async () => {
     try {
@@ -243,10 +319,11 @@ function Reconcile({ accountId }: { accountId: string }) {
 
   const { busy, run: once } = useSubmit();
   // One action at a time, so a double click cannot repeat it
-  const run = (action: () => Promise<unknown>) => once(async () => {
+  const run = (action: () => Promise<unknown>, title?: string, detail?: string) => once(async () => {
     try {
       await action();
       await load();
+      if (title) toast.success(title, { detail });
     } catch (err: any) {
       setError(err.message);
     }
@@ -254,18 +331,25 @@ function Reconcile({ accountId }: { accountId: string }) {
 
   const unclear = (item: any) => {
     if (window.confirm('Unclear this item? If it was posted from a statement line, that entry is reversed.')) {
-      run(() => api.post(`/api/accounting/bank/lines/${item.bank_line_id}/unmatch`, {}));
+      run(() => api.post(`/api/accounting/bank/lines/${item.bank_line_id}/unmatch`, {}), 'Item uncleared', 'It is back in the list of items not cleared yet.');
     }
   };
 
+  // Reconciling to the bank's own balance is a real win, so it gets a small celebration
   const finish = () =>
-    run(async () => {
-      await api.post('/api/accounting/bank/reconcile', { account_id: accountId, statement_date: asOf, statement_balance: balance });
-      setNotice(`Reconciled to ${formatDate(asOf)}. Cleared items up to that date are now locked.`);
-      setBalance('');
+    once(async () => {
+      try {
+        await api.post('/api/accounting/bank/reconcile', { account_id: accountId, statement_date: asOf, statement_balance: balance });
+        await load();
+        celebrate({ from: finishButton.current });
+        toast.success(`Reconciled to ${formatDate(asOf)}`, { detail: 'Your books match the bank. Cleared items up to that date are now locked.' });
+        setBalance('');
+      } catch (err: any) {
+        setError(err.message);
+      }
     });
 
-  if (!status) return error ? <p className="error">{error}</p> : <p className="empty">Loading…</p>;
+  if (!status) return error ? <p className="error">{error}</p> : <><SkeletonStats count={3} /><SkeletonTable rows={4} columns={4} /></>;
 
   const cents = (value: unknown) => Math.round(Number(value) * 100);
   const difference = (cents(balance) - cents(status.cleared_balance)) / 100;
@@ -279,54 +363,63 @@ function Reconcile({ accountId }: { accountId: string }) {
 
       {status.last_reconciled && <p className="muted">Last reconciled to {formatDate(status.last_reconciled)}</p>}
       {error && <p className="error">{error}</p>}
-      {notice && <p className="notice">{notice}</p>}
 
       <div className="stats">
-        <div className="card"><div className="stat-label">Book balance</div><div className="stat-value">{money(status.book_balance)}</div></div>
-        <div className="card"><div className="stat-label">Cleared</div><div className="stat-value">{money(status.cleared_balance)}</div></div>
-        <div className="card"><div className="stat-label">Difference</div><div className="stat-value">{balance === '' ? '—' : money(difference)}</div></div>
+        <div className="card"><div className="stat-label">Book balance</div><div className="stat-value"><Amount value={status.book_balance} /></div></div>
+        <div className="card"><div className="stat-label">Cleared</div><div className="stat-value"><Amount value={status.cleared_balance} /></div></div>
+        <div className="card">
+          <div className="stat-label">Difference</div>
+          <div className="stat-value">{balance === '' ? <span className="muted">Enter the balance</span> : difference === 0 ? <span style={{ color: 'var(--good)' }}>{money(0)}</span> : <Amount value={difference} />}</div>
+        </div>
       </div>
 
       <div className="form-actions">
-        <button className="primary" disabled={balance === '' || difference !== 0} onClick={finish}>Finish reconciliation</button>
+        <button ref={finishButton} className="primary" disabled={busy || balance === '' || difference !== 0} onClick={finish}>Finish reconciliation</button>
+        {balance !== '' && difference !== 0 && <span className="muted">Clear items until the difference is zero.</span>}
       </div>
 
       <div className="card table-wrap">
         <h2>Not cleared yet</h2>
-        <table>
-          <thead><tr><th>#</th><th>Date</th><th>Description</th><th className="num">Amount</th><th /></tr></thead>
-          <tbody>
-            {status.uncleared.length === 0 && <tr><td colSpan={5} className="empty">Everything has cleared</td></tr>}
-            {status.uncleared.map((item: any) => (
-              <tr key={item.id}>
-                <td>{item.entry_number}</td>
-                <td>{formatDate(item.entry_date)}</td>
-                <td className="wrap">{item.memo}</td>
-                <td className="num">{money(item.amount)}</td>
-                <td className="num"><button onClick={() => run(() => api.post('/api/accounting/bank/clear', { journal_line_id: item.id }))}>Clear</button></td>
-              </tr>
-            ))}
-          </tbody>
-        </table>
+        {status.uncleared.length === 0 ? (
+          <EmptyState compact tone="done" icon="paid" title="Everything has cleared" line="Nothing is waiting on the bank." />
+        ) : (
+          <table>
+            <thead><tr><th>#</th><th>Date</th><th>Description</th><th className="num">Amount</th><th /></tr></thead>
+            <tbody>
+              {status.uncleared.map((item: any) => (
+                <tr key={item.id}>
+                  <td>{item.entry_number}</td>
+                  <td>{formatDate(item.entry_date)}</td>
+                  <td className="wrap">{item.memo}</td>
+                  <td className="num"><Amount value={item.amount} /></td>
+                  <td className="num"><button className="small" disabled={busy} onClick={() => run(() => api.post('/api/accounting/bank/clear', { journal_line_id: item.id }), 'Cleared', `${money(item.amount)} counts toward the cleared balance.`)}>Clear</button></td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        )}
       </div>
 
       <div className="card table-wrap">
         <h2>Cleared</h2>
-        <table>
-          <thead><tr><th>#</th><th>Date</th><th>Description</th><th className="num">Amount</th><th /></tr></thead>
-          <tbody>
-            {status.cleared.length === 0 && <tr><td colSpan={5} className="empty">Nothing cleared since the last reconciliation</td></tr>}
-            {status.cleared.map((item: any) => (
-              <tr key={item.bank_line_id}>
-                <td>{item.entry_number}</td>
-                <td>{formatDate(item.entry_date)}</td>
-                <td className="wrap">{item.memo}</td>
-                <td className="num">{money(item.amount)}</td>
-                <td className="num"><button onClick={() => unclear(item)}>Unclear</button></td>
-              </tr>
-            ))}
-          </tbody>
-        </table>
+        {status.cleared.length === 0 ? (
+          <EmptyState compact icon="bank" title="Nothing cleared yet" line="Items you clear since the last reconciliation show up here." />
+        ) : (
+          <table>
+            <thead><tr><th>#</th><th>Date</th><th>Description</th><th className="num">Amount</th><th /></tr></thead>
+            <tbody>
+              {status.cleared.map((item: any) => (
+                <tr key={item.bank_line_id}>
+                  <td>{item.entry_number}</td>
+                  <td>{formatDate(item.entry_date)}</td>
+                  <td className="wrap">{item.memo}</td>
+                  <td className="num"><Amount value={item.amount} /></td>
+                  <td className="num"><button className="small" disabled={busy} onClick={() => unclear(item)}>Unclear</button></td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        )}
       </div>
     </>
   );
@@ -337,6 +430,8 @@ const blankRule = { name: '', match_text: '', direction: 'out', min_amount: '', 
 
 // Rules post routine statement lines, such as bank fees or subscriptions, without choosing an account each time
 function Rules({ accounts }: { accounts: any[] }) {
+  const account = useAccount();
+  const canEdit = account?.canEdit !== false;
   const [rules, setRules] = useState<any[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState('');
@@ -359,14 +454,22 @@ function Rules({ accounts }: { accounts: any[] }) {
 
   const { busy, run: once } = useSubmit();
   // One action at a time, so a double click cannot repeat it
-  const run = (action: () => Promise<unknown>) => once(async () => {
+  const run = (action: () => Promise<unknown>, title?: string, detail?: string, undo?: () => void) => once(async () => {
     try {
       await action();
       await load();
+      if (title) toast.success(title, { detail, action: undo ? { label: 'Undo', onClick: undo } : undefined });
     } catch (err: any) {
       setError(err.message);
     }
   });
+
+  const setActive = (rule: any, is_active: boolean, undoing = false): Promise<unknown> => run(
+    () => api.post('/api/accounting/bank/rules', { ...rule, is_active }),
+    undoing ? (is_active ? 'Rule resumed' : 'Rule paused') : is_active ? `${rule.name} resumed` : `${rule.name} paused`,
+    undoing ? undefined : is_active ? 'It suggests postings again.' : 'It stops suggesting postings until you resume it.',
+    undoing ? undefined : () => { setActive(rule, !is_active, true); }
+  );
 
   const amounts = (rule: any) => {
     if (rule.min_amount === null && rule.max_amount === null) return 'Any amount';
@@ -384,16 +487,25 @@ function Rules({ accounts }: { accounts: any[] }) {
 
       {error && <p className="error">{error}</p>}
 
+      {loading ? <SkeletonTable rows={4} columns={5} /> : rules.length === 0 ? (
+        <div className="card">
+          <EmptyState
+            icon="sparkle"
+            title="No rules yet"
+            line="Add one for bank fees, card charges or anything else that turns up every month. We sort them for you after that."
+            action={canEdit ? { label: 'New rule', onClick: () => setForm(blankRule) } : undefined}
+          />
+        </div>
+      ) : (
       <div className="card table-wrap">
-        {loading ? <p className="empty">Loading…</p> : (
+        {(
           <table>
             <thead><tr><th>Order</th><th>Rule</th><th>Description contains</th><th>When</th><th>Post to</th><th /></tr></thead>
             <tbody>
-              {rules.length === 0 && <tr><td colSpan={6} className="empty">No rules yet. Add one for bank fees, card charges or other lines that come every month.</td></tr>}
               {rules.map((rule) => (
                 <tr key={rule.id}>
                   <td>{rule.position}</td>
-                  <td className="wrap">{rule.name}{!rule.is_active && <span className="muted"> (paused)</span>}</td>
+                  <td className="wrap">{rule.name}{!rule.is_active && <> <StatusPill status="paused" /></>}</td>
                   <td className="wrap">&ldquo;{rule.match_text}&rdquo;</td>
                   <td className="wrap">
                     {DIRECTIONS[rule.direction]} · {amounts(rule)}
@@ -410,10 +522,10 @@ function Rules({ accounts }: { accounts: any[] }) {
                         memo: rule.memo || '',
                         position: String(rule.position)
                       })}>Edit</button>
-                      <button onClick={() => run(() => api.post('/api/accounting/bank/rules', { ...rule, is_active: !rule.is_active }))}>{rule.is_active ? 'Pause' : 'Resume'}</button>
+                      <button disabled={busy} onClick={() => setActive(rule, !rule.is_active)}>{rule.is_active ? 'Pause' : 'Resume'}</button>
                       <button className="danger" onClick={() => {
                         if (window.confirm(`Delete the rule "${rule.name}"? Lines already posted stay as they are.`)) {
-                          run(() => api.delete(`/api/accounting/bank/rules/${rule.id}`));
+                          run(() => api.delete(`/api/accounting/bank/rules/${rule.id}`), 'Rule deleted', 'Lines it already posted stay as they are.');
                         }
                       }}>Delete</button>
                     </div>
@@ -424,6 +536,7 @@ function Rules({ accounts }: { accounts: any[] }) {
           </table>
         )}
       </div>
+      )}
 
       {form && <RuleForm initial={form} accounts={accounts} onClose={() => setForm(null)} onSaved={load} />}
     </>
@@ -444,6 +557,7 @@ function RuleForm({ initial, accounts, onClose, onSaved }: { initial: any; accou
       try {
         const { id, name, match_text, direction, min_amount, max_amount, bank_account_id, account_id, memo, position, is_active } = form;
         await api.post('/api/accounting/bank/rules', { id, name, match_text, direction, min_amount, max_amount, bank_account_id, account_id, memo, position, is_active });
+        toast.success(id ? 'Rule saved' : 'Rule added', { detail: `Lines with “${match_text}” will be suggested for posting.` });
         await onSaved();
         onClose();
       } catch (err: any) {

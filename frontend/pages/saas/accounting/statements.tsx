@@ -1,8 +1,12 @@
 import Link from 'next/link';
 import { useRouter } from 'next/router';
 import { useEffect, useState } from 'react';
+import { Amount, PageHead, styles } from '@/components/AccountingKit';
 import AccountingNav from '@/components/AccountingNav';
 import AppShell from '@/components/AppShell';
+import EmptyState from '@/components/EmptyState';
+import Skeleton, { SkeletonText } from '@/components/Skeleton';
+import { toast } from '@/components/Toast';
 import { api, formatDate, money, today, isUuid } from '@/lib/api';
 
 const KIND_LABELS: Record<string, string> = {
@@ -14,9 +18,9 @@ const KIND_LABELS: Record<string, string> = {
 
 const AGEING = [
   ['not_due', 'Not due'],
-  ['days_1_30', '1–30 days'],
-  ['days_31_60', '31–60 days'],
-  ['days_61_90', '61–90 days'],
+  ['days_1_30', '1 to 30 days'],
+  ['days_31_60', '31 to 60 days'],
+  ['days_61_90', '61 to 90 days'],
   ['days_over_90', 'Over 90 days']
 ];
 
@@ -40,7 +44,6 @@ function StatementsApp() {
   const [company, setCompany] = useState('');
   const [statement, setStatement] = useState<any>(null);
   const [error, setError] = useState('');
-  const [notice, setNotice] = useState('');
 
   useEffect(() => {
     api.get('/api/accounting/customers').then(setCustomers).catch((err) => setError(err.message));
@@ -93,7 +96,7 @@ function StatementsApp() {
     }
     try {
       await navigator.clipboard.writeText(lines.join('\n'));
-      setNotice('Statement copied. Paste it into an email or message.');
+      toast.success('Statement copied', { detail: `Paste it into an email or message to ${statement.customer.name}.` });
     } catch {
       setError('Your browser did not allow copying. Use Print or save as PDF instead.');
     }
@@ -106,20 +109,19 @@ function StatementsApp() {
   return (
     <div className="stack">
       <AccountingNav />
-      <div className="page-head no-print">
-        <h1>Customer statements</h1>
-        <div className="row-actions">
-          {statement && <button className="always" onClick={copyText}>Copy as text</button>}
-          {mailto && <a href={mailto}>Open in email app</a>}
-          {statement && <button className="primary always" onClick={() => window.print()}>Print or save as PDF</button>}
-        </div>
-      </div>
-
-      <p className="muted no-print">A statement lists everything a customer was invoiced and paid in a period, with what they still owe at the end. Amounts are in your main currency.</p>
+      <PageHead
+        className="no-print"
+        title="Customer statements"
+        line="Everything a customer was invoiced and paid in a period, and what they still owe. Amounts are in your main currency."
+      >
+        {mailto && <a href={mailto} className="button">Open in email app</a>}
+        {statement && <button className="always" onClick={copyText}>Copy as text</button>}
+        {statement && <button className="primary always" onClick={() => window.print()}>Print or save as PDF</button>}
+      </PageHead>
 
       <div className="report-filters no-print">
         <label>Customer
-          <select value={customerId} onChange={(e) => { setCustomerId(e.target.value); setNotice(''); }}>
+          <select value={customerId} onChange={(e) => setCustomerId(e.target.value)}>
             <option value="">Choose a customer</option>
             {customers.map((customer) => (
               <option key={customer.id} value={customer.id}>{customer.name}{Number(customer.balance) ? ` (${money(customer.balance)})` : ''}</option>
@@ -131,11 +133,27 @@ function StatementsApp() {
       </div>
 
       {error && <p className="error no-print">{error}</p>}
-      {notice && <p className="notice no-print">{notice}</p>}
 
-      {!customerId && <div className="card"><p className="empty">Choose a customer to see their statement</p></div>}
+      {!customerId && (
+        <div className="card">
+          <EmptyState
+            icon="contact"
+            title="Choose a customer"
+            line={customers.length ? 'Pick someone above to see their statement, ready to print or copy into an email.' : 'Add a customer first. Their statement fills in as you invoice them.'}
+            action={customers.length ? undefined : { label: 'Add a customer', href: '/saas/accounting/customers?new=1' }}
+          />
+        </div>
+      )}
 
-      {customerId && !statement && !error && <p className="empty">Loading…</p>}
+      {customerId && !statement && !error && (
+        <div className="card document" role="status" aria-label="Loading statement">
+          <div className="document-head">
+            <div style={{ display: 'grid', gap: 8 }}><Skeleton width={200} height={24} /><Skeleton width={130} height={12} /></div>
+            <div style={{ display: 'grid', gap: 8, justifyItems: 'end' }}><Skeleton width={170} height={12} /><Skeleton width={100} height={12} /></div>
+          </div>
+          <SkeletonText lines={6} />
+        </div>
+      )}
 
       {statement && (
         <div className="card document">
@@ -163,7 +181,7 @@ function StatementsApp() {
                 <tr><th>Date</th><th>Item</th><th>Details</th><th className="num">Charges</th><th className="num">Payments and credits</th><th className="num">Balance</th></tr>
               </thead>
               <tbody>
-                <tr><td>{formatDate(statement.from)}</td><td colSpan={4}>Opening balance</td><td className="num">{money(statement.opening, currency)}</td></tr>
+                <tr><td>{formatDate(statement.from)}</td><td colSpan={4}><strong>Opening balance</strong></td><td className="num"><Amount value={statement.opening} currency={currency} strong /></td></tr>
                 {statement.lines.length === 0 && <tr><td colSpan={6} className="empty">Nothing happened in this period</td></tr>}
                 {statement.lines.map((line: any, index: number) => (
                   <tr key={`${line.kind}-${line.reference}-${index}`}>
@@ -175,19 +193,19 @@ function StatementsApp() {
                         : line.reference}
                     </td>
                     <td className="wrap">{line.description}{line.due_date && <span className="muted"> · due {formatDate(line.due_date)}</span>}</td>
-                    <td className="num">{Number(line.charge) > 0 ? money(line.charge, currency) : ''}</td>
-                    <td className="num">{Number(line.credit) > 0 ? money(line.credit, currency) : ''}</td>
-                    <td className="num">{money(line.balance, currency)}</td>
+                    <td className="num"><Amount value={line.charge} currency={currency} blankZero /></td>
+                    <td className="num"><Amount value={line.credit} currency={currency} blankZero /></td>
+                    <td className="num"><Amount value={line.balance} currency={currency} /></td>
                   </tr>
                 ))}
-                <tr className="total"><td colSpan={5}>Balance due on {formatDate(statement.to)}</td><td className="num">{money(statement.closing, currency)}</td></tr>
+                <tr className={styles.totalRow}><td colSpan={5}>Balance due on {formatDate(statement.to)}</td><td className="num"><Amount value={statement.closing} currency={currency} strong /></td></tr>
               </tbody>
             </table>
           </div>
 
           <div className="stats">
             {AGEING.map(([key, label]) => (
-              <div key={key}><div className="stat-label">{label}</div><div className="stat-value">{money(statement.ageing[key], currency)}</div></div>
+              <div key={key}><div className="stat-label">{label}</div><div className="stat-value"><Amount value={statement.ageing[key]} currency={currency} dim={!Number(statement.ageing[key])} /></div></div>
             ))}
           </div>
 
@@ -202,9 +220,9 @@ function StatementsApp() {
                       <td><Link href={`/saas/accounting/invoice/${invoice.id}`}>{invoice.invoice_number}</Link></td>
                       <td>{formatDate(invoice.invoice_date)}</td>
                       <td>{formatDate(invoice.due_date)}</td>
-                      <td className="num">{money(invoice.amount, currency)}</td>
-                      <td className="num">{money(invoice.open, currency)}</td>
-                      <td className="num">{invoice.days_overdue > 0 ? invoice.days_overdue : '—'}</td>
+                      <td className="num"><Amount value={invoice.amount} currency={currency} /></td>
+                      <td className="num"><Amount value={invoice.open} currency={currency} strong={invoice.days_overdue > 0} /></td>
+                      <td className="num">{invoice.days_overdue > 0 ? <span style={{ color: 'var(--danger)' }}>{invoice.days_overdue}</span> : <span className="muted">Not yet</span>}</td>
                     </tr>
                   ))}
                 </tbody>

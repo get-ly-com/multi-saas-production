@@ -1,9 +1,13 @@
 import Link from 'next/link';
 import { useRouter } from 'next/router';
 import { useState } from 'react';
+import EmptyState from '@/components/EmptyState';
+import Icon from '@/components/Icon';
 import Modal from '@/components/Modal';
+import Skeleton, { SkeletonTable } from '@/components/Skeleton';
+import { toast } from '@/components/Toast';
 
-const SECTIONS = [
+export const SECTIONS = [
   { name: 'Webhooks', path: '/saas/integrations' },
   { name: 'Incoming webhooks', path: '/saas/integrations/inbound' },
   { name: 'API keys', path: '/saas/integrations/keys' },
@@ -32,7 +36,22 @@ export const eventLabel = (name: string) => EVENTS.find((event) => event.name ==
 export const dateTime = (value: string | null | undefined) => (value ? new Date(value.endsWith('Z') || value.includes('+') ? value : `${value}Z`).toLocaleString() : '—');
 
 export function OnlyManagers() {
-  return <p className="muted">Only owners and admins can set up integrations. Ask one of them if you need a webhook or an API key.</p>;
+  return (
+    <div className="card">
+      <EmptyState icon="integrations" title="Only owners and admins can set this up"
+        line="Ask one of them if you need a webhook or an API key." />
+    </div>
+  );
+}
+
+// While a page first loads: the header and a list, greyed
+export function IntegrationsLoading() {
+  return (
+    <div className="stack" role="status" aria-label="Loading">
+      <div className="page-head"><Skeleton width={180} height={28} /><Skeleton width={130} height={34} /></div>
+      <SkeletonTable rows={4} columns={4} />
+    </div>
+  );
 }
 
 export default function IntegrationsNav() {
@@ -46,24 +65,40 @@ export default function IntegrationsNav() {
   );
 }
 
+const copyText = async (value: string, what = 'Copied') => {
+  try {
+    await navigator.clipboard.writeText(value);
+    toast.success(what, { detail: 'It is on your clipboard.' });
+    return true;
+  } catch {
+    toast.error('Could not copy', { detail: 'Select the text and copy it by hand.' });
+    return false;
+  }
+};
+
+// A code sample or snippet with a copy button in its corner
+export function CodeBlock({ value, label = 'Copied' }: { value: string; label?: string }) {
+  return (
+    <div style={{ position: 'relative' }}>
+      <pre className="code-block" style={{ paddingRight: 84 }}>{value}</pre>
+      <button type="button" className="small always" style={{ position: 'absolute', top: 6, right: 6 }} onClick={() => copyText(value, label)}>
+        <Icon name="copy" size={14} />Copy
+      </button>
+    </div>
+  );
+}
+
 export function ShowOnce({ title, value, onClose, note }: { title: string; value: string; onClose: () => void; note?: string }) {
   const [copied, setCopied] = useState(false);
-  const copy = async () => {
-    try {
-      await navigator.clipboard.writeText(value);
-      setCopied(true);
-    } catch {
-      setCopied(false);
-    }
-  };
+  const copy = async () => setCopied(await copyText(value, 'Copied to your clipboard'));
   return (
     <Modal title={title}>
-      <p className="notice">Copy it now. It won't be shown again; if you lose it, make a new one.</p>
+      <p className="notice">Copy it now. It won&apos;t be shown again. If you lose it, make a new one.</p>
       <pre className="code-block">{value}</pre>
       {note && <p className="muted">{note}</p>}
       <div className="form-actions">
-        <button onClick={copy}>{copied ? 'Copied' : 'Copy'}</button>
-        <button className="primary" onClick={onClose}>I've saved it</button>
+        <button onClick={copy}><Icon name={copied ? 'check' : 'copy'} size={15} />{copied ? 'Copied' : 'Copy'}</button>
+        <button className="primary" onClick={onClose}>I&apos;ve saved it</button>
       </div>
     </Modal>
   );

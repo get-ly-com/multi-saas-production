@@ -37,7 +37,7 @@ export const rememberCompany = (id: string) => {
 
 export const openCompany = (id: string) => {
   rememberCompany(id);
-  window.location.assign('/saas/accounting');
+  window.location.assign('/saas/today');
 };
 
 const request = async (method: string, path: string, body?: unknown) => {
@@ -76,6 +76,8 @@ let baseCurrency = 'USD';
 export const setBaseCurrency = (currency: string) => {
   baseCurrency = currency;
 };
+
+export const getBaseCurrency = () => baseCurrency;
 
 export const money = (value: number | string | null | undefined, currency = baseCurrency) =>
   Number(value || 0).toLocaleString(undefined, { style: 'currency', currency });

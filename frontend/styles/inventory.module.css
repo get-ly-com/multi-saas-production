@@ -1,0 +1,107 @@
+/* Inventory only. Tokens come from styles/globals.css; never hard-code a colour here. */
+
+.sku { font-family: var(--font-mono); font-size: 12px; color: var(--text-2); letter-spacing: 0.01em; white-space: nowrap; }
+.itemName { font-weight: 600; color: var(--text); }
+
+.list tbody tr { cursor: pointer; }
+.list tbody tr:focus-visible { outline: none; box-shadow: inset 3px 0 0 var(--accent); }
+.list tbody tr:focus-visible td { background: var(--hover); }
+
+/* Stock level: green plenty, amber at or under the reorder level, red none */
+.level { display: grid; gap: 4px; min-width: 120px; }
+.levelTop { display: flex; justify-content: space-between; align-items: baseline; gap: 8px; font-variant-numeric: tabular-nums; }
+.levelQty { font-weight: 600; color: var(--text); }
+.bar { position: relative; height: 6px; border-radius: var(--r-full); background: var(--sunken); overflow: hidden; }
+.bar > span { position: absolute; inset: 0 auto 0 0; border-radius: inherit; background: var(--good); transition: width var(--dur-4) var(--ease-out); }
+.bar.low > span { background: var(--warn); }
+.bar.out > span { background: var(--danger); }
+.bar.out { background: var(--danger-soft); }
+.bar > i { position: absolute; top: -1px; bottom: -1px; width: 2px; background: var(--text); opacity: 0.35; border-radius: 1px; }
+
+/* Item drawer */
+.drawerTop { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: var(--s-3); margin-bottom: var(--s-5); }
+.tile { padding: var(--s-3) var(--s-4); border: 1px solid var(--border); border-radius: var(--r-md); background: var(--surface-2); display: grid; gap: 2px; min-width: 0; }
+.tile strong { font-size: var(--text-lg); font-variant-numeric: tabular-nums; overflow-wrap: anywhere; }
+.facts { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: var(--s-3) var(--s-5); margin: 0 0 var(--s-5); }
+.facts dt { font-size: var(--text-xs); color: var(--muted); }
+.facts dd { margin: 0; overflow-wrap: anywhere; }
+.places { display: grid; gap: 8px; margin-bottom: var(--s-5); }
+.place { display: grid; grid-template-columns: minmax(0, 1fr) 120px auto; gap: var(--s-3); align-items: center; font-size: var(--text-sm); }
+.section { font-size: var(--text-sm); font-weight: 600; color: var(--muted); margin: var(--s-5) 0 var(--s-3); }
+.moves { list-style: none; margin: 0; padding: 0; display: grid; }
+.move { display: grid; grid-template-columns: 28px minmax(0, 1fr) auto; gap: var(--s-3); align-items: center; padding: 10px 0; border-top: 1px solid var(--border); }
+.move:first-child { border-top: 0; }
+.moveIcon { width: 28px; height: 28px; border-radius: var(--r-full); display: grid; place-items: center; background: var(--sunken); color: var(--muted); }
+.moveIcon.in { background: var(--good-soft); color: var(--good); }
+.moveIcon.out { background: var(--danger-soft); color: var(--danger); }
+.moveText { min-width: 0; display: grid; gap: 1px; }
+.moveText span:first-child { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.moveQty { text-align: right; font-variant-numeric: tabular-nums; font-weight: 600; }
+.moveQty.in { color: var(--good); }
+.moveQty.out { color: var(--danger); }
+
+/* Count sheet: a scanning game */
+.scanHero {
+  display: grid; gap: var(--s-4); padding: var(--s-5) var(--s-6); border: 1px solid var(--border); border-radius: var(--r-lg);
+  background: linear-gradient(180deg, var(--accent-soft) 0%, var(--surface) 80%); box-shadow: var(--shadow-xs);
+}
+.scanRow { display: flex; gap: var(--s-2); align-items: stretch; }
+.scanRow input {
+  flex: 1; min-width: 0; font-size: var(--text-xl); padding: 14px 16px; min-height: 56px; border-radius: var(--r-lg);
+  font-family: var(--font-mono); letter-spacing: 0.02em;
+}
+.scanRow button { min-height: 56px; padding: 0 18px; border-radius: var(--r-lg); font-size: var(--text-base, 14px); }
+.scanRow.hit input { animation: hitRing var(--dur-4) var(--ease-out); border-color: var(--good); }
+.scanRow.miss input { animation: shake var(--dur-3) var(--ease-out); border-color: var(--danger); }
+@keyframes hitRing { 0% { box-shadow: 0 0 0 0 var(--good-soft); } 40% { box-shadow: 0 0 0 6px var(--good-soft); } 100% { box-shadow: 0 0 0 0 transparent; } }
+@keyframes shake { 0%, 100% { transform: translateX(0); } 25% { transform: translateX(-4px); } 75% { transform: translateX(4px); } }
+
+.scanLast { display: flex; align-items: center; gap: var(--s-3); min-height: 28px; font-size: var(--text-sm); }
+.scanLast strong { font-variant-numeric: tabular-nums; }
+.scanPop { display: inline-flex; align-items: center; gap: 6px; padding: 3px 10px; border-radius: var(--r-full); background: var(--good-soft); color: var(--good); font-weight: 600; animation: pop var(--dur-3) var(--ease-spring); }
+.scanMiss { display: inline-flex; align-items: center; gap: 6px; padding: 3px 10px; border-radius: var(--r-full); background: var(--danger-soft); color: var(--danger); font-weight: 600; animation: pop var(--dur-3) var(--ease-spring); }
+@keyframes pop { from { transform: scale(0.7); opacity: 0; } to { transform: scale(1); opacity: 1; } }
+
+.progress { display: grid; gap: 6px; }
+.progressTop { display: flex; justify-content: space-between; gap: var(--s-3); font-size: var(--text-sm); font-variant-numeric: tabular-nums; }
+.progressTrack { height: 10px; border-radius: var(--r-full); background: var(--sunken); overflow: hidden; }
+.progressTrack > span { display: block; height: 100%; border-radius: inherit; background: var(--accent); transition: width var(--dur-4) var(--ease-out); }
+.progressTrack > span.full { background: var(--good); }
+
+.sheet tbody tr { transition: background var(--dur-3) var(--ease-out); }
+.sheet tbody tr.counted td:first-child { box-shadow: inset 3px 0 0 var(--good-soft); }
+.sheet tbody tr.hitRow td { animation: rowHit 900ms var(--ease-out); }
+@keyframes rowHit { 0% { background: var(--good-soft); } 70% { background: var(--good-soft); } 100% { background: transparent; } }
+.countInput { width: 96px; text-align: right; font-variant-numeric: tabular-nums; font-weight: 600; }
+.countInput.hitInput { animation: hitRing var(--dur-4) var(--ease-out); border-color: var(--good); }
+.diffUp { color: var(--good); font-weight: 600; }
+.diffDown { color: var(--danger); font-weight: 600; }
+
+/* Reorder, value and profit */
+.marginBar { display: inline-flex; align-items: center; gap: 8px; justify-content: flex-end; }
+.marginTrack { width: 56px; height: 6px; border-radius: var(--r-full); background: var(--sunken); overflow: hidden; position: relative; flex: none; }
+.marginTrack > span { position: absolute; inset: 0 auto 0 0; border-radius: inherit; background: var(--good); }
+.marginTrack > span.thin { background: var(--warn); }
+.marginTrack > span.loss { background: var(--danger); }
+.share { display: inline-flex; align-items: center; gap: 8px; justify-content: flex-end; }
+.shareTrack { width: 64px; height: 6px; border-radius: var(--r-full); background: var(--sunken); overflow: hidden; position: relative; flex: none; }
+.shareTrack > span { position: absolute; inset: 0 auto 0 0; border-radius: inherit; background: var(--series-1); }
+.orderBar { display: flex; flex-wrap: wrap; gap: var(--s-3); align-items: flex-end; justify-content: space-between; position: sticky; bottom: 0; z-index: 2; padding: var(--s-4) var(--s-5); border: 1px solid var(--border); border-radius: var(--r-lg); background: var(--surface); box-shadow: var(--shadow-lg); }
+.orderTotal { display: grid; gap: 2px; }
+.orderTotal strong { font-size: var(--text-xl); font-variant-numeric: tabular-nums; }
+.chosenRow td { background: var(--accent-soft); }
+
+@media (max-width: 640px) {
+  .drawerTop { grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); }
+  .facts { grid-template-columns: minmax(0, 1fr); }
+  .scanHero { padding: var(--s-4); }
+  .scanRow input { font-size: var(--text-lg); min-height: 52px; }
+  .scanRow button { min-height: 52px; padding: 0 12px; }
+  .place { grid-template-columns: minmax(0, 1fr) 80px auto; }
+  .level { min-width: 90px; }
+  .orderBar { padding: var(--s-3); }
+}
+
+/* Two copies of the scan pulse, so back to back scans each replay it */
+.scanRow.hit2 input { animation: hitRing2 var(--dur-4) var(--ease-out); border-color: var(--good); }
+@keyframes hitRing2 { 0% { box-shadow: 0 0 0 0 var(--good-soft); } 40% { box-shadow: 0 0 0 6px var(--good-soft); } 100% { box-shadow: 0 0 0 0 transparent; } }

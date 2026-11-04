@@ -1,10 +1,14 @@
 import Link from 'next/link';
 import { FormEvent, useEffect, useState } from 'react';
 import AppShell from '@/components/AppShell';
-import IntegrationsNav, { OnlyManagers, ShowOnce, dateTime } from '@/components/IntegrationsNav';
+import EmptyState from '@/components/EmptyState';
+import Icon from '@/components/Icon';
+import IntegrationsNav, { IntegrationsLoading, OnlyManagers, ShowOnce, dateTime } from '@/components/IntegrationsNav';
 import Modal from '@/components/Modal';
 import { api } from '@/lib/api';
+import { toast } from '@/components/Toast';
 import useSubmit from '@/lib/useSubmit';
+import s from '@/styles/settings.module.css';
 
 export default function ApiKeys() {
   return <AppShell><KeysApp /></AppShell>;
@@ -32,8 +36,8 @@ function KeysApp() {
     load();
   }, []);
 
-  if (!data) return <div className="stack"><IntegrationsNav />{error ? <p className="error">{error}</p> : <p className="empty">Loading…</p>}</div>;
-  if (!data.is_manager) return <div className="stack"><IntegrationsNav /><h1>API keys</h1><OnlyManagers /></div>;
+  if (!data) return <div className="stack"><IntegrationsNav />{error ? <p className="error">{error}</p> : <IntegrationsLoading />}</div>;
+  if (!data.is_manager) return <div className="stack"><IntegrationsNav /><div className="page-head"><h1>API keys</h1></div><OnlyManagers /></div>;
 
   const create = (event: FormEvent) => {
     event.preventDefault();
@@ -63,6 +67,7 @@ function KeysApp() {
     try {
       await api.delete(`/api/integration/api-keys/${row.id}`);
       await load();
+      toast.success('Key revoked', { detail: `${row.name} no longer works.` });
     } catch (err: any) {
       setError(err.message);
     }
@@ -71,46 +76,58 @@ function KeysApp() {
   return (
     <div className="stack">
       <IntegrationsNav />
-      <h1>API keys</h1>
-      <p className="muted">
-        An API key lets another app read this company's contacts, leads, invoices, stock items and deals. A key that can also write may add
-        contacts and leads, nothing else. A key stops working if you revoke it, or if the person who made it is no longer an owner or admin. See the <Link href="/saas/integrations/api">API guide</Link>.
-      </p>
+      <div className="page-head">
+        <div>
+          <h1>API keys</h1>
+          <p className="muted">Let another app read your records, with a key you can revoke at any time.</p>
+        </div>
+        <Link className="button" href="/saas/integrations/api"><Icon name="external" size={15} />API guide</Link>
+      </div>
       {error && <p className="error">{error}</p>}
 
-      <form className="card row-actions" style={{ justifyContent: 'flex-start' }} onSubmit={create}>
-        <input aria-label="Key name" placeholder="Name, like Reporting tool" required maxLength={80} value={name} onChange={(e) => setName(e.target.value)} />
-        <select aria-label="What the key can do" value={scope} onChange={(e) => setScope(e.target.value as 'read' | 'write')}>
-          <option value="read">Read only</option>
-          <option value="write">Read, and add contacts and leads</option>
-        </select>
-        <button className="primary" disabled={busy}>Make a key</button>
-      </form>
+      <div className="card">
+        <div className={s.section}>
+          <div className={s.sectionText}>
+            <h2>Make a key</h2>
+            <p>A key can read contacts, leads, invoices, stock items and deals. A key that can also write may add contacts and leads, nothing else. It stops working if you revoke it, or if the person who made it is no longer an owner or admin.</p>
+          </div>
+          <form className={s.inline} onSubmit={create}>
+            <label>Name<input placeholder="Like Reporting tool" required maxLength={80} value={name} onChange={(e) => setName(e.target.value)} /></label>
+            <label style={{ flex: '0 0 auto' }}>What it can do
+              <select value={scope} onChange={(e) => setScope(e.target.value as 'read' | 'write')}>
+                <option value="read">Read only</option>
+                <option value="write">Read, and add contacts and leads</option>
+              </select>
+            </label>
+            <button className="primary" disabled={busy}><Icon name="plus" size={16} />Make a key</button>
+          </form>
+        </div>
+      </div>
 
       <div className="card table-wrap">
         <table>
           <thead><tr><th>Name</th><th>Key</th><th>Can</th><th>Made</th><th>Last used</th><th>Status</th><th /></tr></thead>
           <tbody>
-            {data.api_keys.length === 0 && <tr><td colSpan={7} className="empty">No API keys yet</td></tr>}
+            {data.api_keys.length === 0 && <tr><td colSpan={7}><EmptyState compact icon="integrations" title="No API keys yet" line="Make one above when another app needs to read your records." /></td></tr>}
             {data.api_keys.map((row: any) => (
               <tr key={row.id}>
-                <td>{row.name}</td>
+                <td><strong>{row.name}</strong></td>
                 <td><code>{row.prefix}…</code></td>
                 <td>{row.scope === 'write' ? 'Read and add' : 'Read only'}</td>
                 <td>{dateTime(row.created_at)}{row.created_by && <div className="muted">{row.created_by}</div>}</td>
                 <td>{row.last_used_at ? dateTime(row.last_used_at) : 'Never'}{Number(row.requests_1d) > 0 && <div className="muted">{row.requests_1d} in the last day</div>}</td>
-                <td>{row.revoked_at ? <span className="badge failed">Revoked</span> : <span className="badge delivered">Active</span>}</td>
+                <td>{row.revoked_at ? <span className="badge cancelled">Revoked</span> : <span className="badge active">Active</span>}</td>
                 <td>
                   <div className="row-actions">
-                    <button onClick={() => showLog(row)}>Requests</button>
-                    {!row.revoked_at && <button className="danger" disabled={busy} onClick={() => revoke(row)}>Revoke</button>}
+                    <button className="small" onClick={() => showLog(row)}>Requests</button>
+                    {!row.revoked_at && <button className="small ghost danger" disabled={busy} onClick={() => revoke(row)}>Revoke</button>}
                   </div>
                 </td>
               </tr>
             ))}
           </tbody>
         </table>
-        <p className="muted">
+        <p className="muted small" style={{ padding: '12px 16px', margin: 0 }}>
           Up to {data.limits.api_keys_per_company} active keys, each allowed {data.limits.api_requests_per_minute} requests a minute.
           Keys that can write may add up to {data.limits.api_writes_per_day} contacts and leads a day for the whole company.
           Requests are kept in each key's log for {data.limits.log_days} days.

@@ -3,7 +3,7 @@ import { useRouter } from 'next/router';
 import { useEffect, useState } from 'react';
 import { api } from '@/lib/api';
 
-const SECTIONS = [
+export const SECTIONS = [
   { name: 'Today', path: '/saas/crm' },
   { name: 'Pipeline', path: '/saas/crm/pipeline' },
   { name: 'Forecast', path: '/saas/crm/forecast' },

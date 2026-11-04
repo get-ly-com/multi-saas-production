@@ -57,7 +57,13 @@ function NextStepFields({ value, onChange, members, emptyOwner }: { value: NextS
   );
 }
 
-const blankStep = (): NextStep => ({ kind: 'call', subject: '', due_on: today(), due_time: '', owner_id: '' });
+const blankStep = (kind = 'call'): NextStep => ({ kind, subject: '', due_on: today(), due_time: '', owner_id: '' });
+
+// Tick an activity off with no notes, the same as "Mark done" with the form left empty
+export const finishActivity = (id: string) => api.post(`/api/crm/activities/${id}/finish`, { feedback: '', next: null });
+
+// Undo a tick: the activity is open again
+export const reopenActivity = (id: string) => api.put(`/api/crm/activities/${id}/done`, { done: false });
 
 // Mark done, say how it went, and plan what comes next on the same record
 export function FinishForm({ activity, onClose, onSaved }: { activity: any; onClose: () => void; onSaved: () => void }) {
@@ -101,9 +107,9 @@ export function FinishForm({ activity, onClose, onSaved }: { activity: any; onCl
 }
 
 // Plan a call, meeting, email or to-do on a record (or on its own)
-export function PlanForm({ links = {}, onClose, onSaved }: { links?: Record<string, string | undefined>; onClose: () => void; onSaved: () => void }) {
+export function PlanForm({ links = {}, kind = 'call', onClose, onSaved }: { links?: Record<string, string | undefined>; kind?: string; onClose: () => void; onSaved: () => void }) {
   const members = useTeam();
-  const [step, setStep] = useState<NextStep>(blankStep());
+  const [step, setStep] = useState<NextStep>(blankStep(kind));
   const [body, setBody] = useState('');
   const [error, setError] = useState('');
 
@@ -122,13 +128,62 @@ export function PlanForm({ links = {}, onClose, onSaved }: { links?: Record<stri
   };
 
   return (
-    <Modal title="Plan an activity" onClose={onClose}>
+    <Modal title={kind === 'task' ? 'Add a task' : 'Plan an activity'} onClose={onClose}>
       <form onSubmit={submit} className="stack">
         <NextStepFields value={step} onChange={setStep} members={members} emptyOwner="Me" />
         <label>Details (optional)<textarea rows={2} value={body} onChange={(e) => setBody(e.target.value)} /></label>
         {error && <p className="error">{error}</p>}
         <div className="form-actions">
           <button disabled={busy} className="primary">Plan it</button>
+          <button type="button" onClick={onClose}>Cancel</button>
+        </div>
+      </form>
+    </Modal>
+  );
+}
+
+const LOGGED_KINDS = [
+  { id: 'note', name: 'Note' },
+  { id: 'call', name: 'Call' },
+  { id: 'meeting', name: 'Meeting' },
+  { id: 'email', name: 'Email' }
+];
+
+// Log something that already happened (a call, a meeting, a note) on a record.
+// Posts the same thing the timeline does when it logs an activity as done now.
+export function LogForm({ links, onClose, onSaved }: { links: Record<string, string | undefined>; onClose: () => void; onSaved: () => void }) {
+  const [kind, setKind] = useState('call');
+  const [subject, setSubject] = useState('');
+  const [body, setBody] = useState('');
+  const [error, setError] = useState('');
+
+  const { busy, run } = useSubmit();
+  const submit = async (event: FormEvent) => {
+    event.preventDefault();
+    return run(async () => {
+      try {
+        await api.post('/api/crm/activities', { ...links, kind, subject, body, due_on: '', due_time: '' });
+        await onSaved();
+        onClose();
+      } catch (err: any) {
+        setError(err.message);
+      }
+    });
+  };
+
+  return (
+    <Modal title="Log an activity" onClose={onClose}>
+      <form onSubmit={submit} className="stack">
+        <div className="tabs" role="group" aria-label="Type">
+          {LOGGED_KINDS.map(({ id, name }) => (
+            <button type="button" key={id} className={kind === id ? 'active' : ''} onClick={() => setKind(id)}>{name}</button>
+          ))}
+        </div>
+        <label>Subject<input required maxLength={200} autoFocus value={subject} onChange={(e) => setSubject(e.target.value)} /></label>
+        <label>Details (optional)<textarea rows={3} value={body} onChange={(e) => setBody(e.target.value)} /></label>
+        {error && <p className="error">{error}</p>}
+        <div className="form-actions">
+          <button disabled={busy} className="primary">{busy ? 'Saving…' : 'Log it'}</button>
           <button type="button" onClick={onClose}>Cancel</button>
         </div>
       </form>

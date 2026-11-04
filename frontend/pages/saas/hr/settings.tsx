@@ -3,6 +3,8 @@ import { FormEvent, useEffect, useState } from 'react';
 import AppShell from '@/components/AppShell';
 import HrNav from '@/components/HrNav';
 import Modal from '@/components/Modal';
+import { SkeletonPage } from '@/components/Skeleton';
+import { toast } from '@/components/Toast';
 import { api, formatDate } from '@/lib/api';
 import useSubmit from '@/lib/useSubmit';
 
@@ -17,7 +19,7 @@ function SettingsApp() {
   const [types, setTypes] = useState<any[]>([]);
   const [holidays, setHolidays] = useState<any[]>([]);
   const [error, setError] = useState('');
-  const [notice, setNotice] = useState('');
+  const setNotice = (text: string) => { if (text) toast.success(text); };
 
   const load = async () => {
     try {
@@ -43,14 +45,13 @@ function SettingsApp() {
   const { busy, run: once } = useSubmit();
   // One action at a time, so a double click cannot repeat it
   const run = (work: () => Promise<unknown>, done = '') => once(async () => {
-    setNotice('');
     try {
       await work();
       await load();
       if (done) setNotice(done);
       return true;
     } catch (err: any) {
-      setError(err.message);
+      toast.error('That did not go through', { detail: err.message });
       return false;
     }
   });
@@ -64,7 +65,7 @@ function SettingsApp() {
       </div>
     );
   }
-  if (!rates) return <div className="stack"><HrNav />{error ? <p className="error">{error}</p> : <p className="empty">Loading…</p>}</div>;
+  if (!rates) return <div className="stack"><HrNav />{error ? <p className="error">{error}</p> : <SkeletonPage />}</div>;
 
   const saveRates = (event: FormEvent) => {
     event.preventDefault();
@@ -79,7 +80,6 @@ function SettingsApp() {
       <HrNav />
       <h1>HR settings</h1>
       {error && <p className="error">{error}</p>}
-      {notice && <p className="notice">{notice}</p>}
 
       <form className="card" onSubmit={saveRates}>
         <h2>Payroll rates</h2>

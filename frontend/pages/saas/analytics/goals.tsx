@@ -1,7 +1,14 @@
 import { FormEvent, useEffect, useState } from 'react';
-import AnalyticsNav, { day, monthName } from '@/components/AnalyticsNav';
+import AnalyticsNav, { Ring, day, monthName } from '@/components/AnalyticsNav';
 import AppShell from '@/components/AppShell';
+import { celebrate } from '@/components/Celebrate';
+import EmptyState from '@/components/EmptyState';
+import Icon from '@/components/Icon';
 import Modal from '@/components/Modal';
+import Skeleton from '@/components/Skeleton';
+import { toast } from '@/components/Toast';
+import { store } from '@/lib/ui';
+import a from '@/styles/analytics.module.css';
 import { api, money } from '@/lib/api';
 
 export default function Goals() {
@@ -35,7 +42,22 @@ function GoalsApp() {
     load(month);
   }, [month]);
 
-  if (!data) return <div className="stack"><AnalyticsNav />{error ? <p className="error">{error}</p> : <p className="empty">Loading…</p>}</div>;
+  // A goal reached this month is a real win: one burst, once per goal
+  useEffect(() => {
+    if (!data || month !== firstOfMonth()) return;
+    const reached = (data.goals || []).filter((row: any) => Number(row.percent) >= 100).map((row: any) => row.metric);
+    const key = `getly:goals-cheered:${month}`;
+    const seen = store.get<string[]>(key, []);
+    const fresh = reached.filter((metric: string) => !seen.includes(metric));
+    if (!fresh.length) return;
+    store.set(key, [...seen, ...fresh]);
+    setTimeout(() => celebrate(), 300);
+    toast.success(fresh.length === 1 ? 'Goal reached' : `${fresh.length} goals reached`, { detail: 'Nice work this month.' });
+  }, [data]);
+
+  if (!data) return <div className="stack"><AnalyticsNav />{error ? <p className="error">{error}</p> : (
+    <div className={a.goals} aria-busy="true">{[0, 1, 2, 3].map((n) => <div key={n} className={a.goalCard}><Skeleton width={84} height={84} radius={999} /><div style={{ display: 'grid', gap: 8 }}><Skeleton width="60%" /><Skeleton width="80%" height={20} /></div></div>)}</div>
+  )}</div>;
 
   const metrics: Metric[] = data.metrics;
   const metricOf = (key: string) => metrics.find((item) => item.key === key);
@@ -52,7 +74,7 @@ function GoalsApp() {
     try {
       const result = await api.post('/api/analytics/goals', { metric, month, target: target === '' ? null : Number(target), months });
       setEditing(null);
-      setNotice(result.cleared !== undefined ? 'Goal cleared' : `Goal saved for ${result.saved} ${result.saved === 1 ? 'month' : 'months'}`);
+      toast.success(result.cleared !== undefined ? 'Goal cleared' : 'Goal saved', result.cleared !== undefined ? undefined : { detail: `Set for ${result.saved} ${result.saved === 1 ? 'month' : 'months'}.` });
       await load();
     } catch (err: any) {
       setError(err.message);
@@ -72,50 +94,55 @@ function GoalsApp() {
           <p className="muted">Monthly targets for the numbers that matter, and how close you are.</p>
         </div>
         <div className="row-actions">
-          <button onClick={() => shift(-1)} aria-label="Month before">‹</button>
+          <button className="icon-button" onClick={() => shift(-1)} aria-label="Month before"><Icon name="chevron-left" size={18} /></button>
           <strong className="month-label">{new Date(`${month}T00:00:00`).toLocaleDateString(undefined, { month: 'long', year: 'numeric' })}</strong>
-          <button onClick={() => shift(1)} aria-label="Month after">›</button>
-          {!isThisMonth && <button onClick={() => setMonth(firstOfMonth())}>This month</button>}
+          <button className="icon-button" onClick={() => shift(1)} aria-label="Month after"><Icon name="chevron-right" size={18} /></button>
+          {!isThisMonth && <button className="small" onClick={() => setMonth(firstOfMonth())}>This month</button>}
         </div>
       </div>
       {error && <p className="error">{error}</p>}
       {notice && <p className="notice">{notice}</p>}
 
-      <div className="stats">
+      {data.goals.length === 0 && data.can_edit && (
+        <div className="card">
+          <EmptyState icon="lead" title="No goals for this month yet"
+            line="Pick one number that matters, like invoiced or new leads, and set a target. We'll show how close you are each day." />
+        </div>
+      )}
+
+      <div className={a.goals}>
         {metrics.map((metric) => {
           const goal = data.goals.find((row: any) => row.metric === metric.key);
           const percent = goal ? Number(goal.percent) : 0;
           const ahead = goal && Number(goal.actual) >= Number(goal.expected);
+          const behind = Boolean(goal) && !ahead && Number(data.share_of_month) > 0 && Number(data.share_of_month) < 1;
           return (
-            <div key={metric.key} className="card">
-              <div className="stat-label">{metric.label}</div>
+            <div key={metric.key} className={`${a.goalCard} ${percent >= 100 ? a.isDone : ''}`}>
+              <Ring percent={goal ? percent : 0} size={84} stroke={8} behind={behind} label={goal ? `${Math.round(percent)}% of the ${metric.label.toLowerCase()} goal` : 'No goal set'} />
+              <div className={a.goalText}>
+                <strong>{metric.label}</strong>
               {goal ? (
                 <>
-                  <div className="stat-value">{show(metric.key, goal.actual)}</div>
-                  <div className="muted">of {show(metric.key, goal.target)} · {Math.round(percent)}%</div>
-                  <div className="goal-meter" title={`${Math.round(percent)}% of the goal`}>
-                    <span className={percent >= 100 ? 'done' : ''} style={{ width: `${Math.min(100, percent)}%` }} />
-                    {Number(data.share_of_month) > 0 && Number(data.share_of_month) < 1 && (
-                      <i style={{ left: `${Number(data.share_of_month) * 100}%` }} title="Where you'd be today at an even pace" />
-                    )}
-                  </div>
-                  <div className="muted">
+                  <span className={a.goalValue}>{show(metric.key, goal.actual)}</span>
+                  <span>of {show(metric.key, goal.target)}</span>
+                  <span className={percent >= 100 ? 'badge done' : behind ? 'badge due' : Number(data.share_of_month) >= 1 ? 'badge lost' : 'badge new'} style={{ justifySelf: 'start' }}>
                     {percent >= 100 ? 'Goal reached'
                       : Number(data.share_of_month) >= 1 ? `Missed by ${show(metric.key, Number(goal.target) - Number(goal.actual))}`
                         : Number(data.share_of_month) <= 0 ? 'Month not started'
                           : ahead ? 'On track' : `Behind: ${show(metric.key, goal.expected)} expected by today`}
-                  </div>
+                  </span>
                 </>
               ) : (
-                <div className="muted">No goal for this month</div>
+                <span>No goal for this month</span>
               )}
               {data.can_edit && (
-                <div className="row-actions" style={{ justifyContent: 'flex-start', marginTop: 8 }}>
-                  <button onClick={() => setEditing({ metric: metric.key, target: goal ? String(Number(goal.target)) : '' })}>
+                <div className="row-actions" style={{ justifyContent: 'flex-start', marginTop: 6 }}>
+                  <button className={goal ? 'small ghost' : 'small'} onClick={() => setEditing({ metric: metric.key, target: goal ? String(Number(goal.target)) : '' })}>
                     {goal ? 'Change' : 'Set a goal'}
                   </button>
                 </div>
               )}
+              </div>
             </div>
           );
         })}

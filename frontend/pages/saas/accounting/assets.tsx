@@ -1,7 +1,11 @@
 import { FormEvent, useEffect, useState } from 'react';
 import AccountingNav from '@/components/AccountingNav';
-import AppShell from '@/components/AppShell';
+import { Amount, PageHead, StatusPill, styles } from '@/components/AccountingKit';
+import AppShell, { useAccount } from '@/components/AppShell';
+import EmptyState from '@/components/EmptyState';
 import Modal from '@/components/Modal';
+import { SkeletonTable } from '@/components/Skeleton';
+import { toast } from '@/components/Toast';
 import { api, formatDate, money, today } from '@/lib/api';
 import useSubmit from '@/lib/useSubmit';
 
@@ -17,8 +21,8 @@ function AssetsApp() {
   const [through, setThrough] = useState(today());
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState('');
-  const [notice, setNotice] = useState('');
   const [adding, setAdding] = useState(false);
+  const canEdit = useAccount()?.canEdit;
   const [disposing, setDisposing] = useState<any>(null);
 
   const load = async () => {
@@ -45,10 +49,13 @@ function AssetsApp() {
   const depreciate = () => once(async () => {
     try {
       const result = await api.post('/api/accounting/assets/depreciate', { through });
-      setNotice(result.months_posted ? `Posted depreciation for ${result.months_posted} month(s).` : 'Nothing new to post. Only finished months are depreciated.');
+      if (result.months_posted) {
+        toast.success('Depreciation posted', { detail: `${result.months_posted} ${result.months_posted === 1 ? 'month' : 'months'} through ${formatDate(through)}` });
+      } else {
+        toast.info('Nothing new to post', { detail: 'Only finished months are depreciated.' });
+      }
       await load();
     } catch (err: any) {
-      setNotice('');
       setError(err.message);
     }
   });
@@ -56,15 +63,11 @@ function AssetsApp() {
   return (
     <div className="stack">
       <AccountingNav />
-      <div className="page-head">
-        <h1>Fixed assets</h1>
+      <PageHead title="Fixed assets" line={'Straight-line depreciation by month. If you bought the asset on a bill coded to 1500 Fixed Assets, leave "Paid from" empty when you add it.'}>
         <button className="primary" onClick={() => setAdding(true)}>New asset</button>
-      </div>
-
-      <p className="muted">Straight-line depreciation by month. If the asset was bought on a bill coded to 1500 Fixed Assets, leave "Paid from" empty when registering it.</p>
+      </PageHead>
 
       {error && <p className="error">{error}</p>}
-      {notice && <p className="notice">{notice}</p>}
 
       <div className="card">
         <div className="report-filters">
@@ -73,23 +76,27 @@ function AssetsApp() {
         <div className="form-actions"><button className="primary" disabled={!through} onClick={depreciate}>Run depreciation</button></div>
       </div>
 
-      <div className="card table-wrap">
-        {loading ? <p className="empty">Loading…</p> : (
+      {loading ? <SkeletonTable rows={4} columns={7} /> : assets.length === 0 ? (
+        <div className="card">
+          <EmptyState icon="item" title="No fixed assets yet" line="Add equipment, vehicles or furniture, and depreciation posts each month you run it."
+            action={canEdit ? { label: 'New asset', onClick: () => setAdding(true) } : undefined} />
+        </div>
+      ) : (
+        <div className="card table-wrap">
           <table>
             <thead>
               <tr><th>Asset</th><th>Start</th><th>Life</th><th className="num">Cost</th><th className="num">Depreciated</th><th className="num">Book value</th><th>Status</th><th /></tr>
             </thead>
             <tbody>
-              {assets.length === 0 && <tr><td colSpan={8} className="empty">No fixed assets yet</td></tr>}
               {assets.map((asset) => (
                 <tr key={asset.id}>
                   <td className="wrap">{asset.name}</td>
                   <td>{formatDate(asset.start_date)}</td>
                   <td>{asset.life_months} months</td>
-                  <td className="num">{money(asset.cost)}</td>
-                  <td className="num">{money(asset.accumulated)}</td>
-                  <td className="num">{money(asset.book_value)}</td>
-                  <td><span className="badge">{asset.status === 'disposed' ? `disposed ${formatDate(asset.disposed_on)}` : 'active'}</span></td>
+                  <td className="num"><Amount value={asset.cost} /></td>
+                  <td className="num"><Amount value={asset.accumulated} /></td>
+                  <td className="num"><Amount value={asset.book_value} strong /></td>
+                  <td>{asset.status === 'disposed' ? <StatusPill status="disposed" label={`Disposed ${formatDate(asset.disposed_on)}`} /> : <StatusPill status="active" />}</td>
                   <td>
                     {asset.status === 'active' && (
                       <div className="row-actions"><button className="danger" onClick={() => setDisposing(asset)}>Dispose</button></div>
@@ -97,13 +104,20 @@ function AssetsApp() {
                   </td>
                 </tr>
               ))}
+              <tr className={styles.totalRow}>
+                <td colSpan={3}>Total</td>
+                <td className="num"><Amount value={assets.reduce((sum, asset) => sum + Number(asset.cost || 0), 0)} /></td>
+                <td className="num"><Amount value={assets.reduce((sum, asset) => sum + Number(asset.accumulated || 0), 0)} /></td>
+                <td className="num"><Amount value={assets.reduce((sum, asset) => sum + Number(asset.book_value || 0), 0)} strong /></td>
+                <td colSpan={2} />
+              </tr>
             </tbody>
           </table>
-        )}
-      </div>
+        </div>
+      )}
 
       {adding && <AssetForm banks={banks} onClose={() => setAdding(false)} onSaved={load} />}
-      {disposing && <DisposeForm asset={disposing} banks={banks} onClose={() => setDisposing(null)} onSaved={async () => { setNotice(`${disposing.name} disposed.`); await load(); }} />}
+      {disposing && <DisposeForm asset={disposing} banks={banks} onClose={() => setDisposing(null)} onSaved={async () => { toast.success('Asset disposed', { detail: `${disposing.name} is off the books and the gain or loss is posted` }); await load(); }} />}
     </div>
   );
 }
@@ -120,6 +134,7 @@ function AssetForm({ banks, onClose, onSaved }: { banks: any[]; onClose: () => v
       try {
         await api.post('/api/accounting/assets', form);
         await onSaved();
+        toast.success('Asset added', { detail: `${form.name} depreciates over ${form.life_months} months` });
         onClose();
       } catch (err: any) {
         setError(err.message);

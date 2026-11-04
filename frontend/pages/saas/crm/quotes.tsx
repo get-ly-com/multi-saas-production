@@ -3,7 +3,9 @@ import { useRouter } from 'next/router';
 import { useEffect, useState } from 'react';
 import AppShell from '@/components/AppShell';
 import CrmNav from '@/components/CrmNav';
+import EmptyState from '@/components/EmptyState';
 import QuoteForm from '@/components/QuoteForm';
+import { SkeletonTable } from '@/components/Skeleton';
 import { api, formatDate, money, today } from '@/lib/api';
 
 export const quoteLabel = (quote: any) =>
@@ -40,12 +42,15 @@ function QuotesApp() {
 
       {error && <p className="error">{error}</p>}
 
-      <div className="card table-wrap">
-        {loading ? <p className="empty">Loading…</p> : (
+      {loading ? <SkeletonTable rows={6} columns={6} /> : (
+        <div className="card table-wrap">
           <table>
             <thead><tr><th>Quote</th><th>For</th><th>Deal</th><th>Date</th><th>Status</th><th className="num">Total</th></tr></thead>
             <tbody>
-              {quotes.length === 0 && <tr><td colSpan={6} className="empty">No quotes yet</td></tr>}
+              {quotes.length === 0 && (
+                <tr><td colSpan={6}><EmptyState compact icon="quote" title="No quotes yet" line="Send a clear, priced quote and turn it into an invoice when it's accepted."
+                  action={{ label: 'New quote', onClick: () => setAdding(true) }} /></td></tr>
+              )}
               {quotes.map((quote) => (
                 <tr key={quote.id}>
                   <td><Link href={`/saas/crm/quote/${quote.id}`}>{quote.quote_number}</Link></td>
@@ -58,8 +63,8 @@ function QuotesApp() {
               ))}
             </tbody>
           </table>
-        )}
-      </div>
+        </div>
+      )}
 
       {adding && <QuoteForm onClose={() => setAdding(false)} onSaved={(id) => { router.push(`/saas/crm/quote/${id}`); }} />}
     </div>

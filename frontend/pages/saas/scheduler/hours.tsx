@@ -1,5 +1,6 @@
 import { FormEvent, useEffect, useState } from 'react';
 import AppShell from '@/components/AppShell';
+import { SkeletonTable } from '@/components/Skeleton';
 import Modal from '@/components/Modal';
 import SchedulerNav, { WEEKDAYS, dayLabel } from '@/components/SchedulerNav';
 import { api } from '@/lib/api';
@@ -63,7 +64,7 @@ function HoursApp() {
     });
   };
 
-  if (!data) return <div className="stack"><SchedulerNav />{error ? <p className="error">{error}</p> : <p>Loading…</p>}</div>;
+  if (!data) return <div className="stack"><SchedulerNav />{error ? <p className="error">{error}</p> : <SkeletonTable rows={7} columns={3} />}</div>;
 
   const team = data.staff.filter((row: any) => row.role !== 'viewer');
   const canEdit = (row: any) => data.can_edit && (data.is_manager || row.user_id === data.me);
@@ -73,7 +74,7 @@ function HoursApp() {
   return (
     <div className="stack">
       <SchedulerNav />
-      <div className="page-head"><h1>Opening hours</h1></div>
+      <div className="page-head"><div><h1>Opening hours</h1><p className="muted">When customers can book you, and the days you are closed.</p></div></div>
       {error && <p className="error">{error}</p>}
 
       <div className="card table-wrap">

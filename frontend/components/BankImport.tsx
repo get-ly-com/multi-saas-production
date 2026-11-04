@@ -1,6 +1,7 @@
 import { ChangeEvent, useMemo, useState } from 'react';
 import Modal from '@/components/Modal';
-import { api, money } from '@/lib/api';
+import { Amount } from '@/components/AccountingKit';
+import { api, formatDate } from '@/lib/api';
 import { DATE_FORMATS, guessDateFormat, parseCsv, parseStatementAmount, parseStatementDate } from '@/lib/csv';
 import useSubmit from '@/lib/useSubmit';
 
@@ -65,7 +66,7 @@ export default function BankImport({ accountId, onClose, onSaved }: Props) {
   const importLines = () => once(async () => {
     try {
       const result = await api.post('/api/accounting/bank/import', { account_id: accountId, lines });
-      await onSaved(`Imported ${result.imported} lines, skipped ${result.skipped} already imported or empty`);
+      await onSaved(`${result.imported} new ${result.imported === 1 ? 'line' : 'lines'} to review${result.skipped ? `. ${result.skipped} skipped because they were already in or empty.` : '.'}`);
       onClose();
     } catch (err: any) {
       setError(err.message);
@@ -100,14 +101,14 @@ export default function BankImport({ accountId, onClose, onSaved }: Props) {
             </label>
           </div>
 
-          <p>{lines.length} lines ready{bad > 0 && `, ${bad} can't be read`}</p>
+          <p className={bad > 0 ? 'notice' : 'muted'}>{lines.length} {lines.length === 1 ? 'line is' : 'lines are'} ready{bad > 0 && `. ${bad} can't be read, so check the columns above.`}{lines.length > 5 && ' Here are the first five.'}</p>
           {lines.length > 0 && (
             <div className="table-wrap">
               <table>
                 <thead><tr><th>Date</th><th>Description</th><th className="num">Amount</th></tr></thead>
                 <tbody>
                   {lines.slice(0, 5).map((line, index) => (
-                    <tr key={index}><td>{line.line_date}</td><td className="wrap">{line.description}</td><td className="num">{money(line.amount)}</td></tr>
+                    <tr key={index}><td>{formatDate(line.line_date)}</td><td className="wrap">{line.description}</td><td className="num"><Amount value={line.amount} /></td></tr>
                   ))}
                 </tbody>
               </table>
@@ -118,7 +119,7 @@ export default function BankImport({ accountId, onClose, onSaved }: Props) {
 
       {error && <p className="error">{error}</p>}
       <div className="form-actions">
-        <button className="primary" disabled={lines.length === 0} onClick={importLines}>Import {lines.length || ''} lines</button>
+        <button className="primary" disabled={busy || lines.length === 0} onClick={importLines}>Import {lines.length || ''} {lines.length === 1 ? 'line' : 'lines'}</button>
         <button type="button" onClick={onClose}>Cancel</button>
       </div>
     </Modal>

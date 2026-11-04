@@ -1,19 +1,19 @@
 import Link from 'next/link';
 import { useEffect, useState } from 'react';
-import AnalyticsNav, { PERIODS, periodDates, yearBefore } from '@/components/AnalyticsNav';
+import AnalyticsNav, { Delta, PERIODS, Ring, periodDates, yearBefore } from '@/components/AnalyticsNav';
 import AppShell from '@/components/AppShell';
+import EmptyState from '@/components/EmptyState';
+import Icon from '@/components/Icon';
+import Skeleton, { SkeletonStats } from '@/components/Skeleton';
+import { toast } from '@/components/Toast';
 import { api, money } from '@/lib/api';
 import { downloadCsv } from '@/lib/csv';
+import { compactMoney } from '@/lib/format';
+import a from '@/styles/analytics.module.css';
 
 const monthName = (value: string) =>
   new Date(`${value}T00:00:00`).toLocaleDateString(undefined, { month: 'short', year: '2-digit' });
 
-const change = (now: number, before: number) => {
-  if (!before) return now ? 'new this period' : 'no change';
-  const percent = Math.round(((now - before) / Math.abs(before)) * 100);
-  if (percent === 0) return 'no change';
-  return `${percent > 0 ? '↑' : '↓'} ${Math.abs(percent)}%`;
-};
 
 export default function Analytics() {
   return <AppShell><Dashboard /></AppShell>;
@@ -73,8 +73,11 @@ function Dashboard() {
     ? 'the same dates last year'
     : PERIODS.find(({ id }) => id === period)?.compare;
   const cash = (value: number | string) => money(value, data?.currency);
+  const shortCash = (value: number) => compactMoney(value, data?.currency);
+  const shortCount = (value: number) => Math.round(value).toLocaleString();
 
-  const download = () => downloadCsv(`business-trend-${data.trend[data.trend.length - 1].month.slice(0, 7)}.csv`, [
+  const download = () => { saveCsv(); toast.success('CSV downloaded', { detail: 'Twelve months of numbers, one row a month.' }); };
+  const saveCsv = () => downloadCsv(`business-trend-${data.trend[data.trend.length - 1].month.slice(0, 7)}.csv`, [
     ['Month', 'Invoiced', 'Cash in', 'Cash out', 'Profit', 'New leads', 'Deals won', 'Bookings', 'Chats', ...(data.sees_payroll ? ['Payroll cost'] : [])],
     ...data.trend.map((row: any) => [
       row.month.slice(0, 7), Number(row.revenue), Number(row.cash_in), Number(row.cash_out), Number(row.profit),
@@ -123,40 +126,47 @@ function Dashboard() {
       </div>
 
       {goals?.goals?.length > 0 && (
-        <Link href="/saas/analytics/goals" className="card stat-link goal-strip">
-          <div className="stat-label">This month's goals</div>
-          <div className="goal-strip-items">
+        <Link href="/saas/analytics/goals" className={a.goalStrip}>
+          <span className={a.goalStripHead}>This month&apos;s goals<Icon name="chevron-right" size={14} /></span>
+          <span className={a.goalItems}>
             {goals.goals.map((goal: any) => {
               const metric = goals.metrics.find((item: any) => item.key === goal.metric);
+              const behind = Number(goal.actual) < Number(goal.expected);
               return (
-                <div key={goal.metric}>
-                  <div className="muted">{metric?.label || goal.metric} · {Math.round(Number(goal.percent))}%</div>
-                  <div className="goal-meter"><span style={{ width: `${Math.min(100, Number(goal.percent))}%` }} /></div>
-                </div>
+                <span key={goal.metric} className={a.goalItem}>
+                  <Ring percent={Number(goal.percent)} size={44} stroke={5} behind={behind} />
+                  <span><strong>{metric?.label || goal.metric}</strong><br /><span className="muted small">{Number(goal.percent) >= 100 ? 'Reached' : behind ? 'Behind pace' : 'On track'}</span></span>
+                </span>
               );
             })}
-          </div>
+          </span>
         </Link>
       )}
 
       {error && <p className="error">{error}</p>}
-      {loading && !data && <p className="empty">Loading…</p>}
+      {loading && !data && !error && (
+        <div className="stack" aria-busy="true" aria-label="Loading the dashboard">
+          <SkeletonStats count={5} />
+          <SkeletonStats count={3} />
+          <div className="chart-grid">{[0, 1].map((n) => <div key={n} className="card"><Skeleton width="30%" height={14} /><Skeleton height={180} radius={8} style={{ marginTop: 12 }} /></div>)}</div>
+        </div>
+      )}
 
       {data && (
         <>
-          <h2>Money</h2>
-          <div className="stats">
+          <div className={a.section}><h2>Money</h2></div>
+          <div className={a.tiles}>
             <Stat label="Invoiced (before tax)" value={cash(data.current.revenue)} now={data.current.revenue} before={data.previous.revenue} compare={compare} href="/saas/accounting" />
             <Stat label="Profit" value={cash(data.current.profit)} now={data.current.profit} before={data.previous.profit} compare={compare} href="/saas/accounting/reports"
               note={`${cash(data.current.income)} earned, ${cash(data.current.expenses)} spent`} />
             <Stat label="Cash in" value={cash(data.current.cash_in)} now={data.current.cash_in} before={data.previous.cash_in} compare={compare} href="/saas/accounting/banking" />
-            <Stat label="Cash out" value={cash(data.current.cash_out)} now={data.current.cash_out} before={data.previous.cash_out} compare={compare} href="/saas/accounting/banking" />
+            <Stat label="Cash out" value={cash(data.current.cash_out)} now={data.current.cash_out} before={data.previous.cash_out} compare={compare} href="/saas/accounting/banking" upIsGood={false} />
             <Stat label="Overdue from customers" value={cash(data.receivables.overdue)} href="/saas/accounting"
               note={`${data.receivables.overdue_count} ${data.receivables.overdue_count === 1 ? 'invoice' : 'invoices'} late · ${cash(data.receivables.outstanding)} still to collect`} />
           </div>
 
-          <h2>Sales</h2>
-          <div className="stats">
+          <div className={a.section}><h2>Sales</h2></div>
+          <div className={a.tiles}>
             <Stat label="New leads" value={data.current.new_leads} now={data.current.new_leads} before={data.previous.new_leads} compare={compare} href="/saas/crm/leads" />
             <Stat label="Deals won" value={cash(data.current.won_value)} now={data.current.won_value} before={data.previous.won_value} compare={compare} href="/saas/crm/pipeline"
               note={`${data.current.won_deals} ${data.current.won_deals === 1 ? 'deal' : 'deals'}`} />
@@ -166,8 +176,8 @@ function Dashboard() {
 
           {marketing && (
             <>
-              <h2>Customers and marketing</h2>
-              <div className="stats">
+              <div className={a.section}><h2>Customers and marketing</h2></div>
+              <div className={a.tiles}>
                 <Stat label="Bookings made" value={marketing.current.bookings} now={marketing.current.bookings} before={marketing.previous.bookings} compare={compare} href="/saas/scheduler"
                   note={`${cash(marketing.current.booking_value)} at service prices · ${plural(marketing.current.cancellations, 'cancellation', 'cancellations')}`} />
                 <Stat label="Booked for the next 7 days" value={marketing.upcoming.bookings} href="/saas/scheduler"
@@ -181,40 +191,40 @@ function Dashboard() {
             </>
           )}
 
-          <h2>Stock and staff</h2>
-          <div className="stats">
+          <div className={a.section}><h2>Stock and staff</h2></div>
+          <div className={a.tiles}>
             <Stat label="Stock value" value={cash(data.stock.value)} href="/saas/inventory" note={`${data.stock.items} ${data.stock.items === 1 ? 'item' : 'items'}`} />
             <Stat label="Low or out of stock" value={data.stock.low} href="/saas/inventory" note={data.stock.low ? 'Time to reorder' : 'All stocked up'} />
             <Stat label="People employed" value={data.people.headcount} now={data.people.headcount} before={data.people.previous}
               compare={compareTo === 'last_year' ? 'the end of the period before' : compare} href="/saas/hr"
               note={`${data.people.joined} joined, ${data.people.left} left`} />
             {data.sees_payroll && (
-              <Stat label="Payroll cost" value={cash(data.current.payroll)} now={data.current.payroll} before={data.previous.payroll} compare={compare} href="/saas/hr/payroll"
+              <Stat label="Payroll cost" value={cash(data.current.payroll)} now={data.current.payroll} before={data.previous.payroll} compare={compare} href="/saas/hr/payroll" upIsGood={false}
                 note="Pay and employer costs" />
             )}
           </div>
 
-          <h2>Last 12 months</h2>
+          <div className={a.section}><h2>Last 12 months</h2></div>
           <div className="chart-grid">
-            <div className="card">
-              <BarChart title="Invoiced" rows={data.trend} series={[{ key: 'revenue', label: 'Invoiced', tone: 1 }]} format={cash} />
+            <div className={`card ${a.chartCard}`}>
+              <BarChart title="Invoiced" rows={data.trend} series={[{ key: 'revenue', label: 'Invoiced', tone: 1 }]} format={cash} short={shortCash} />
             </div>
-            <div className="card">
-              <BarChart title="Profit" rows={data.trend} series={[{ key: 'profit', label: 'Profit', tone: 1 }]} format={cash} />
+            <div className={`card ${a.chartCard}`}>
+              <BarChart title="Profit" rows={data.trend} series={[{ key: 'profit', label: 'Profit', tone: 1 }]} format={cash} short={shortCash} />
             </div>
-            <div className="card">
+            <div className={`card ${a.chartCard}`}>
               <BarChart title="Cash in and out" rows={data.trend}
-                series={[{ key: 'cash_in', label: 'Cash in', tone: 1 }, { key: 'cash_out', label: 'Cash out', tone: 2 }]} format={cash} />
+                series={[{ key: 'cash_in', label: 'Cash in', tone: 1 }, { key: 'cash_out', label: 'Cash out', tone: 2 }]} format={cash} short={shortCash} />
             </div>
-            <div className="card">
-              <BarChart title="New leads" rows={data.trend} series={[{ key: 'new_leads', label: 'New leads', tone: 1 }]} format={(value) => String(value)} />
+            <div className={`card ${a.chartCard}`}>
+              <BarChart title="New leads" rows={data.trend} series={[{ key: 'new_leads', label: 'New leads', tone: 1 }]} format={(value) => String(value)} short={shortCount} />
             </div>
           </div>
 
           <div className="card table-wrap">
             <div className="page-head">
               <h2>Month by month</h2>
-              <button onClick={download}>Download CSV</button>
+              <button className="small" onClick={download}><Icon name="import" size={14} />Download CSV</button>
             </div>
             <table>
               <thead>
@@ -250,7 +260,7 @@ function Dashboard() {
               <table>
                 <thead><tr><th>Customer</th><th className="num">Invoices</th><th className="num">Invoiced</th></tr></thead>
                 <tbody>
-                  {data.top_customers.length === 0 && <tr><td colSpan={3} className="empty">No invoices in this period</td></tr>}
+                  {data.top_customers.length === 0 && <tr><td colSpan={3} style={{ padding: 0 }}><EmptyState compact icon="invoice" title="No invoices in this period" line="Customers you invoice will rank here." /></td></tr>}
                   {data.top_customers.map((row: any) => (
                     <tr key={`${row.customer_id}-${row.name}`}>
                       <td className="wrap">{row.name}</td>
@@ -266,7 +276,7 @@ function Dashboard() {
               <table>
                 <thead><tr><th>Item</th><th className="num">Sold</th><th className="num">Sales</th><th className="num">Profit</th></tr></thead>
                 <tbody>
-                  {data.top_products.length === 0 && <tr><td colSpan={4} className="empty">No stock sold in this period</td></tr>}
+                  {data.top_products.length === 0 && <tr><td colSpan={4} style={{ padding: 0 }}><EmptyState compact icon="inventory" title="No stock sold in this period" line="Products you sell will rank here by profit." /></td></tr>}
                   {data.top_products.map((row: any) => (
                     <tr key={row.item_id}>
                       <td className="wrap">{row.name}</td>
@@ -292,7 +302,8 @@ function Dashboard() {
   );
 }
 
-function Stat({ label, value, note, now, before, compare, href }: {
+
+function Stat({ label, value, note, now, before, compare, href, upIsGood = true }: {
   label: string;
   value: string | number;
   note?: string;
@@ -300,76 +311,93 @@ function Stat({ label, value, note, now, before, compare, href }: {
   before?: number | string;
   compare?: string;
   href: string;
+  upIsGood?: boolean;
 }) {
   return (
-    <Link href={href} className="card stat-link">
-      <div className="stat-label">{label}</div>
-      <div className="stat-value">{value}</div>
-      {before !== undefined && <div className="muted">{change(Number(now), Number(before))} vs {compare}</div>}
-      {note && <div className="muted">{note}</div>}
+    <Link href={href} className={a.tile}>
+      <span className={a.tileLabel}>{label}<Icon name="chevron-right" size={14} /></span>
+      <span className={a.tileValue}>{value}</span>
+      {before !== undefined && (
+        <span className={a.tileFoot}><Delta now={now ?? 0} before={before} upIsGood={upIsGood} />vs {compare}</span>
+      )}
+      {note && <span className={a.tileNote}>{note}</span>}
     </Link>
   );
 }
 
 type Series = { key: string; label: string; tone: 1 | 2 };
 
-// Plain SVG bars on one axis. Negative values hang below the zero line.
-function BarChart({ title, rows, series, format }: {
+// Plain SVG bars on one axis, with light gridlines. Negative values hang below the zero line.
+function BarChart({ title, rows, series, format, short }: {
   title: string;
   rows: any[];
   series: Series[];
   format: (value: number) => string;
+  short?: (value: number) => string;
 }) {
   const [active, setActive] = useState<number | null>(null);
   const width = 600;
-  const height = 200;
-  const top = 8;
-  const bottom = 22;
+  const height = 210;
+  const left = 46;
+  const top = 10;
+  const bottom = 24;
   const values = rows.flatMap((row) => series.map(({ key }) => Number(row[key]) || 0));
   const max = Math.max(0, ...values);
   const min = Math.min(0, ...values);
   const span = max - min || 1;
   const plot = height - top - bottom;
   const y = (value: number) => top + ((max - value) / span) * plot;
-  const slot = width / rows.length;
-  const gap = 2;
-  const barWidth = Math.min(28, (slot * 0.7 - gap * (series.length - 1)) / series.length);
+  const slot = (width - left) / rows.length;
+  const gap = 3;
+  const barWidth = Math.min(26, (slot * 0.62 - gap * (series.length - 1)) / series.length);
   const shown = active === null ? null : rows[active];
+  const label = short || format;
+  const lines = [0, 0.5, 1].map((share) => min + span * share).filter((value, n, all) => all.indexOf(value) === n);
+  const total = rows.reduce((sum, row) => sum + (Number(row[series[0].key]) || 0), 0);
 
   return (
-    <figure className="bar-chart">
-      <figcaption>
+    <figure className={a.chart}>
+      <figcaption className={a.chartHead}>
         <strong>{title}</strong>
-        <span className="muted">
+        <span className={a.readout}>
           {shown
-            ? `${monthName(shown.month)}: ${series.map(({ key, label }) => `${series.length > 1 ? `${label} ` : ''}${format(Number(shown[key]))}`).join(', ')}`
-            : 'Point at a month to see its numbers'}
+            ? <><b>{monthName(shown.month)}</b> {series.map(({ key, label: name }) => `${series.length > 1 ? `${name} ` : ''}${format(Number(shown[key]))}`).join(', ')}</>
+            : series.length === 1 ? <>12 months: <b>{format(total)}</b></> : 'Point at a month to see its numbers'}
         </span>
       </figcaption>
       {series.length > 1 && (
-        <div className="chart-legend">
-          {series.map(({ key, label, tone }) => <span key={key}><i className={`swatch tone-${tone}`} />{label}</span>)}
+        <div className={a.legend}>
+          {series.map(({ key, label: name, tone }) => <span key={key}><i className={tone === 2 ? a.tone2 : a.tone1} />{name}</span>)}
         </div>
       )}
       <svg viewBox={`0 0 ${width} ${height}`} role="img" aria-label={`${title} for the last 12 months`} onMouseLeave={() => setActive(null)}>
-        <line x1={0} x2={width} y1={y(0)} y2={y(0)} className="axis" />
+        {lines.map((value) => (
+          <g key={value}>
+            <line x1={left} x2={width} y1={y(value)} y2={y(value)} className={value === 0 ? a.zero : a.grid} />
+            <text x={left - 8} y={y(value) + 4} textAnchor="end" className={a.tick}>{label(value)}</text>
+          </g>
+        ))}
+        {min < 0 && max > 0 && <line x1={left} x2={width} y1={y(0)} y2={y(0)} className={a.zero} />}
         {rows.map((row, index) => {
           const groupWidth = barWidth * series.length + gap * (series.length - 1);
-          const start = index * slot + (slot - groupWidth) / 2;
+          const x0 = left + index * slot;
+          const start = x0 + (slot - groupWidth) / 2;
           return (
-            <g key={row.month} className={active === index ? 'active' : ''}>
+            <g key={row.month} className={active === index ? a.on : ''}>
+              <rect className={a.column} x={x0 + 2} y={top - 4} width={slot - 4} height={plot + 8} rx={6} />
               {series.map(({ key, tone }, n) => {
                 const value = Number(row[key]) || 0;
                 const barTop = Math.min(y(value), y(0));
-                const barHeight = Math.max(Math.abs(y(value) - y(0)), value ? 1 : 0);
-                return <rect key={key} className={`bar tone-${tone}`} x={start + n * (barWidth + gap)} y={barTop} width={barWidth} height={barHeight} rx={2} />;
+                const barHeight = Math.max(Math.abs(y(value) - y(0)), value ? 2 : 0);
+                return <rect key={key} className={`${a.bar} ${tone === 2 ? a.tone2 : a.tone1} ${value < 0 ? a.negative : ''}`}
+                  x={start + n * (barWidth + gap)} y={barTop} width={barWidth} height={barHeight} rx={Math.min(4, barWidth / 2)} />;
               })}
               {(index % 2 === rows.length % 2 || rows.length <= 6) && (
-                <text x={index * slot + slot / 2} y={height - 6} textAnchor="middle" className="tick">{monthName(row.month)}</text>
+                <text x={x0 + slot / 2} y={height - 6} textAnchor="middle" className={a.tick}>{monthName(row.month)}</text>
               )}
-              <rect className="hit" x={index * slot} y={0} width={slot} height={height}
+              <rect className={a.hit} x={x0} y={0} width={slot} height={height}
                 onMouseEnter={() => setActive(index)} onClick={() => setActive(index)}>
-                <title>{`${monthName(row.month)}: ${series.map(({ key, label }) => `${label} ${format(Number(row[key]))}`).join(', ')}`}</title>
+                <title>{`${monthName(row.month)}: ${series.map(({ key, label: name }) => `${name} ${format(Number(row[key]))}`).join(', ')}`}</title>
               </rect>
             </g>
           );

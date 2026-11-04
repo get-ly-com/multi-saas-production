@@ -1,8 +1,11 @@
-import Link from 'next/link';
 import { useEffect, useState } from 'react';
+import {
+  PageHead, Statement, StatementEmpty, StatementHeading, StatementLine, StatementSpacer, StatementTotal, StatusPill, styles
+} from '@/components/AccountingKit';
 import AccountingNav from '@/components/AccountingNav';
 import AppShell from '@/components/AppShell';
-import { api, formatDate, money, today } from '@/lib/api';
+import Skeleton from '@/components/Skeleton';
+import { api, formatDate, today } from '@/lib/api';
 
 const REPORTS = [
   { id: 'profit-and-loss', name: 'Profit and loss', dates: 'range' },
@@ -61,10 +64,9 @@ function ReportsApp() {
   return (
     <div className="stack">
       <AccountingNav />
-      <div className="page-head no-print">
-        <h1>Reports</h1>
+      <PageHead className="no-print" title="Reports" line="Your financial statements, ready to print or share with your accountant.">
         <button className="primary always" onClick={() => window.print()}>Print or save as PDF</button>
-      </div>
+      </PageHead>
 
       <div className="tabs no-print">
         {REPORTS.map(({ id, name }) => (
@@ -96,15 +98,31 @@ function ReportsApp() {
       {error && <p className="error">{error}</p>}
 
       <div className="card table-wrap">
-        <h2>{company} · {report.name}{cashBasis && ' (cash basis)'}</h2>
-        <p className="muted">{period}</p>
+        <div className={styles.statementHead}>
+          <div>
+            <h2>{company ? `${company} · ` : ''}{report.name}{cashBasis && ' (cash basis)'}</h2>
+            <p className="muted">{period}</p>
+          </div>
+          {reportId === 'balance-sheet' && data && (
+            <StatusPill status={data.balanced ? 'paid' : 'overdue'} label={data.balanced ? 'In balance' : 'Out of balance'} />
+          )}
+        </div>
         {cashBasis && <p className="muted">Sales and bills count when they are paid, in proportion to what was paid. Write-offs and credit notes move no money, so they are left out. Other entries, such as depreciation, count on their date.</p>}
-        {!data ? <p className="empty">Loading…</p> : (
+        {!data ? (
+          <div role="status" aria-label="Loading report" style={{ display: 'grid', gap: 10, paddingTop: 8 }}>
+            {[42, 70, 64, 76, 50, 68, 58].map((width, index) => (
+              <div key={index} style={{ display: 'flex', justifyContent: 'space-between', gap: 16, paddingLeft: index % 3 === 0 ? 0 : 28 }}>
+                <Skeleton width={`${width}%`} height={index % 3 === 0 ? 11 : 13} />
+                <Skeleton width={90} height={13} />
+              </div>
+            ))}
+          </div>
+        ) : (
           <>
             {reportId === 'profit-and-loss' && <ProfitAndLoss data={data} />}
             {reportId === 'balance-sheet' && <BalanceSheet data={data} />}
             {reportId === 'cash-flow' && <CashFlow data={data} />}
-            {reportId.startsWith('aged') && <Aged data={data} />}
+            {reportId.startsWith('aged') && <Aged data={data} payable={reportId === 'aged/payable'} />}
             {reportId === 'tax' && <TaxSummary data={data} />}
             {reportId === 'cost-centers' && <ByCostCenter rows={data} />}
           </>
@@ -114,158 +132,122 @@ function ReportsApp() {
   );
 }
 
-function AccountRows({ rows }: { rows: any[] }) {
+const ledgerLink = (row: any) => (row.account_id ? `/saas/accounting/ledger?account=${row.account_id}` : undefined);
+
+function AccountRows({ rows, empty }: { rows: any[]; empty?: string }) {
+  if (!rows.length) return <StatementEmpty text={empty || 'Nothing in this period'} />;
   return (
     <>
       {rows.map((row) => (
-        <tr key={row.code}>
-          <td className="wrap">
-            {row.account_id
-              ? <Link href={`/saas/accounting/ledger?account=${row.account_id}`}>{row.code} {row.name}</Link>
-              : row.name}
-          </td>
-          <td className="num">{money(row.amount)}</td>
-        </tr>
+        <StatementLine key={row.code || row.name} code={row.account_id ? row.code : undefined} label={row.name} href={ledgerLink(row)} values={[row.amount]} />
       ))}
     </>
   );
 }
 
-const Section = ({ title }: { title: string }) => <tr className="section"><td colSpan={2}>{title}</td></tr>;
-
-const Total = ({ label, value }: { label: string; value: number }) => (
-  <tr className="total"><td>{label}</td><td className="num">{money(value)}</td></tr>
-);
-
 // Matches the accounts the database counts in gross profit
 const COST_OF_SALES = ['5000', '5100'];
 
 function ProfitAndLoss({ data }: { data: any }) {
+  const hasCostOfSales = Number(data.cost_of_sales) !== 0;
   return (
-    <table>
-      <tbody>
-        <Section title="Revenue" />
-        <AccountRows rows={data.revenue} />
-        <Total label="Total revenue" value={data.total_revenue} />
-        {Number(data.cost_of_sales) !== 0 && (
-          <>
-            <Section title="Cost of sales" />
-            <AccountRows rows={data.expenses.filter(({ code }: any) => COST_OF_SALES.includes(code))} />
-            <Total label="Gross profit" value={data.gross_profit} />
-          </>
-        )}
-        <Section title="Expenses" />
-        <AccountRows rows={Number(data.cost_of_sales) !== 0 ? data.expenses.filter(({ code }: any) => !COST_OF_SALES.includes(code)) : data.expenses} />
-        <Total label="Total expenses" value={data.total_expenses} />
-        <Total label="Net income" value={data.net_income} />
-      </tbody>
-    </table>
+    <Statement columns={['', 'Amount']}>
+      <StatementHeading title="Revenue" />
+      <AccountRows rows={data.revenue} empty="No revenue in this period" />
+      <StatementTotal label="Total revenue" values={[data.total_revenue]} />
+      {hasCostOfSales && (
+        <>
+          <StatementHeading title="Cost of sales" />
+          <AccountRows rows={data.expenses.filter(({ code }: any) => COST_OF_SALES.includes(code))} />
+          <StatementTotal label="Gross profit" values={[data.gross_profit]} />
+        </>
+      )}
+      <StatementHeading title="Expenses" />
+      <AccountRows rows={hasCostOfSales ? data.expenses.filter(({ code }: any) => !COST_OF_SALES.includes(code)) : data.expenses} empty="No expenses in this period" />
+      <StatementTotal label="Total expenses" values={[data.total_expenses]} />
+      <StatementSpacer />
+      <StatementTotal grand label={Number(data.net_income) < 0 ? 'Net loss' : 'Net income'} values={[data.net_income]} />
+    </Statement>
   );
 }
 
 function BalanceSheet({ data }: { data: any }) {
   return (
-    <>
-      <span className={`badge ${data.balanced ? 'paid' : 'void'}`}>{data.balanced ? 'In balance' : 'Out of balance'}</span>
-      <table>
-        <tbody>
-          <Section title="Assets" />
-          <AccountRows rows={data.assets} />
-          <Total label="Total assets" value={data.total_assets} />
-          <Section title="Liabilities" />
-          <AccountRows rows={data.liabilities} />
-          <Total label="Total liabilities" value={data.total_liabilities} />
-          <Section title="Equity" />
-          <AccountRows rows={data.equity} />
-          <tr><td>Earnings to date</td><td className="num">{money(data.earnings)}</td></tr>
-          <Total label="Total equity" value={data.total_equity} />
-          <Total label="Total liabilities and equity" value={Number(data.total_liabilities) + Number(data.total_equity)} />
-        </tbody>
-      </table>
-    </>
+    <Statement columns={['', 'Amount']}>
+      <StatementHeading title="Assets" />
+      <AccountRows rows={data.assets} empty="No assets" />
+      <StatementTotal grand label="Total assets" values={[data.total_assets]} />
+      <StatementSpacer />
+      <StatementHeading title="Liabilities" />
+      <AccountRows rows={data.liabilities} empty="No liabilities" />
+      <StatementTotal label="Total liabilities" values={[data.total_liabilities]} />
+      <StatementHeading title="Equity" />
+      <AccountRows rows={data.equity} empty="No equity accounts" />
+      <StatementLine label="Earnings to date" values={[data.earnings]} />
+      <StatementTotal label="Total equity" values={[data.total_equity]} />
+      <StatementSpacer />
+      <StatementTotal grand label="Total liabilities and equity" values={[Number(data.total_liabilities) + Number(data.total_equity)]} />
+    </Statement>
   );
 }
 
 function CashFlow({ data }: { data: any }) {
   return (
-    <table>
-      <tbody>
-        <Section title="Operating activities" />
-        <AccountRows rows={data.operating} />
-        <Total label="Cash from operations" value={data.total_operating} />
-        <Section title="Investing activities" />
-        <AccountRows rows={data.investing} />
-        <Total label="Cash from investing" value={data.total_investing} />
-        <Section title="Financing activities" />
-        <AccountRows rows={data.financing} />
-        <Total label="Cash from financing" value={data.total_financing} />
-        <Section title="Cash" />
-        <tr><td>Opening cash</td><td className="num">{money(data.opening)}</td></tr>
-        <tr><td>Net change</td><td className="num">{money(data.net_change)}</td></tr>
-        <Total label="Closing cash" value={data.closing} />
-      </tbody>
-    </table>
+    <Statement columns={['', 'Amount']}>
+      <StatementHeading title="Operating activities" />
+      <AccountRows rows={data.operating} empty="No operating cash movements" />
+      <StatementTotal label="Cash from operations" values={[data.total_operating]} />
+      <StatementHeading title="Investing activities" />
+      <AccountRows rows={data.investing} empty="No investing cash movements" />
+      <StatementTotal label="Cash from investing" values={[data.total_investing]} />
+      <StatementHeading title="Financing activities" />
+      <AccountRows rows={data.financing} empty="No financing cash movements" />
+      <StatementTotal label="Cash from financing" values={[data.total_financing]} />
+      <StatementHeading title="Cash" />
+      <StatementLine label="Opening cash" values={[data.opening]} />
+      <StatementLine label="Net change" values={[data.net_change]} />
+      <StatementSpacer />
+      <StatementTotal grand label="Closing cash" values={[data.closing]} />
+    </Statement>
   );
 }
 
 function ByCostCenter({ rows }: { rows: any[] }) {
+  const sum = (field: string) => rows.reduce((total, row) => total + Number(row[field] || 0), 0);
   return (
-    <table>
-      <thead><tr><th>Cost center</th><th className="num">Revenue</th><th className="num">Expenses</th><th className="num">Net</th></tr></thead>
-      <tbody>
-        {rows.length === 0 && <tr><td colSpan={4} className="empty">No activity in this period</td></tr>}
-        {rows.map((row) => (
-          <tr key={row.code}>
-            <td className="wrap">{row.code} {row.name}</td>
-            <td className="num">{money(row.revenue)}</td>
-            <td className="num">{money(row.expenses)}</td>
-            <td className="num">{money(row.net)}</td>
-          </tr>
-        ))}
-      </tbody>
-    </table>
+    <Statement columns={['Cost center', 'Revenue', 'Expenses', 'Net']}>
+      {rows.length === 0 && <StatementEmpty text="No activity in this period" span={4} />}
+      {rows.map((row) => (
+        <StatementLine key={row.code} code={row.code} label={row.name} values={[row.revenue, row.expenses, row.net]} />
+      ))}
+      {rows.length > 0 && <StatementTotal grand label="Total" values={[sum('revenue'), sum('expenses'), sum('net')]} />}
+    </Statement>
   );
 }
 
 function TaxSummary({ data }: { data: any }) {
   return (
-    <table>
-      <tbody>
-        <tr><td>Tax collected on sales</td><td className="num">{money(data.collected)}</td></tr>
-        <tr><td>Tax paid on purchases</td><td className="num">{money(data.on_purchases)}</td></tr>
-        <Total label="Net tax for the period" value={data.net} />
-        <tr><td>Paid to the tax office in the period</td><td className="num">{money(data.paid)}</td></tr>
-        <Total label="Tax owed at the end of the period" value={data.balance} />
-      </tbody>
-    </table>
+    <Statement columns={['', 'Amount']}>
+      <StatementHeading title="This period" />
+      <StatementLine label="Tax collected on sales" values={[data.collected]} />
+      <StatementLine label="Tax paid on purchases" values={[data.on_purchases]} />
+      <StatementTotal label="Net tax for the period" values={[data.net]} />
+      <StatementHeading title="Payments" />
+      <StatementLine label="Paid to the tax office in the period" values={[data.paid]} />
+      <StatementSpacer />
+      <StatementTotal grand label="Tax owed at the end of the period" values={[data.balance]} />
+    </Statement>
   );
 }
 
-function Aged({ data }: { data: any }) {
-  const cells = (row: any) => (
-    <>
-      <td className="num">{money(row.not_due)}</td>
-      <td className="num">{money(row.days_1_30)}</td>
-      <td className="num">{money(row.days_31_60)}</td>
-      <td className="num">{money(row.days_61_90)}</td>
-      <td className="num">{money(row.days_over_90)}</td>
-      <td className="num">{money(row.total)}</td>
-    </>
-  );
+function Aged({ data, payable }: { data: any; payable: boolean }) {
+  const values = (row: any) => [row.not_due, row.days_1_30, row.days_31_60, row.days_61_90, row.days_over_90, row.total];
 
   return (
-    <table>
-      <thead>
-        <tr>
-          <th>Name</th><th className="num">Not due</th><th className="num">1–30 days</th><th className="num">31–60 days</th>
-          <th className="num">61–90 days</th><th className="num">Over 90 days</th><th className="num">Total</th>
-        </tr>
-      </thead>
-      <tbody>
-        {data.rows.length === 0 && <tr><td colSpan={7} className="empty">Nothing outstanding</td></tr>}
-        {data.rows.map((row: any) => <tr key={row.party_id}><td className="wrap">{row.name}</td>{cells(row)}</tr>)}
-        <tr className="total"><td>Total</td>{cells(data.totals)}</tr>
-      </tbody>
-    </table>
+    <Statement columns={[payable ? 'Vendor' : 'Customer', 'Not due', '1 to 30 days', '31 to 60 days', '61 to 90 days', 'Over 90 days', 'Total']}>
+      {data.rows.length === 0 && <StatementEmpty text={payable ? 'You owe nothing right now' : 'Nobody owes you anything right now'} span={7} />}
+      {data.rows.map((row: any) => <StatementLine key={row.party_id} label={row.name} values={values(row)} blankZero />)}
+      {data.rows.length > 0 && <StatementTotal grand label="Total" values={values(data.totals)} />}
+    </Statement>
   );
 }

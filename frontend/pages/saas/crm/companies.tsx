@@ -2,6 +2,9 @@ import Link from 'next/link';
 import { useEffect, useState } from 'react';
 import AppShell from '@/components/AppShell';
 import CrmNav from '@/components/CrmNav';
+import EmptyState from '@/components/EmptyState';
+import { SkeletonTable } from '@/components/Skeleton';
+import { toast } from '@/components/Toast';
 import { CompanyForm, useTeam } from '@/components/CrmForms';
 import { useCustomFields } from '@/components/CustomFields';
 import SavedViews, { Filters, ListFilters, matchesFilters } from '@/components/SavedViews';
@@ -22,7 +25,6 @@ function CompaniesApp() {
   const [filters, setFilters] = useState<Filters>({});
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState('');
-  const [notice, setNotice] = useState('');
   const [adding, setAdding] = useState(false);
 
   const load = async () => {
@@ -64,7 +66,6 @@ function CompaniesApp() {
       </div>
 
       {error && <p className="error">{error}</p>}
-      {notice && <p className="notice">{notice}</p>}
 
       <div className="card stack">
         <SavedViews entity="company" filters={filters} onApply={setFilters} />
@@ -76,14 +77,20 @@ function CompaniesApp() {
       </div>
 
       <BulkBar entity="company" selected={selection.selected} onClear={selection.clear} tags={tags} members={members}
-        onDone={async (message) => { setNotice(message); await load(); }} />
+        onDone={async (message) => { toast.success('Done', { detail: message }); await load(); }} />
 
-      <div className="card table-wrap">
-        {loading ? <p className="empty">Loading…</p> : (
+      {loading ? <SkeletonTable rows={8} columns={6} /> : (
+        <div className="card table-wrap">
           <table>
             <thead><tr><th className="pick"><input type="checkbox" aria-label="Select all shown" checked={selection.all} onChange={selection.toggleAll} /></th><th>Name</th><th>Industry</th><th>Phone</th><th>Tags</th><th className="num">Contacts</th><th className="num">Deals</th></tr></thead>
             <tbody>
-              {visible.length === 0 && <tr><td colSpan={7} className="empty">{companies.length ? 'No matches' : 'No companies yet'}</td></tr>}
+              {visible.length === 0 && (
+                <tr><td colSpan={7}>
+                  {companies.length
+                    ? <EmptyState compact icon="search" title="No companies match" line="Try a different search or clear a filter." />
+                    : <EmptyState compact icon="company" title="No companies yet" line="Add the businesses you work with and link people to them." action={{ label: 'New company', onClick: () => setAdding(true) }} />}
+                </td></tr>
+              )}
               {visible.map((company) => (
                 <tr key={company.id} className={selection.has(company.id) ? 'picked' : ''}>
                   <td className="pick"><input type="checkbox" aria-label={`Select ${company.name}`} checked={selection.has(company.id)} onChange={() => selection.toggle(company.id)} /></td>
@@ -97,10 +104,10 @@ function CompaniesApp() {
               ))}
             </tbody>
           </table>
-        )}
-      </div>
+        </div>
+      )}
 
-      {adding && <CompanyForm onClose={() => setAdding(false)} onSaved={load} />}
+      {adding && <CompanyForm onClose={() => setAdding(false)} onSaved={async () => { toast.success('Company added'); await load(); }} />}
     </div>
   );
 }

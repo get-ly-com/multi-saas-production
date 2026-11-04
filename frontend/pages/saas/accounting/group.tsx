@@ -1,8 +1,12 @@
 import { FormEvent, useEffect, useState } from 'react';
 import AccountingNav from '@/components/AccountingNav';
+import { Amount, PageHead, StatusPill, StatementHeading, styles } from '@/components/AccountingKit';
 import AppShell from '@/components/AppShell';
+import EmptyState from '@/components/EmptyState';
 import Modal from '@/components/Modal';
-import { api, formatDate, money, today } from '@/lib/api';
+import Skeleton, { SkeletonTable } from '@/components/Skeleton';
+import { toast } from '@/components/Toast';
+import { api, formatDate, today } from '@/lib/api';
 import useSubmit from '@/lib/useSubmit';
 
 const TABS = ['Companies', 'Intercompany', 'Profit and loss', 'Balance sheet'];
@@ -33,8 +37,9 @@ function GroupApp() {
   return (
     <div className="stack">
       <AccountingNav />
-      <div className="page-head"><h1>Company group</h1></div>
+      <PageHead title="Company group" line="Report several of your companies together, in one currency." />
       {error && <p className="error">{error}</p>}
+      {!overview && !error && <SkeletonTable rows={3} columns={3} />}
       {overview && !overview.group && <CreateGroup overview={overview} onSaved={load} />}
       {overview?.group && overview.access === false && (
         <div className="card"><p>This company is in {overview.group.name}. You need to be an owner or admin of every company in the group to open it.</p></div>
@@ -65,6 +70,7 @@ function CreateGroup({ overview, onSaved }: { overview: any; onSaved: () => void
       try {
         await api.post('/api/accounting/group', form);
         await onSaved();
+        toast.success('Group started', { detail: `${form.name} reports in ${form.currency}. Add your other companies next.` });
       } catch (err: any) {
         setError(err.message);
       }
@@ -91,26 +97,24 @@ function Companies({ overview, onSaved }: { overview: any; onSaved: () => void }
   const [adding, setAdding] = useState('');
   const [rate, setRate] = useState({ currency: '', rate_date: today(), closing_rate: '', average_rate: '' });
   const [error, setError] = useState('');
-  const [notice, setNotice] = useState('');
   const { group, companies, rates, addable } = overview;
 
   const { busy, run: once } = useSubmit();
   // One action at a time, so a double click cannot repeat it
-  const run = (action: () => Promise<unknown>, done: string) => once(async () => {
+  const run = (action: () => Promise<unknown>, title: string, detail?: string) => once(async () => {
     try {
       await action();
-      setNotice(done);
       setError('');
       await onSaved();
+      toast.success(title, { detail });
     } catch (err: any) {
-      setNotice('');
       setError(err.message);
     }
   });
 
   const remove = (company: any) => {
     if (window.confirm(`Take ${company.name} out of ${group.name}? Its books are not changed.`)) {
-      run(() => api.delete(`/api/accounting/group/companies/${company.id}`), `${company.name} removed.`);
+      run(() => api.delete(`/api/accounting/group/companies/${company.id}`), 'Company removed', `${company.name} is out of ${group.name}. Its books are unchanged.`);
     }
   };
 
@@ -119,13 +123,12 @@ function Companies({ overview, onSaved }: { overview: any; onSaved: () => void }
     run(async () => {
       await api.post('/api/accounting/group/rates', rate);
       setRate({ ...rate, currency: '', closing_rate: '', average_rate: '' });
-    }, `Saved the ${rate.currency} rate.`);
+    }, 'Rate saved', `${rate.currency} rates from ${formatDate(rate.rate_date)}`);
   };
 
   return (
     <>
       {error && <p className="error">{error}</p>}
-      {notice && <p className="notice">{notice}</p>}
 
       <div className="card table-wrap">
         <h2>{group.name} · reports in {group.currency}</h2>
@@ -155,7 +158,7 @@ function Companies({ overview, onSaved }: { overview: any; onSaved: () => void }
               <button className="primary" disabled={!adding} onClick={() => run(async () => {
                 await api.post('/api/accounting/group/companies', { company_id: adding });
                 setAdding('');
-              }, 'Company added.')}>Add company</button>
+              }, 'Company added', `${addable.find((company: any) => company.id === adding)?.name || 'The company'} now reports with ${group.name}`)}>Add company</button>
             </div>
           </>
         )}
@@ -173,10 +176,12 @@ function Companies({ overview, onSaved }: { overview: any; onSaved: () => void }
           </div>
           <div className="form-actions"><button disabled={busy} className="primary">Save rate</button></div>
         </form>
+        {rates.length === 0 ? (
+          <EmptyState compact icon="money" title="No rates yet" line="Add a rate for each company currency that differs from the group's." />
+        ) : (
         <table>
           <thead><tr><th>Currency</th><th>Date</th><th className="num">Closing</th><th className="num">Average</th></tr></thead>
           <tbody>
-            {rates.length === 0 && <tr><td colSpan={4} className="empty">No rates yet</td></tr>}
             {rates.map((row: any) => (
               <tr key={`${row.currency}:${row.rate_date}`}>
                 <td>{row.currency}</td>
@@ -187,6 +192,7 @@ function Companies({ overview, onSaved }: { overview: any; onSaved: () => void }
             ))}
           </tbody>
         </table>
+        )}
       </div>
     </>
   );
@@ -206,6 +212,7 @@ function Intercompany({ overview, onSaved }: { overview: any; onSaved: () => voi
       await api.post(`/api/accounting/group/intercompany/${entry.id}/void`, {});
       setError('');
       await onSaved();
+      toast.success('Entry voided', { detail: `Both companies' entries for "${entry.memo}" are reversed` });
     } catch (err: any) {
       setError(err.message);
     }
@@ -219,27 +226,30 @@ function Intercompany({ overview, onSaved }: { overview: any; onSaved: () => voi
       </div>
       {companies.length < 2 && <p className="muted">Add a second company to the group first.</p>}
       <div className="card table-wrap">
+        {entries.length === 0 ? (
+          <EmptyState icon="company" title="No intercompany entries yet" line="Record loans, charges and repayments between your companies, posted to both sets of books at once." />
+        ) : (
         <table>
           <thead><tr><th>Date</th><th>Type</th><th>From</th><th>To</th><th>Description</th><th className="num">Amount</th><th /></tr></thead>
           <tbody>
-            {entries.length === 0 && <tr><td colSpan={7} className="empty">No intercompany entries yet</td></tr>}
             {entries.map((entry: any) => (
               <tr key={entry.id}>
                 <td>{formatDate(entry.entry_date)}</td>
-                <td>{entry.kind}</td>
+                <td>{KINDS[entry.kind] || entry.kind}</td>
                 <td className="wrap">{entry.from_name}</td>
                 <td className="wrap">{entry.to_name}</td>
                 <td className="wrap">{entry.memo}</td>
-                <td className="num">{money(entry.from_amount, currencyOf(entry.from_tenant))}</td>
+                <td className="num"><Amount value={entry.from_amount} currency={currencyOf(entry.from_tenant)} /></td>
                 <td>
                   {entry.voided_at
-                    ? <span className="badge void">void</span>
+                    ? <StatusPill status="void" />
                     : <div className="row-actions"><button disabled={busy} className="danger" onClick={() => voidEntry(entry)}>Void</button></div>}
                 </td>
               </tr>
             ))}
           </tbody>
         </table>
+        )}
       </div>
       {adding && <EntryForm companies={companies} onClose={() => setAdding(false)} onSaved={onSaved} />}
     </>
@@ -267,6 +277,7 @@ function EntryForm({ companies, onClose, onSaved }: { companies: any[]; onClose:
       try {
         await api.post('/api/accounting/group/intercompany', form);
         await onSaved();
+        toast.success('Entry posted to both companies', { detail: form.memo });
         onClose();
       } catch (err: any) {
         setError(err.message);
@@ -351,12 +362,13 @@ function useReport(path: string) {
 function Rows({ rows, companies, currency }: { rows: any[]; companies: any[]; currency: string }) {
   return (
     <>
+      {rows.length === 0 && <tr className={styles.empty}><td colSpan={companies.length + 3}>Nothing here yet</td></tr>}
       {rows.map((row) => (
-        <tr key={row.code}>
-          <td className="wrap">{row.code} {row.name}</td>
-          {companies.map(({ id }) => <td key={id} className="num">{money(row.amounts[id], currency)}</td>)}
-          <td className="num">{Number(row.elimination) ? money(-row.elimination, currency) : '—'}</td>
-          <td className="num">{money(row.total, currency)}</td>
+        <tr key={row.code} className={styles.account}>
+          <td className="wrap"><span className={styles.code}>{row.code}</span>{row.name}</td>
+          {companies.map(({ id }) => <td key={id}><Amount value={row.amounts[id]} currency={currency} /></td>)}
+          <td>{Number(row.elimination) ? <Amount value={-row.elimination} currency={currency} /> : <span className="muted">—</span>}</td>
+          <td><Amount value={row.total} currency={currency} strong /></td>
         </tr>
       ))}
     </>
@@ -368,18 +380,24 @@ function ReportHead({ companies }: { companies: any[] }) {
     <thead>
       <tr>
         <th>Account</th>
-        {companies.map(({ id, name }) => <th key={id} className="num">{name}</th>)}
-        <th className="num">Eliminated</th>
-        <th className="num">Group</th>
+        {companies.map(({ id, name }) => <th key={id}>{name}</th>)}
+        <th>Eliminated</th>
+        <th>Group</th>
       </tr>
     </thead>
   );
 }
 
-const Section = ({ title, span }: { title: string; span: number }) => <tr className="section"><td colSpan={span}>{title}</td></tr>;
+const Section = ({ title, span }: { title: string; span: number }) => <StatementHeading title={title} span={span} />;
 
-const Total = ({ label, value, span, currency }: { label: string; value: number; span: number; currency: string }) => (
-  <tr className="total"><td colSpan={span - 1}>{label}</td><td className="num">{money(value, currency)}</td></tr>
+const Total = ({ label, value, span, currency, grand }: { label: string; value: number; span: number; currency: string; grand?: boolean }) => (
+  <tr className={grand ? styles.grand : styles.subtotal}><td colSpan={span - 1} style={{ textAlign: 'left' }}>{label}</td><td><Amount value={value} currency={currency} /></td></tr>
+);
+
+const ReportSkeleton = () => (
+  <div style={{ display: 'grid', gap: 10, marginTop: 12 }} aria-hidden="true">
+    {Array.from({ length: 8 }, (_, n) => <Skeleton key={n} width={n % 4 === 0 ? '30%' : '100%'} height={n % 4 === 0 ? 12 : 14} />)}
+  </div>
 );
 
 function GroupProfit({ overview }: { overview: any }) {
@@ -399,8 +417,8 @@ function GroupProfit({ overview }: { overview: any }) {
       <div className="card table-wrap">
         <h2>{group.name} · Consolidated profit and loss</h2>
         <p className="muted">{formatDate(from)} to {formatDate(to)}, in {group.currency}</p>
-        {!data ? !error && <p className="empty">Loading…</p> : (
-          <table>
+        {!data ? !error && <ReportSkeleton /> : (
+          <table className={styles.statement}>
             <ReportHead companies={data.companies} />
             <tbody>
               <Section title="Revenue" span={span} />
@@ -412,7 +430,7 @@ function GroupProfit({ overview }: { overview: any }) {
               {Number(data.elimination_difference) !== 0 && (
                 <Total label="Rate difference on eliminated charges" value={data.elimination_difference} span={span} currency={group.currency} />
               )}
-              <Total label="Net income" value={data.net_income} span={span} currency={group.currency} />
+              <Total grand label="Net income" value={data.net_income} span={span} currency={group.currency} />
             </tbody>
           </table>
         )}
@@ -436,10 +454,10 @@ function GroupBalance({ overview }: { overview: any }) {
       <div className="card table-wrap">
         <h2>{group.name} · Consolidated balance sheet</h2>
         <p className="muted">As of {formatDate(asOf)}, in {group.currency}</p>
-        {!data ? !error && <p className="empty">Loading…</p> : (
+        {!data ? !error && <ReportSkeleton /> : (
           <>
-            <p><span className={`badge ${data.balanced ? 'paid' : 'void'}`}>{data.balanced ? 'In balance' : 'Out of balance'}</span></p>
-            <table>
+            <p><StatusPill status={data.balanced ? 'paid' : 'void'} label={data.balanced ? 'In balance' : 'Out of balance'} /></p>
+            <table className={styles.statement}>
               <ReportHead companies={data.companies} />
               <tbody>
                 <Section title="Assets" span={span} />
@@ -450,11 +468,11 @@ function GroupBalance({ overview }: { overview: any }) {
                 <Total label="Total liabilities" value={data.total_liabilities} span={span} currency={group.currency} />
                 <Section title="Equity" span={span} />
                 <Rows rows={data.equity} companies={data.companies} currency={group.currency} />
-                <tr>
+                <tr className={styles.account}>
                   <td>Earnings to date</td>
-                  {data.companies.map(({ id }: any) => <td key={id} className="num">{money(data.earnings[id], group.currency)}</td>)}
-                  <td className="num">—</td>
-                  <td className="num">{money(data.total_earnings, group.currency)}</td>
+                  {data.companies.map(({ id }: any) => <td key={id}><Amount value={data.earnings[id]} currency={group.currency} /></td>)}
+                  <td><span className="muted">—</span></td>
+                  <td><Amount value={data.total_earnings} currency={group.currency} strong /></td>
                 </tr>
                 {Number(data.translation) !== 0 && (
                   <Total label="Currency translation difference" value={data.translation} span={span} currency={group.currency} />
@@ -463,7 +481,7 @@ function GroupBalance({ overview }: { overview: any }) {
                   <Total label="Intercompany difference from rates or unmatched entries" value={data.intercompany_difference} span={span} currency={group.currency} />
                 )}
                 <Total label="Total equity" value={data.total_equity} span={span} currency={group.currency} />
-                <Total label="Total liabilities and equity" value={Number(data.total_liabilities) + Number(data.total_equity)} span={span} currency={group.currency} />
+                <Total grand label="Total liabilities and equity" value={Number(data.total_liabilities) + Number(data.total_equity)} span={span} currency={group.currency} />
               </tbody>
             </table>
           </>

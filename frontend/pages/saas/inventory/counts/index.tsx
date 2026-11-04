@@ -2,8 +2,11 @@ import Link from 'next/link';
 import { useRouter } from 'next/router';
 import { FormEvent, useEffect, useState } from 'react';
 import AppShell from '@/components/AppShell';
+import EmptyState from '@/components/EmptyState';
 import InventoryNav from '@/components/InventoryNav';
 import Modal from '@/components/Modal';
+import { SkeletonTable } from '@/components/Skeleton';
+import styles from '@/styles/inventory.module.css';
 import { api, formatDate, money } from '@/lib/api';
 import useSubmit from '@/lib/useSubmit';
 
@@ -12,7 +15,7 @@ export default function Counts() {
 }
 
 function CountsApp() {
-  const [counts, setCounts] = useState<any[]>([]);
+  const [counts, setCounts] = useState<any[] | null>(null);
   const [places, setPlaces] = useState<any[]>([]);
   const [categories, setCategories] = useState<any[]>([]);
   const [starting, setStarting] = useState(false);
@@ -29,41 +32,61 @@ function CountsApp() {
         setPlaces(placeRows);
         setCategories(categoryRows);
       })
-      .catch((err) => setError(err.message));
+      .catch((err) => {
+        setError(err.message);
+        setCounts([]);
+      });
   }, []);
 
   return (
     <div className="stack">
       <div className="page-head">
-        <h1>Stock counts</h1>
+        <div>
+          <h1>Stock counts</h1>
+          <p className="muted">Scan the shelves, then set stock to what is really there in one go.</p>
+        </div>
         <button className="primary" onClick={() => setStarting(true)}>Start a count</button>
       </div>
       <InventoryNav />
-      <p className="muted">
+      <p className="muted small">
         Count what's really on the shelves, then apply the count: every counted item is set to what you found, in one go, and the
         difference in value goes to Stock Adjustments. Items you leave blank aren't changed.
       </p>
       {error && <p className="error">{error}</p>}
 
-      <div className="card table-wrap">
-        <table>
-          <thead><tr><th>#</th><th>Started</th><th>Where</th><th>Category</th><th>Status</th><th className="num">Counted</th><th className="num">Value change</th></tr></thead>
-          <tbody>
-            {counts.length === 0 && <tr><td colSpan={7} className="empty">No counts yet</td></tr>}
-            {counts.map((row) => (
-              <tr key={row.id}>
-                <td><Link href={`/saas/inventory/counts/${row.id}`}>Count {row.number}</Link></td>
-                <td>{formatDate(row.created_at)}</td>
-                <td>{row.location?.name}</td>
-                <td>{row.category?.name || 'All items'}</td>
-                <td><span className={`badge ${row.status === 'applied' ? 'paid' : row.status === 'open' ? 'open' : 'void'}`}>{row.status}</span></td>
-                <td className="num">{row.counted} of {row.lines}</td>
-                <td className="num">{row.value_change === null ? '—' : money(row.value_change)}</td>
-              </tr>
-            ))}
-          </tbody>
-        </table>
-      </div>
+      {!counts ? <SkeletonTable rows={4} columns={6} /> : counts.length === 0 ? (
+        <div className="card">
+          <EmptyState icon="inventory" title="No counts yet" line="Start one for a shelf, a category or the whole warehouse. Scanning makes it quick."
+            action={{ label: 'Start a count', onClick: () => setStarting(true) }} />
+        </div>
+      ) : (
+        <div className="card table-wrap">
+          <table>
+            <thead><tr><th>Count</th><th>Started</th><th>Where</th><th>Category</th><th>Status</th><th>Counted</th><th className="num">Value change</th></tr></thead>
+            <tbody>
+              {counts.map((row) => {
+                const share = Number(row.lines) ? Math.round((Number(row.counted) / Number(row.lines)) * 100) : 0;
+                return (
+                  <tr key={row.id}>
+                    <td><Link href={`/saas/inventory/counts/${row.id}`}><strong>Count {row.number}</strong></Link></td>
+                    <td>{formatDate(row.created_at)}</td>
+                    <td>{row.location?.name}</td>
+                    <td>{row.category?.name || 'All items'}</td>
+                    <td><span className={`badge ${row.status === 'applied' ? 'applied' : row.status === 'open' ? 'pending' : 'cancelled'}`}>{row.status === 'open' ? 'Counting' : row.status === 'applied' ? 'Applied' : 'Cancelled'}</span></td>
+                    <td>
+                      <div className={styles.progress} style={{ minWidth: 120 }}>
+                        <div className={styles.progressTop}><span>{row.counted} of {row.lines}</span><span className="muted">{share}%</span></div>
+                        <div className={styles.progressTrack} style={{ height: 6 }}><span className={share === 100 ? styles.full : ''} style={{ width: `${share}%` }} /></div>
+                      </div>
+                    </td>
+                    <td className="num">{row.value_change === null ? '—' : money(row.value_change)}</td>
+                  </tr>
+                );
+              })}
+            </tbody>
+          </table>
+        </div>
+      )}
 
       {starting && <StartForm places={places.filter((place) => place.active)} categories={categories} onClose={() => setStarting(false)} />}
     </div>

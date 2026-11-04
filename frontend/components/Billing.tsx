@@ -1,5 +1,6 @@
 import Link from 'next/link';
 import { useEffect, useState } from 'react';
+import { Amount, StatusPill, shownStatus } from '@/components/AccountingKit';
 import { api, formatDate, money } from '@/lib/api';
 
 // What Accounting has billed this customer, shown inside the CRM
@@ -23,9 +24,9 @@ export default function Billing({ query }: { query: string }) {
             <tr key={invoice.id}>
               <td><Link href={`/saas/accounting/invoice/${invoice.id}`}>{invoice.invoice_number}</Link></td>
               <td>{formatDate(invoice.invoice_date)}</td>
-              <td><span className={`badge ${invoice.status}`}>{invoice.status}</span></td>
-              <td className="num">{money(invoice.amount, invoice.currency)}</td>
-              <td className="num">{money(invoice.balance, invoice.currency)}</td>
+              <td><StatusPill status={shownStatus(invoice)} /></td>
+              <td className="num"><Amount value={invoice.amount} currency={invoice.currency} /></td>
+              <td className="num"><Amount value={invoice.balance} currency={invoice.currency} dim={Number(invoice.balance) === 0} /></td>
             </tr>
           ))}
         </tbody>

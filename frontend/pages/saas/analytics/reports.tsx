@@ -1,7 +1,10 @@
 import { FormEvent, useEffect, useMemo, useState } from 'react';
 import AnalyticsNav, { HBarChart, PERIODS, monthName, periodDates } from '@/components/AnalyticsNav';
 import AppShell from '@/components/AppShell';
+import EmptyState from '@/components/EmptyState';
 import Modal from '@/components/Modal';
+import Skeleton, { SkeletonTable } from '@/components/Skeleton';
+import { toast } from '@/components/Toast';
 import { api, money } from '@/lib/api';
 import { downloadCsv } from '@/lib/csv';
 
@@ -101,7 +104,7 @@ function ReportBuilder() {
       const data = await load();
       setOpenReport(data.reports.find((report: Saved) => report.name.toLowerCase() === name.trim().toLowerCase()) || null);
       setSaving(null);
-      setNotice(`Saved "${name.trim()}"`);
+      toast.success('Report saved', { detail: `"${name.trim()}" is in your saved reports.` });
     } catch (err: any) {
       setError(err.message);
     }
@@ -158,7 +161,7 @@ function ReportBuilder() {
   };
 
   if (!dataset) {
-    return <div className="stack"><AnalyticsNav />{error ? <p className="error">{error}</p> : <p className="empty">Loading…</p>}</div>;
+    return <div className="stack"><AnalyticsNav />{error ? <p className="error">{error}</p> : <div className="stack" aria-busy="true"><Skeleton width={180} height={28} /><div className="card"><Skeleton height={90} radius={8} /></div><SkeletonTable rows={5} columns={4} /></div>}</div>;
   }
 
   const set = (change: Partial<Spec>) => setSpec({ ...spec, ...change });
@@ -237,7 +240,7 @@ function ReportBuilder() {
             <button className={spec.chart === 'bar' ? 'active' : ''} onClick={() => set({ chart: 'bar' })}>Chart</button>
             <button className={spec.chart === 'table' ? 'active' : ''} onClick={() => set({ chart: 'table' })}>Table</button>
           </div>
-          {running && <span className="muted">Working…</span>}
+          {running && <span className="muted small" role="status">Running the report…</span>}
         </div>
       </div>
 
@@ -280,7 +283,7 @@ function ReportBuilder() {
                 </tr>
               </thead>
               <tbody>
-                {table.groups.length === 0 && <tr><td colSpan={table.months.length + 3} className="empty">No records for these choices</td></tr>}
+                {table.groups.length === 0 && <tr><td colSpan={table.months.length + 3} style={{ padding: 0 }}><EmptyState compact icon="search" title="No records for these choices" line="Try a longer period or a different filter." /></td></tr>}
                 {table.groups.map((group) => (
                   <tr key={group.label}>
                     <td className="wrap">{group.label}</td>
@@ -317,12 +320,12 @@ function ReportBuilder() {
         <table>
           <thead><tr><th>Name</th><th>Made by</th><th /></tr></thead>
           <tbody>
-            {saved.length === 0 && <tr><td colSpan={3} className="empty">No saved reports yet</td></tr>}
+            {saved.length === 0 && <tr><td colSpan={3} style={{ padding: 0 }}><EmptyState compact icon="analytics" title="No saved reports yet" line={canSave ? 'Build a report above and save it to run it again in one click.' : 'Saved reports from your team will show here.'} /></td></tr>}
             {saved.map((report) => (
               <tr key={report.id} className={openReport?.id === report.id ? 'active' : ''}>
                 <td><button className="link" onClick={() => open(report)}>{report.name}</button></td>
                 <td className="muted">{report.created_by || '—'}</td>
-                <td><div className="row-actions">{report.can_change && <button className="danger" onClick={() => remove(report)}>Delete</button>}</div></td>
+                <td><div className="row-actions">{report.can_change && <button className="small ghost danger" onClick={() => remove(report)}>Delete</button>}</div></td>
               </tr>
             ))}
           </tbody>

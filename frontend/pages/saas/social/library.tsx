@@ -1,8 +1,13 @@
 import { FormEvent, useEffect, useState } from 'react';
 import AppShell from '@/components/AppShell';
+import EmptyState from '@/components/EmptyState';
+import Icon from '@/components/Icon';
 import Modal from '@/components/Modal';
+import Skeleton from '@/components/Skeleton';
 import SocialNav from '@/components/SocialNav';
+import { toast } from '@/components/Toast';
 import { api } from '@/lib/api';
+import ss from '@/styles/social.module.css';
 
 export default function SocialLibrary() {
   return <AppShell><Library /></AppShell>;
@@ -14,7 +19,7 @@ const KINDS = { text: 'Text', hashtags: 'Hashtag set' };
 
 // Text and hashtag sets the team reuses. In a post, "Add from library" puts one into the text.
 function Library() {
-  const [rows, setRows] = useState<Snippet[]>([]);
+  const [rows, setRows] = useState<Snippet[] | null>(null);
   const [canEdit, setCanEdit] = useState(false);
   const [editing, setEditing] = useState<Snippet | null>(null);
   const [error, setError] = useState('');
@@ -27,6 +32,7 @@ function Library() {
       setError('');
     } catch (err: any) {
       setError(err.message);
+      setRows((current) => current || []);
     }
   };
 
@@ -39,50 +45,68 @@ function Library() {
     try {
       await api.delete(`/api/social-media/snippets/${row.id}`);
       load();
+      toast.success('Removed from the library');
     } catch (err: any) {
       setError(err.message);
     }
   };
 
+  const full = (rows?.length || 0) >= 300;
+
   return (
     <div className="stack">
       <SocialNav />
       <div className="page-head">
-        <h1>Content library</h1>
+        <div>
+          <h1>Content library</h1>
+          <p className="muted">Save sign-offs, calls to action and hashtag sets once, then add them to any post. Up to 300 items.</p>
+        </div>
         {canEdit && (
           <div className="row-actions">
-            <button onClick={() => setEditing({ kind: 'hashtags', name: '', body: '' })} disabled={rows.length >= 300}>New hashtag set</button>
-            <button className="primary" onClick={() => setEditing({ kind: 'text', name: '', body: '' })} disabled={rows.length >= 300}>New text</button>
+            <button onClick={() => setEditing({ kind: 'hashtags', name: '', body: '' })} disabled={full}>New hashtag set</button>
+            <button className="primary" onClick={() => setEditing({ kind: 'text', name: '', body: '' })} disabled={full}><Icon name="plus" size={16} />New text</button>
           </div>
         )}
       </div>
-      <p className="muted">Save sign-offs, disclaimers, calls to action and hashtag sets once, then add them to any post. Up to 300 items.</p>
       {error && <p className="error">{error}</p>}
-      <div className="table-wrap">
-        <table>
-          <thead><tr><th>Name</th><th>Kind</th><th>Content</th><th /></tr></thead>
-          <tbody>
-            {rows.length === 0 && <tr><td colSpan={4} className="empty">Nothing saved yet</td></tr>}
-            {rows.map((row) => (
-              <tr key={row.id}>
-                <td>{row.name}</td>
-                <td>{KINDS[row.kind]}</td>
-                <td className="wrap">{row.body}</td>
-                <td>{canEdit && (
-                  <div className="row-actions">
-                    <button onClick={() => setEditing(row)}>Edit</button>
-                    <button className="danger" onClick={() => remove(row)}>Delete</button>
-                  </div>
-                )}</td>
-              </tr>
-            ))}
-          </tbody>
-        </table>
-      </div>
-      {editing && <SnippetForm row={editing} onClose={() => setEditing(null)} onSaved={() => { setEditing(null); load(); }} />}
+
+      {rows === null && (
+        <div className={ss.library} aria-busy="true">
+          {[0, 1, 2].map((n) => <div key={n} className={ss.snippet}><Skeleton width="50%" height={14} /><Skeleton height={48} /></div>)}
+        </div>
+      )}
+      {rows?.length === 0 && (
+        <div className="card">
+          <EmptyState icon="copy" title="Nothing saved yet"
+            line="Save text you use often, like a sign-off or your usual hashtags. Then add it to a post in one click."
+            action={canEdit ? { label: 'New text', onClick: () => setEditing({ kind: 'text', name: '', body: '' }) } : undefined}
+            secondary={canEdit ? { label: 'New hashtag set', onClick: () => setEditing({ kind: 'hashtags', name: '', body: '' }) } : undefined} />
+        </div>
+      )}
+      {rows && rows.length > 0 && (
+        <div className={ss.library}>
+          {rows.map((row) => (
+            <article key={row.id} className={ss.snippet}>
+              <header>
+                <strong>{row.name}</strong>
+                <span className={`badge ${row.kind === 'hashtags' ? 'new' : ''}`}>{KINDS[row.kind]}</span>
+              </header>
+              <p>{row.body}</p>
+              {canEdit && (
+                <footer>
+                  <button className="small" onClick={() => setEditing(row)}>Edit</button>
+                  <button className="small ghost danger" onClick={() => remove(row)}>Delete</button>
+                </footer>
+              )}
+            </article>
+          ))}
+        </div>
+      )}
+      {editing && <SnippetForm row={editing} onClose={() => setEditing(null)} onSaved={() => { toast.success(editing.id ? 'Saved' : 'Added to the library'); setEditing(null); load(); }} />}
     </div>
   );
 }
+
 
 function SnippetForm({ row, onClose, onSaved }: { row: Snippet; onClose: () => void; onSaved: () => void }) {
   const [form, setForm] = useState(row);

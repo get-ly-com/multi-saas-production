@@ -3,7 +3,12 @@ import { useEffect, useMemo, useState } from 'react';
 import AppShell from '@/components/AppShell';
 import CrmNav from '@/components/CrmNav';
 import { useTeam } from '@/components/CrmForms';
+import { StatTile } from '@/components/CrmRecord';
+import EmptyState from '@/components/EmptyState';
+import { SkeletonStats, SkeletonTable } from '@/components/Skeleton';
 import TargetsForm from '@/components/TargetsForm';
+import { toast } from '@/components/Toast';
+import styles from '@/styles/crm.module.css';
 import { api, formatDate, money } from '@/lib/api';
 import { downloadCsv } from '@/lib/csv';
 import { CATEGORIES, addMonths, automaticCategory, categoryName, monthName, monthOf } from '@/lib/forecast';
@@ -75,9 +80,10 @@ function ForecastApp() {
   const setCategory = async (deal: any, category: string) => {
     try {
       await api.put(`/api/crm/deals/${deal.id}`, { forecast_category: category });
+      toast.success('Forecast updated', { detail: `${deal.title}: ${category ? categoryName(category) : 'from the stage'}` });
       await load();
     } catch (err: any) {
-      setError(err.message);
+      toast.error('Could not update the forecast', { detail: err.message });
     }
   };
 
@@ -139,15 +145,19 @@ function ForecastApp() {
 
       {error && <p className="error">{error}</p>}
 
+      {!data && !error && <><SkeletonStats count={5} /><SkeletonTable rows={4} columns={6} /></>}
+
       {data && (
         <>
           <div className="stats">
-            <div className="card"><div className="stat-label">Target</div><div className="stat-value">{target === null ? '—' : money(target)}</div><div className="muted">{target === null ? 'No target set' : `${monthName(from)} to ${monthName(to)}`}</div></div>
-            <div className="card"><div className="stat-label">Won</div><div className="stat-value">{money(totals.won)}</div><div className="muted">{totals.won_deals} {Number(totals.won_deals) === 1 ? 'deal' : 'deals'}</div></div>
-            <div className="card"><div className="stat-label">Won and commit</div><div className="stat-value">{money(likely)}</div><div className="muted">{target === null ? 'Likely result' : likely >= target ? `${money(likely - target)} over target` : `${money(target - likely)} short of target`}</div></div>
-            <div className="card"><div className="stat-label">Best case</div><div className="stat-value">{money(best)}</div><div className="muted">Won, commit and best case</div></div>
-            <div className="card"><div className="stat-label">Weighted open</div><div className="stat-value">{money(totals.weighted)}</div><div className="muted">Open value × stage chance</div></div>
+            <StatTile label="Target" icon="target" value={target === null ? '—' : money(target)} note={target === null ? 'No target set' : `${monthName(from)} to ${monthName(to)}`} />
+            <StatTile label="Won" icon="paid" tone="good" value={money(totals.won)} note={`${totals.won_deals} ${Number(totals.won_deals) === 1 ? 'deal' : 'deals'}`} />
+            <StatTile label="Won and commit" icon="check" value={money(likely)} note={target === null ? 'Likely result' : likely >= target ? `${money(likely - target)} over target` : `${money(target - likely)} short of target`} />
+            <StatTile label="Best case" icon="star" value={money(best)} note="Won, commit and best case" />
+            <StatTile label="Weighted open" icon="deal" value={money(totals.weighted)} note="Open value × stage chance" />
           </div>
+
+          <ForecastBar won={Number(totals.won)} commit={Number(totals.commit)} bestCase={Number(totals.best_case)} target={target} />
 
           {(Number(data.late.deals) > 0 || Number(data.undated.deals) > 0) && (
             <div className="card">
@@ -161,7 +171,10 @@ function ForecastApp() {
             <table>
               <thead><tr><th>Person</th><th className="num">Target</th><th className="num">Won</th><th className="num">Commit</th><th className="num">Best case</th><th className="num">Pipeline</th><th className="num">Weighted</th><th className="num">Won and commit</th><th className="num">Of target</th></tr></thead>
               <tbody>
-                {data.people.length === 0 && <tr><td colSpan={9} className="empty">No deals or targets in this period</td></tr>}
+                {data.people.length === 0 && (
+                  <tr><td colSpan={9}><EmptyState compact icon="target" title="Nothing in this period yet" line="Deals with an expected close in these months, and any targets, show up here."
+                    action={{ label: 'Set targets', onClick: () => setTargets(true) }} /></td></tr>
+                )}
                 {data.people.map((row: any) => {
                   const sure = Number(row.won) + Number(row.commit);
                   return (
@@ -224,7 +237,7 @@ function ForecastApp() {
             <table>
               <thead><tr><th>Deal</th><th>Owner</th><th>Stage</th><th>Close</th><th>Forecast</th><th className="num">Value</th></tr></thead>
               <tbody>
-                {deals.length === 0 && <tr><td colSpan={6} className="empty">No deals</td></tr>}
+                {deals.length === 0 && <tr><td colSpan={6} className="empty">{data.deals.length ? 'No deals match these filters' : 'No deals in this period'}</td></tr>}
                 {deals.map((deal: any) => (
                   <tr key={deal.id}>
                     <td className="wrap"><Link href={`/saas/crm/deal/${deal.id}`}>{deal.title}</Link></td>
@@ -253,7 +266,7 @@ function ForecastApp() {
             <table>
               <thead><tr><th>Deal</th><th>Owner</th><th>Was due</th><th>Now due</th><th>Moved</th><th className="num">Value</th></tr></thead>
               <tbody>
-                {data.slipped.length === 0 && <tr><td colSpan={6} className="empty">Nothing slipped</td></tr>}
+                {data.slipped.length === 0 && <tr><td colSpan={6} className="empty">Nothing slipped. Every date held.</td></tr>}
                 {data.slipped.map((deal: any) => (
                   <tr key={deal.id}>
                     <td className="wrap"><Link href={`/saas/crm/deal/${deal.id}`}>{deal.title}</Link></td>
@@ -270,7 +283,51 @@ function ForecastApp() {
         </>
       )}
 
-      {targets && <TargetsForm month={from} members={members} onClose={() => setTargets(false)} onSaved={load} />}
+      {targets && <TargetsForm month={from} members={members} onClose={() => setTargets(false)} onSaved={async () => { toast.success('Targets saved'); await load(); }} />}
     </div>
+  );
+}
+
+// Won, commit and best case stacked on one bar, with the target marked
+function ForecastBar({ won, commit, bestCase, target }: { won: number; commit: number; bestCase: number; target: number | null }) {
+  const scale = Math.max(won + commit + bestCase, target || 0, 1);
+  const pct = (value: number) => (Math.max(0, value) / scale) * 100;
+  const parts = [
+    { key: 'won', label: 'Won', value: won, className: styles.segWon },
+    { key: 'commit', label: 'Commit', value: commit, className: styles.segCommit },
+    { key: 'best', label: 'Best case', value: bestCase, className: styles.segBest }
+  ];
+  let x = 0;
+  const reached = target ? Math.round(((won + commit) / target) * 100) : null;
+  return (
+    <section className="card" aria-labelledby="forecast-bar-title">
+      <div className={styles.cardHead}>
+        <div>
+          <h2 id="forecast-bar-title">{reached === null ? 'Where the period stands' : `${reached}% of target won or committed`}</h2>
+          <p className="muted">{target === null ? 'Set a target to see how close you are.' : `Target ${money(target)}`}</p>
+        </div>
+      </div>
+      <div className={styles.progress}>
+        <svg className={styles.progressSvg} role="img" aria-label={`Won ${money(won)}, commit ${money(commit)}, best case ${money(bestCase)}${target !== null ? `, target ${money(target)}` : ''}`}>
+          <rect className={styles.segTrack} x="0" y="2" width="100%" height="14" rx="4" />
+          {parts.map((part) => {
+            const width = pct(part.value);
+            const start = x;
+            x += width;
+            if (width <= 0) return null;
+            return (
+              <rect key={part.key} className={part.className} x={`${start}%`} y="2" width={`${width}%`} height="14" rx="4">
+                <title>{`${part.label}: ${money(part.value)}`}</title>
+              </rect>
+            );
+          })}
+          {target !== null && target > 0 && <line className={styles.targetMark} x1={`${pct(target)}%`} x2={`${pct(target)}%`} y1="0" y2="18" />}
+        </svg>
+        <ul className={styles.legend}>
+          {parts.map((part) => <li key={part.key}><span className={`${styles.swatch} ${part.className}`} />{part.label} {money(part.value)}</li>)}
+          {target !== null && <li><span className={`${styles.swatch} ${styles.target}`} />Target {money(target)}</li>}
+        </ul>
+      </div>
+    </section>
   );
 }

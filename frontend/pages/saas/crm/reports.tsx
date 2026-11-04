@@ -2,6 +2,9 @@ import { useEffect, useState } from 'react';
 import AppShell from '@/components/AppShell';
 import CrmNav from '@/components/CrmNav';
 import { useTeam } from '@/components/CrmForms';
+import { Bars, StatTile } from '@/components/CrmRecord';
+import { SkeletonStats, SkeletonTable } from '@/components/Skeleton';
+import styles from '@/styles/crm.module.css';
 import { api, money } from '@/lib/api';
 import { downloadCsv } from '@/lib/csv';
 import { monthName } from '@/lib/forecast';
@@ -94,8 +97,17 @@ function ReportsApp() {
 
       {error && <p className="error">{error}</p>}
 
+      {!data && !error && <><SkeletonStats count={4} /><SkeletonTable rows={5} columns={7} /></>}
+
       {data && (
         <>
+          <div className="stats">
+            <StatTile label="Won" icon="paid" tone="good" value={money(sum(people, 'won_value'))} note={`${sum(people, 'won')} ${sum(people, 'won') === 1 ? 'deal' : 'deals'}`} />
+            <StatTile label="Win rate" icon="star" value={percent(sum(people, 'won'), sum(people, 'won') + sum(people, 'lost'))} note={`${sum(people, 'won')} won, ${sum(people, 'lost')} lost`} />
+            <StatTile label="Deals added" icon="deal" value={sum(people, 'deals_created')} note="In these dates" />
+            <StatTile label="Average won deal" icon="money" value={sum(people, 'won') ? money(sum(people, 'won_value') / sum(people, 'won')) : '—'} />
+          </div>
+
           <div className="card table-wrap">
             <div className="page-head">
               <h2>Results by person</h2>
@@ -177,6 +189,22 @@ function ReportsApp() {
               ])}>Download CSV</button>
             </div>
             <p className="muted">Deals added in these dates and how far they got. A won deal counts as passing every stage. Days in stage are for deals that left it in these dates.</p>
+            {data.funnel.length > 0 && (
+              <div style={{ margin: '12px 0 16px' }}>
+                <Bars
+                  max={Number(data.funnel_total) || undefined}
+                  rows={data.funnel.map((row: any) => ({
+                    key: row.name + row.position,
+                    label: row.name,
+                    value: Number(row.deals),
+                    tone: row.kind === 'won' ? 'good' as const : undefined,
+                    text: row.deals,
+                    extra: percent(Number(row.deals), Number(data.funnel_total)),
+                    title: `${row.name}: ${row.deals} deals, ${percent(Number(row.deals), Number(data.funnel_total))} of deals added`
+                  }))}
+                />
+              </div>
+            )}
             <table>
               <thead><tr><th>Stage</th><th className="num">Deals reaching it</th><th className="num">Of deals added</th><th className="num">From the stage before</th><th className="num">Average days in stage</th></tr></thead>
               <tbody>
@@ -222,7 +250,20 @@ function ReportsApp() {
           </div>
 
           <div className="card table-wrap">
-            <h2>Why deals were lost</h2>
+            <div className={styles.cardHead}><h2>Why deals were lost</h2></div>
+            {data.lost_reasons.length > 0 && (
+              <div style={{ marginBottom: 16 }}>
+                <Bars rows={data.lost_reasons.map((row: any) => ({
+                  key: row.reason,
+                  label: row.reason,
+                  value: Number(row.deals),
+                  tone: 'danger' as const,
+                  text: row.deals,
+                  extra: money(row.value),
+                  title: `${row.reason}: ${row.deals} deals, ${money(row.value)}`
+                }))} />
+              </div>
+            )}
             <table>
               <thead><tr><th>Reason</th><th className="num">Deals</th><th className="num">Value</th></tr></thead>
               <tbody>

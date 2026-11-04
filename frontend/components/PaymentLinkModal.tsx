@@ -1,5 +1,7 @@
 import { FormEvent, useEffect, useState } from 'react';
 import Modal from '@/components/Modal';
+import Skeleton from '@/components/Skeleton';
+import { toast } from '@/components/Toast';
 import { api, money } from '@/lib/api';
 import useSubmit from '@/lib/useSubmit';
 
@@ -44,6 +46,7 @@ export default function PaymentLinkModal({ invoice, onClose, onSaved }: { invoic
         await api.put('/api/accounting/online-payments', { account_id: accountId });
         setSetup((current) => (current ? { ...current, account_id: accountId } : current));
         if (!link) await makeLink();
+        toast.success('Account saved', { detail: 'Card payments will go into this account.' });
       } catch (err: any) {
         setError(err.message);
       }
@@ -54,6 +57,7 @@ export default function PaymentLinkModal({ invoice, onClose, onSaved }: { invoic
     try {
       await navigator.clipboard.writeText(link);
       setCopied(true);
+      toast.success('Link copied', { detail: `Paste it into a message to ${invoice.customer_name || 'your customer'}.` });
     } catch {
       setError('Could not copy. Select the link and copy it yourself.');
     }
@@ -63,8 +67,13 @@ export default function PaymentLinkModal({ invoice, onClose, onSaved }: { invoic
     <Modal title={`Payment link for ${invoice.invoice_number}`} onClose={onClose}>
       <div className="stack">
         <p className="muted">Your customer can open this link to pay {money(balance, invoice.currency)} by card.</p>
-        {!setup && !error && <p className="empty">Loading…</p>}
-        {setup && !setup.ready && <p>Online payments aren’t set up yet.</p>}
+        {!setup && !error && (
+          <div role="status" aria-label="Loading" style={{ display: 'grid', gap: 8 }}>
+            <Skeleton width={140} height={12} />
+            <Skeleton height={36} radius={8} />
+          </div>
+        )}
+        {setup && !setup.ready && <p className="notice">Online card payments aren’t switched on for this workspace yet.</p>}
 
         {setup?.ready && (
           <form onSubmit={saveAccount}>

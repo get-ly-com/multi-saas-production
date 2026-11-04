@@ -1,12 +1,17 @@
 import { FormEvent, useEffect, useState } from 'react';
 import AccountingNav from '@/components/AccountingNav';
-import AppShell from '@/components/AppShell';
+import { PageHead, StatusPill } from '@/components/AccountingKit';
+import AppShell, { useAccount } from '@/components/AppShell';
 import CurrencyFields from '@/components/CurrencyFields';
+import EmptyState from '@/components/EmptyState';
 import Modal from '@/components/Modal';
+import { SkeletonTable } from '@/components/Skeleton';
+import { toast } from '@/components/Toast';
 import { api, formatDate, money, today } from '@/lib/api';
 import useSubmit from '@/lib/useSubmit';
 
 const blankLine = { description: '', quantity: '1', unit_price: '', tax_rate_id: '' };
+const FREQUENCIES: Record<string, string> = { monthly: 'Month', quarterly: 'Quarter', yearly: 'Year' };
 const blankPlan = {
   name: '', customer_id: '', frequency: 'monthly', start_date: '', end_date: '', due_days: '30',
   currency: '', exchange_rate: '1', cost_center_id: '', auto_send: false, line_items: [blankLine]
@@ -24,8 +29,9 @@ function RecurringApp() {
   const [through, setThrough] = useState(today());
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState('');
-  const [notice, setNotice] = useState('');
   const [form, setForm] = useState<any>(null);
+  const canEdit = useAccount()?.canEdit;
+  const newPlan = () => setForm({ ...blankPlan, start_date: today() });
 
   const load = async () => {
     try {
@@ -55,18 +61,22 @@ function RecurringApp() {
   const generate = () => once(async () => {
     try {
       const created = await api.post('/api/accounting/recurring/run', { through });
-      setNotice(created ? `Created ${created} invoice(s).` : 'Nothing is due yet.');
       await load();
+      if (created) toast.success('Invoices created', { detail: `${created} ${created === 1 ? 'invoice is' : 'invoices are'} ready under Invoices` });
+      else toast.info('Nothing is due yet', { detail: `No plan has an invoice due through ${formatDate(through)}` });
     } catch (err: any) {
-      setNotice('');
       setError(err.message);
     }
   });
 
-  const setActive = (plan: any, is_active: boolean) => once(async () => {
+  const setActive = (plan: any, is_active: boolean): Promise<void> => once(async () => {
     try {
       await api.put(`/api/accounting/recurring/${plan.id}/active`, { is_active });
       await load();
+      toast.success(is_active ? 'Plan resumed' : 'Plan paused', {
+        detail: is_active ? `${plan.name} creates invoices again` : `${plan.name} won't create invoices until you resume it`,
+        action: { label: 'Undo', onClick: () => { setActive(plan, !is_active); } }
+      });
     } catch (err: any) {
       setError(err.message);
     }
@@ -75,15 +85,11 @@ function RecurringApp() {
   return (
     <div className="stack">
       <AccountingNav />
-      <div className="page-head">
-        <h1>Recurring invoices</h1>
-        <button className="primary" onClick={() => setForm({ ...blankPlan, start_date: today() })}>New recurring invoice</button>
-      </div>
-
-      <p className="muted">Invoices are created when you run this. Nothing goes out by itself, and no email is sent.</p>
+      <PageHead title="Recurring invoices" line="Invoices are created when you run this. Nothing goes out by itself, and no email is sent.">
+        <button className="primary" onClick={newPlan}>New recurring invoice</button>
+      </PageHead>
 
       {error && <p className="error">{error}</p>}
-      {notice && <p className="notice">{notice}</p>}
 
       <div className="card">
         <div className="report-filters">
@@ -92,20 +98,24 @@ function RecurringApp() {
         <div className="form-actions"><button className="primary" disabled={!through} onClick={generate}>Create due invoices</button></div>
       </div>
 
-      <div className="card table-wrap">
-        {loading ? <p className="empty">Loading…</p> : (
+      {loading ? <SkeletonTable rows={4} columns={7} /> : plans.length === 0 ? (
+        <div className="card">
+          <EmptyState icon="clock" title="No recurring invoices yet" line="Set up a retainer or subscription once, and create each month's invoice in one click."
+            action={canEdit ? { label: 'New recurring invoice', onClick: newPlan } : undefined} />
+        </div>
+      ) : (
+        <div className="card table-wrap">
           <table>
-            <thead><tr><th>Name</th><th>Customer</th><th>Every</th><th>From</th><th>Created</th><th>Status</th><th /></tr></thead>
+            <thead><tr><th>Name</th><th>Customer</th><th>Every</th><th>From</th><th className="num">Created</th><th>Status</th><th /></tr></thead>
             <tbody>
-              {plans.length === 0 && <tr><td colSpan={7} className="empty">No recurring invoices yet</td></tr>}
               {plans.map((plan) => (
                 <tr key={plan.id}>
                   <td className="wrap">{plan.name}</td>
                   <td className="wrap">{plan.customer?.name}</td>
-                  <td>{plan.frequency}</td>
+                  <td>{FREQUENCIES[plan.frequency] || plan.frequency}</td>
                   <td>{formatDate(plan.start_date)}</td>
-                  <td>{plan.runs_done}</td>
-                  <td><span className="badge">{plan.is_active ? 'active' : 'paused'}</span></td>
+                  <td className="num">{plan.runs_done}</td>
+                  <td><StatusPill status={plan.is_active ? 'active' : 'paused'} /></td>
                   <td>
                     <div className="row-actions">
                       <button onClick={() => setForm({ ...plan, end_date: plan.end_date || '', cost_center_id: plan.cost_center_id || '' })}>Edit</button>
@@ -116,8 +126,8 @@ function RecurringApp() {
               ))}
             </tbody>
           </table>
-        )}
-      </div>
+        </div>
+      )}
 
       {form && <PlanForm initial={form} customers={customers} taxRates={taxRates} costCenters={costCenters} onClose={() => setForm(null)} onSaved={load} />}
     </div>
@@ -141,6 +151,7 @@ function PlanForm({ initial, customers, taxRates, costCenters, onClose, onSaved 
       try {
         await api.post('/api/accounting/recurring', form);
         await onSaved();
+        toast.success(form.id ? 'Plan saved' : 'Recurring invoice set up', { detail: `${form.name}, every ${(FREQUENCIES[form.frequency] || form.frequency).toLowerCase()}` });
         onClose();
       } catch (err: any) {
         setError(err.message);

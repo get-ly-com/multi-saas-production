@@ -3,6 +3,9 @@ import { useEffect, useState } from 'react';
 import AppShell from '@/components/AppShell';
 import AutomationForm, { Starters, blankRule, eventFor } from '@/components/AutomationForm';
 import CrmNav from '@/components/CrmNav';
+import EmptyState from '@/components/EmptyState';
+import { SkeletonTable } from '@/components/Skeleton';
+import { toast } from '@/components/Toast';
 import { api, formatDate } from '@/lib/api';
 import useSubmit from '@/lib/useSubmit';
 
@@ -18,7 +21,8 @@ function AutomationApp() {
   const [data, setData] = useState<any>(null);
   const [editing, setEditing] = useState<any>(null);
   const [error, setError] = useState('');
-  const [notice, setNotice] = useState('');
+  // Finished actions show as a toast
+  const setNotice = (message: string) => { if (message) toast.success(message.replace(/\.$/, '')); };
 
   const load = async () => {
     try {
@@ -56,7 +60,7 @@ function AutomationApp() {
     try {
       const { handled } = await api.post('/api/crm/automations/run', {});
       await load();
-      setNotice(`Checked now. ${handled} ${handled === 1 ? 'record' : 'records'} matched a time based rule.`);
+      toast.success('Checked now', { detail: `${handled} ${handled === 1 ? 'record' : 'records'} matched a time based rule.` });
     } catch (err: any) {
       setNotice('');
       setError(err.message);
@@ -77,7 +81,8 @@ function AutomationApp() {
       <p className="muted">Rules create tasks, send alerts and assign records for you. Alerts show under Alerts at the top of the page; nothing is emailed yet. Only owners and admins can change rules.</p>
 
       {error && <p className="error">{error}</p>}
-      {notice && <p className="notice">{notice}</p>}
+
+      {!data && !error && <SkeletonTable rows={4} columns={5} />}
 
       {data && (
         <>
@@ -90,7 +95,10 @@ function AutomationApp() {
             <table>
               <thead><tr><th>Rule</th><th>When</th><th>Does</th><th>Last ran</th><th className="num">30 days</th><th /></tr></thead>
               <tbody>
-                {data.rules.length === 0 && <tr><td colSpan={6} className="empty">No rules yet</td></tr>}
+                {data.rules.length === 0 && (
+                  <tr><td colSpan={6}><EmptyState compact icon="sparkle" title="No rules yet" line="Pick an example above, or make your own, and the busywork does itself."
+                    action={{ label: 'New rule', onClick: () => setEditing(blankRule) }} /></td></tr>
+                )}
                 {data.rules.map((rule: any) => (
                   <tr key={rule.id}>
                     <td className="wrap">{rule.name}{!rule.enabled && <span className="badge"> off</span>}</td>

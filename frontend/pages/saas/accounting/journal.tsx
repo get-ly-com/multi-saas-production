@@ -1,7 +1,11 @@
 import { FormEvent, useEffect, useState } from 'react';
 import AccountingNav from '@/components/AccountingNav';
-import AppShell from '@/components/AppShell';
+import { Amount, PageHead, StatusPill, styles } from '@/components/AccountingKit';
+import AppShell, { useAccount } from '@/components/AppShell';
+import EmptyState from '@/components/EmptyState';
 import Modal from '@/components/Modal';
+import { SkeletonTable } from '@/components/Skeleton';
+import { toast } from '@/components/Toast';
 import { api, formatDate, money, today } from '@/lib/api';
 import useSubmit from '@/lib/useSubmit';
 
@@ -10,7 +14,11 @@ const blankLine = { account_id: '', cost_center_id: '', debit: '', credit: '' };
 const SOURCE_LABELS: Record<string, string> = {
   invoice_payment: 'payment', invoice_cost: 'cost of sales', payroll_payment: 'wages paid', payroll_tax: 'payroll tax paid'
 };
-const sourceLabel = (source: string) => SOURCE_LABELS[source] || source.replace('_', ' ');
+const sourceLabel = (source: string) => {
+  const text = SOURCE_LABELS[source] || source.replace(/_/g, ' ');
+  return text.charAt(0).toUpperCase() + text.slice(1);
+};
+const cents = (value: unknown) => Math.round(Number(value || 0) * 100);
 
 export default function Journal() {
   return <AppShell><JournalApp /></AppShell>;
@@ -23,6 +31,7 @@ function JournalApp() {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState('');
   const [creating, setCreating] = useState(false);
+  const canEdit = useAccount()?.canEdit;
 
   const load = async () => {
     try {
@@ -52,6 +61,7 @@ function JournalApp() {
     try {
       await api.post(`/api/accounting/journal/${entry.id}/reverse`, {});
       await load();
+      toast.success('Entry reversed', { detail: `A new entry cancels out #${entry.entry_number}` });
     } catch (err: any) {
       setError(err.message);
     }
@@ -60,32 +70,35 @@ function JournalApp() {
   return (
     <div className="stack">
       <AccountingNav />
-      <div className="page-head">
-        <h1>Journal</h1>
+      <PageHead title="Journal" line="Every entry in your books, newest first. Add one by hand for adjustments the app doesn't post for you.">
         <button className="primary" onClick={() => setCreating(true)}>New journal entry</button>
-      </div>
+      </PageHead>
 
       {error && <p className="error">{error}</p>}
 
-      <div className="card table-wrap">
-        {loading ? <p className="empty">Loading…</p> : (
+      {loading ? <SkeletonTable rows={8} columns={6} /> : entries.length === 0 ? (
+        <div className="card">
+          <EmptyState icon="accounting" title="No journal entries yet" line="Invoices, bills and payments post here by themselves. Add an entry by hand for anything else."
+            action={canEdit ? { label: 'New journal entry', onClick: () => setCreating(true) } : undefined} />
+        </div>
+      ) : (
+        <div className="card table-wrap">
           <table>
             <thead>
               <tr><th>#</th><th>Date</th><th>Description</th><th>Account</th><th className="num">Debit</th><th className="num">Credit</th><th /></tr>
             </thead>
             <tbody>
-              {entries.length === 0 && <tr><td colSpan={7} className="empty">No journal entries yet</td></tr>}
               {entries.flatMap((entry) => entry.lines.map((line: any, index: number) => (
                 <tr key={line.id}>
                   <td>{index === 0 ? entry.entry_number : ''}</td>
                   <td>{index === 0 ? formatDate(entry.entry_date) : ''}</td>
                   <td className="wrap">
                     {index === 0 && <>{entry.memo} <span className="badge">{sourceLabel(entry.source_type)}</span></>}
-                    {index === 0 && entry.reversed && <> <span className="badge void">reversed</span></>}
+                    {index === 0 && entry.reversed && <> <StatusPill status="void" label="Reversed" /></>}
                   </td>
-                  <td>{line.account.code} {line.account.name}</td>
-                  <td className="num">{Number(line.debit) ? money(line.debit) : ''}</td>
-                  <td className="num">{Number(line.credit) ? money(line.credit) : ''}</td>
+                  <td><span className="muted">{line.account.code}</span> {line.account.name}</td>
+                  <td className="num"><Amount value={line.debit} blankZero /></td>
+                  <td className="num"><Amount value={line.credit} blankZero /></td>
                   <td>
                     {index === 0 && entry.source_type === 'manual' && !entry.reversal_of && !entry.reversed && (
                       <div className="row-actions"><button disabled={busy} onClick={() => reverse(entry)}>Reverse</button></div>
@@ -93,10 +106,16 @@ function JournalApp() {
                   </td>
                 </tr>
               )))}
+              <tr className={styles.totalRow}>
+                <td colSpan={4}>Total</td>
+                <td className="num"><Amount strong value={entries.reduce((sum, entry) => sum + entry.lines.reduce((inner: number, line: any) => inner + cents(line.debit), 0), 0) / 100} /></td>
+                <td className="num"><Amount strong value={entries.reduce((sum, entry) => sum + entry.lines.reduce((inner: number, line: any) => inner + cents(line.credit), 0), 0) / 100} /></td>
+                <td />
+              </tr>
             </tbody>
           </table>
-        )}
-      </div>
+        </div>
+      )}
 
       {creating && <EntryForm accounts={accounts} costCenters={costCenters} onClose={() => setCreating(false)} onSaved={load} />}
     </div>
@@ -133,6 +152,7 @@ function EntryForm({ accounts, costCenters, onClose, onSaved }: { accounts: any[
           }))
         });
         await onSaved();
+        toast.success('Entry posted', { detail: `${memo}, ${money(total('debit'))} on ${formatDate(date)}` });
         onClose();
       } catch (err: any) {
         setError(err.message);
@@ -165,7 +185,7 @@ function EntryForm({ accounts, costCenters, onClose, onSaved }: { accounts: any[
           ))}
         </div>
         <button type="button" onClick={() => setLines([...lines, blankLine])}>Add line</button>
-        <p>Debits {money(total('debit'))} · Credits {money(total('credit'))}</p>
+        <p>Debits <strong><Amount value={total('debit')} /></strong> · Credits <strong><Amount value={total('credit')} /></strong>{!balanced && total('debit') + total('credit') > 0 && <span className="muted"> · {money(Math.abs(total('debit') - total('credit')))} to balance</span>}</p>
         {error && <p className="error">{error}</p>}
         <div className="form-actions">
           <button className="primary" disabled={busy || !balanced}>Post entry</button>

@@ -1,6 +1,10 @@
 import { useEffect, useState } from 'react';
 import AnalyticsNav, { Sparkline } from '@/components/AnalyticsNav';
 import AppShell from '@/components/AppShell';
+import Icon from '@/components/Icon';
+import Skeleton from '@/components/Skeleton';
+import { toast } from '@/components/Toast';
+import a from '@/styles/analytics.module.css';
 import { api, formatDate, money, today } from '@/lib/api';
 import { downloadCsv } from '@/lib/csv';
 
@@ -38,14 +42,15 @@ function HistoryApp() {
       .catch((err) => setError(err.message));
   }, [days]);
 
-  if (!data) return <div className="stack"><AnalyticsNav />{error ? <p className="error">{error}</p> : <p className="empty">Loading…</p>}</div>;
+  if (!data) return <div className="stack"><AnalyticsNav />{error ? <p className="error">{error}</p> : <div className="chart-grid" aria-busy="true">{[0, 1, 2, 3].map((n) => <div key={n} className="card"><Skeleton width="55%" height={12} /><Skeleton width="40%" height={24} style={{ marginTop: 8 }} /><Skeleton height={60} radius={8} style={{ marginTop: 10 }} /></div>)}</div>}</div>;
 
   // Stored days plus today's live numbers at the end
   const points = [...data.days, { day: today(), numbers: data.today }];
   const show = (item: typeof NUMBERS[number], value: number) =>
     (item.money ? money(value, data.currency) : Number(value).toLocaleString());
 
-  const download = () => downloadCsv(`daily-numbers-${today()}.csv`, [
+  const download = () => { saveCsv(); toast.success('CSV downloaded'); };
+  const saveCsv = () => downloadCsv(`daily-numbers-${today()}.csv`, [
     ['Day', ...NUMBERS.map((item) => item.label)],
     ...points.map((point: any) => [point.day, ...NUMBERS.map((item) => Number(point.numbers[item.key] ?? 0))])
   ]);
@@ -67,7 +72,7 @@ function HistoryApp() {
               {RANGES.map((value) => <option key={value} value={value}>Last {value} days</option>)}
             </select>
           </label>
-          <button onClick={download}>Download CSV</button>
+          <button onClick={download}><Icon name="import" size={14} />Download CSV</button>
         </div>
       </div>
       {error && <p className="error">{error}</p>}
@@ -83,8 +88,9 @@ function HistoryApp() {
               <div className="stat-label">{item.label}</div>
               <div className="stat-value">{show(item, now)}</div>
               {series.length > 1 && (
-                <div className="muted">
-                  {moved === 0 ? 'No change' : `${moved > 0 ? 'Up' : 'Down'} ${show(item, Math.abs(moved))}`} since {formatDate(series[0].day)}
+                <div className={a.tileFoot}>
+                  <span className={a.delta}>{moved === 0 ? 'No change' : `${moved > 0 ? '↑' : '↓'} ${show(item, Math.abs(moved))}`}</span>
+                  since {formatDate(series[0].day)}
                 </div>
               )}
               <Sparkline points={series} label={`${item.label} over the last ${days} days`} />

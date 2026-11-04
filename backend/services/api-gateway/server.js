@@ -768,17 +768,22 @@ const serviceRoutes = [
   { path: '/api/social-media', service: 'social-media-service', port: 3008 },
   { path: '/api/analytics', service: 'analytics-service', port: 3010 },
   { path: '/api/integration', service: 'integration-service', port: 3011 },
+  // The Business Brain. BRAIN_SERVICE_URL overrides the private address (for example http://brain-service.railway.internal:3013)
+  { path: '/api/brain', service: 'brain-service', port: 3013, url: process.env.BRAIN_SERVICE_URL },
 ];
 
 const serviceHost = (service) =>
   process.env.NODE_ENV === 'production' ? `${service}.railway.internal` : 'localhost';
 
+const serviceUrlOf = ({ service, port, url }) => (url || `http://${serviceHost(service)}:${port}`).replace(/\/+$/, '');
+
 // Connections to the services are reused instead of opened for every request
 const serviceAgent = new http.Agent({ keepAlive: true, maxSockets: 50 });
 
 // Setup proxies
-serviceRoutes.forEach(({ path, service, port }) => {
-  const serviceUrl = `http://${serviceHost(service)}:${port}`;
+serviceRoutes.forEach((route) => {
+  const { path, service } = route;
+  const serviceUrl = serviceUrlOf(route);
 
   app.use(path, requireUser, requireTenant, httpProxy(serviceUrl, {
     // Bank and contact imports can be up to 2 MB
@@ -812,9 +817,10 @@ app.get('/health', (req, res) => {
 app.get('/status', requireUser, async (req, res) => {
   const statuses = {};
 
-  for (const { service, port } of serviceRoutes) {
+  for (const route of serviceRoutes) {
+    const { service } = route;
     try {
-      const response = await fetch(`http://${serviceHost(service)}:${port}/health`, {
+      const response = await fetch(`${serviceUrlOf(route)}/health`, {
         signal: AbortSignal.timeout(2000)
       });
       statuses[service] = response.ok ? 'up' : 'down';

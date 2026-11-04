@@ -1,13 +1,20 @@
 import Link from 'next/link';
-import { useEffect, useState } from 'react';
+import { DragEvent, useEffect, useRef, useState } from 'react';
 import AppShell from '@/components/AppShell';
 import { NextActivity, PlanForm, dueState } from '@/components/ActivityForms';
 import BulkBar, { useSelection } from '@/components/BulkBar';
+import { celebrate } from '@/components/Celebrate';
 import CrmNav from '@/components/CrmNav';
 import { DealForm, LostForm, useTeam } from '@/components/CrmForms';
+import { RecordDrawer, openInDrawer } from '@/components/CrmRecord';
+import EmptyState from '@/components/EmptyState';
+import Skeleton, { SkeletonTable } from '@/components/Skeleton';
 import { TagChips, TagFilter, tagNames, useTags } from '@/components/Tags';
+import { toast } from '@/components/Toast';
 import { api, formatDate, money, today } from '@/lib/api';
 import { downloadCsv } from '@/lib/csv';
+import { plural } from '@/lib/format';
+import styles from '@/styles/crm.module.css';
 
 export default function Pipeline() {
   return <AppShell><PipelineApp /></AppShell>;
@@ -32,8 +39,11 @@ function PipelineApp() {
   const [signals, setSignals] = useState<Record<string, any>>({});
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState('');
-  const [notice, setNotice] = useState('');
   const [adding, setAdding] = useState(false);
+  const [opened, setOpened] = useState<any>(null);
+  const [over, setOver] = useState('');
+  const [landed, setLanded] = useState('');
+  const cards = useRef<Record<string, HTMLDivElement | null>>({});
   const [losing, setLosing] = useState<any>(null);
   const [planning, setPlanning] = useState<any>(null);
   const [dragged, setDragged] = useState('');
@@ -97,15 +107,57 @@ function PipelineApp() {
 
   const ownerName = (id: string) => members.find(({ user_id }) => user_id === id)?.email || (id ? 'Former member' : 'Unassigned');
 
+  // Show the move straight away, then save it. A failed save puts the card back.
+  const place = (dealId: string, stage: any) =>
+    setDeals((rows) => rows.map((row) => (row.id === dealId ? { ...row, stage_id: stage.id, stage: { ...row.stage, ...stage } } : row)));
+
   const move = async (deal: any, stageId: string) => {
     if (deal.stage_id === stageId) return;
-    if (stages.find(({ id }) => id === stageId)?.kind === 'lost') return setLosing({ deal, stageId });
+    const target = stages.find(({ id }) => id === stageId);
+    if (!target) return;
+    if (target.kind === 'lost') return setLosing({ deal, stageId });
+    const before = stages.find(({ id }) => id === deal.stage_id) || deal.stage;
+    place(deal.id, target);
+    setLanded(deal.id);
     try {
       await api.put(`/api/crm/deals/${deal.id}`, { stage_id: stageId });
+      const undo = before && before.kind !== 'lost' ? {
+        label: 'Undo',
+        onClick: async () => {
+          try {
+            place(deal.id, before);
+            await api.put(`/api/crm/deals/${deal.id}`, { stage_id: before.id });
+          } catch (err: any) {
+            toast.error('Could not undo', { detail: err.message });
+          }
+          await load();
+        }
+      } : undefined;
+      if (target.kind === 'won' && before?.kind !== 'won') {
+        celebrate({ from: cards.current[deal.id] });
+        toast.success('Deal won', { detail: `${deal.title}, ${money(deal.value)}. Lovely work.`, action: undo });
+      } else {
+        toast.info(`Moved to ${target.name}`, { detail: deal.title, action: undo });
+      }
       await load();
     } catch (err: any) {
-      setError(err.message);
+      toast.error('Could not move the deal', { detail: err.message });
+      await load();
     }
+  };
+
+  const dropOn = (event: DragEvent, stageId: string) => {
+    event.preventDefault();
+    const id = event.dataTransfer.getData('text/plain') || dragged;
+    const deal = deals.find((row) => row.id === id);
+    setOver('');
+    setDragged('');
+    if (deal) move(deal, stageId);
+  };
+
+  const lostSaved = async () => {
+    toast.info('Marked as lost', { detail: 'Thanks for noting why. It makes the reports more useful.' });
+    await load();
   };
 
   const exportCsv = () => {
@@ -128,7 +180,14 @@ function PipelineApp() {
     <div className="stack">
       <CrmNav />
       <div className="page-head">
-        <h1>Pipeline</h1>
+        <div>
+          <h1>Pipeline</h1>
+          {!loading && pipeline && (
+            <p className="muted">
+              {plural(inPipeline.filter((deal) => deal.stage?.kind === 'open').length, 'open deal')} worth {money(inPipeline.filter((deal) => deal.stage?.kind === 'open').reduce((sum, deal) => sum + Number(deal.value || 0), 0))}
+            </p>
+          )}
+        </div>
         <div className="row-actions">
           <div className="tabs" role="group" aria-label="Show as">
             <button type="button" className={view === 'board' ? 'active' : ''} onClick={() => changeView('board')}>Board</button>
@@ -177,46 +236,98 @@ function PipelineApp() {
       </div>
 
       {error && <p className="error">{error}</p>}
-      {notice && <p className="notice">{notice}</p>}
 
-      {loading ? <p className="empty">Loading…</p> : view === 'board' ? (
-        <div className="board" style={{ gridTemplateColumns: `repeat(${stages.length}, minmax(190px, 1fr))` }}>
+      {loading ? (
+        view === 'board' ? (
+          <div className={styles.board} style={{ gridTemplateColumns: 'repeat(4, minmax(220px, 1fr))' }} aria-busy="true">
+            {[3, 2, 2, 1].map((cards, n) => (
+              <div className={styles.column} key={n}>
+                <div className={styles.columnHead}><Skeleton width={80} height={12} /><Skeleton width={56} height={12} /></div>
+                {Array.from({ length: cards }, (_, c) => (
+                  <div className={styles.dealCard} key={c} style={{ cursor: 'default' }}>
+                    <Skeleton width="75%" height={13} /><Skeleton width="40%" height={12} /><Skeleton width="55%" height={10} />
+                  </div>
+                ))}
+              </div>
+            ))}
+          </div>
+        ) : <SkeletonTable rows={6} columns={6} />
+      ) : !pipeline ? (
+        <div className="card">
+          <EmptyState icon="deal" title="No pipeline yet" line="Set up the stages your deals move through, and the board appears here."
+            action={{ label: 'Set up a pipeline', href: '/saas/crm/settings' }} />
+        </div>
+      ) : view === 'board' && inPipeline.length === 0 ? (
+        <div className="card">
+          <EmptyState icon="deal" title="No deals yet" line="Add your first deal and drag it along as it moves forward."
+            action={{ label: 'New deal', onClick: () => setAdding(true) }} />
+        </div>
+      ) : view === 'board' ? (
+        <div className={styles.board} style={{ gridTemplateColumns: `repeat(${stages.length}, minmax(220px, 1fr))` }}>
           {stages.map((stage) => {
             const stageDeals = shown.filter((deal) => deal.stage_id === stage.id);
             const total = stageDeals.reduce((sum, deal) => sum + Number(deal.value || 0), 0);
+            const isOver = over === stage.id && !!dragged;
             return (
               <div
-                className="column"
+                className={`${styles.column} ${stage.kind === 'won' ? styles.won : stage.kind === 'lost' ? styles.lost : ''} ${isOver ? styles.isOver : ''}`}
                 key={stage.id}
-                onDragOver={(event) => event.preventDefault()}
-                onDrop={() => {
-                  const deal = deals.find(({ id }) => id === dragged);
-                  if (deal) move(deal, stage.id);
-                  setDragged('');
+                aria-label={`${stage.name}, ${plural(stageDeals.length, 'deal')}, ${money(total)}`}
+                onDragEnter={(event) => { event.preventDefault(); setOver(stage.id); }}
+                onDragOver={(event) => { event.preventDefault(); event.dataTransfer.dropEffect = 'move'; if (over !== stage.id) setOver(stage.id); }}
+                onDragLeave={(event) => {
+                  if (!event.currentTarget.contains(event.relatedTarget as Node | null)) setOver((current) => (current === stage.id ? '' : current));
                 }}
+                onDrop={(event) => dropOn(event, stage.id)}
               >
-                <div className="column-head"><span>{stage.name}</span><span>{money(total)}</span></div>
+                <div className={styles.columnHead}>
+                  <span className={styles.columnName}><span className={styles.dot} aria-hidden="true" /><span>{stage.name}</span></span>
+                  <span>
+                    <span className={styles.columnTotal}>{money(total)}</span>
+                    <span className={styles.columnCount}> · {stageDeals.length}</span>
+                  </span>
+                </div>
+                {stageDeals.length === 0 && (
+                  <div className={styles.dropHint}>
+                    {isOver ? (stage.kind === 'won' ? 'Drop to mark it won' : stage.kind === 'lost' ? 'Drop to mark it lost' : 'Drop here') : 'No deals here'}
+                  </div>
+                )}
                 {stageDeals.map((deal) => {
                   const signal = signals[deal.id];
                   return (
-                    <div className={`deal ${signal?.stale ? 'stale' : ''}`} key={deal.id} draggable onDragStart={() => setDragged(deal.id)}>
-                      <div className="deal-title"><Link href={`/saas/crm/deal/${deal.id}`}>{deal.title}</Link></div>
-                      <div className="deal-meta">{money(deal.value)}{deal.contact ? ` · ${deal.contact.name}` : ''}</div>
+                    <div
+                      key={deal.id}
+                      ref={(node) => { cards.current[deal.id] = node; }}
+                      className={`${styles.dealCard} ${signal?.stale ? styles.isStale : ''} ${dragged === deal.id ? styles.isDragging : ''} ${landed === deal.id ? styles.justLanded : ''}`}
+                      draggable
+                      onDragStart={(event) => {
+                        event.dataTransfer.setData('text/plain', deal.id);
+                        event.dataTransfer.effectAllowed = 'move';
+                        setDragged(deal.id);
+                      }}
+                      onDragEnd={() => { setDragged(''); setOver(''); }}
+                      onAnimationEnd={() => landed === deal.id && setLanded('')}
+                    >
+                      <Link href={`/saas/crm/deal/${deal.id}`} className={styles.dealTitle} draggable={false} onClick={openInDrawer(() => setOpened(deal))}>{deal.title}</Link>
+                      <div className={styles.dealMeta}>
+                        <span className={styles.dealValue}>{money(deal.value)}</span>
+                        {deal.contact && <span>{deal.contact.name}</span>}
+                      </div>
                       {deal.expected_close && (
-                        <div className="deal-meta">
-                          <span className={deal.expected_close < today() && stage.kind === 'open' ? 'late' : ''}>Close {formatDate(deal.expected_close)}</span>
+                        <div className={styles.dealMeta}>
+                          <span className={deal.expected_close < today() && stage.kind === 'open' ? 'late' : ''}>Closes {formatDate(deal.expected_close)}</span>
                         </div>
                       )}
                       <TagChips ids={deal.tags} tags={tags} />
                       {stage.kind === 'open' && (
-                        <div className="deal-meta">
+                        <div className={styles.dealMeta}>
                           {signal?.next
                             ? <NextActivity activity={signal.next} />
                             : <button type="button" className="link" onClick={() => setPlanning(deal)}>Plan an activity</button>}
                         </div>
                       )}
-                      {signal?.stale && <div className="deal-meta stale-note">No progress for {signal.idle_days} days</div>}
-                      <select aria-label={`Stage of ${deal.title}`} value={deal.stage_id} onChange={(e) => move(deal, e.target.value)}>
+                      {signal?.stale && <div className="stale-note">No progress for {signal.idle_days} days</div>}
+                      <select className={styles.dealStage} aria-label={`Stage of ${deal.title}`} value={deal.stage_id} onChange={(e) => move(deal, e.target.value)}>
                         {stages.map((option) => <option key={option.id} value={option.id}>{option.name}</option>)}
                       </select>
                     </div>
@@ -229,7 +340,7 @@ function PipelineApp() {
       ) : (
         <>
           <BulkBar entity="deal" selected={selection.selected} onClear={selection.clear} tags={tags} members={members} stages={bulkStages}
-            onDone={async (message) => { setNotice(message); await load(); }} />
+            onDone={async (message) => { toast.success('Done', { detail: message }); await load(); }} />
           <div className="card table-wrap">
             <table>
               <thead>
@@ -239,14 +350,20 @@ function PipelineApp() {
                 </tr>
               </thead>
               <tbody>
-                {listed.length === 0 && <tr><td colSpan={9} className="empty">{inPipeline.length ? 'No matches' : 'No deals yet'}</td></tr>}
+                {listed.length === 0 && (
+                  <tr><td colSpan={9}>
+                    {inPipeline.length
+                      ? <EmptyState compact icon="search" title="No deals match" line="Try a different search or clear a filter." />
+                      : <EmptyState compact icon="deal" title="No deals yet" line="Add your first deal to start your pipeline." action={{ label: 'New deal', onClick: () => setAdding(true) }} />}
+                  </td></tr>
+                )}
                 {listed.map((deal) => {
                   const signal = signals[deal.id];
                   return (
                     <tr key={deal.id} className={`${selection.has(deal.id) ? 'picked' : ''} ${signal?.stale ? 'stale' : ''}`}>
                       <td className="pick"><input type="checkbox" aria-label={`Select ${deal.title}`} checked={selection.has(deal.id)} onChange={() => selection.toggle(deal.id)} /></td>
                       <td className="wrap">
-                        <Link href={`/saas/crm/deal/${deal.id}`}>{deal.title}</Link>
+                        <Link href={`/saas/crm/deal/${deal.id}`} className={styles.rowOpen} onClick={openInDrawer(() => setOpened(deal))}>{deal.title}</Link>
                         {signal?.stale && <div className="stale-note">No progress for {signal.idle_days} days</div>}
                       </td>
                       <td>{deal.stage?.name}{deal.stage?.kind === 'lost' && deal.lost_reason ? <div className="muted">{deal.lost_reason}</div> : null}</td>
@@ -270,8 +387,9 @@ function PipelineApp() {
       )}
 
       {adding && <DealForm onClose={() => setAdding(false)} onSaved={load} />}
-      {losing && <LostForm deal={losing.deal} stageId={losing.stageId} onClose={() => setLosing(null)} onSaved={load} />}
-      {planning && <PlanForm links={{ deal_id: planning.id }} onClose={() => setPlanning(null)} onSaved={load} />}
+      {losing && <LostForm deal={losing.deal} stageId={losing.stageId} onClose={() => setLosing(null)} onSaved={lostSaved} />}
+      {planning && <PlanForm links={{ deal_id: planning.id }} onClose={() => setPlanning(null)} onSaved={async () => { toast.success('Planned', { detail: planning.title }); await load(); }} />}
+      <RecordDrawer kind="deal" record={opened} onClose={() => setOpened(null)} onChanged={load} ownerName={ownerName} tags={tags} />
     </div>
   );
 }

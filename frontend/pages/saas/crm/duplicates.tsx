@@ -2,6 +2,9 @@ import Link from 'next/link';
 import { useEffect, useState } from 'react';
 import AppShell from '@/components/AppShell';
 import CrmNav from '@/components/CrmNav';
+import { toast } from '@/components/Toast';
+import EmptyState from '@/components/EmptyState';
+import { SkeletonTable } from '@/components/Skeleton';
 import { api } from '@/lib/api';
 
 const REASONS: Record<string, string> = { email: 'Same email', phone: 'Same phone', name: 'Same name' };
@@ -13,7 +16,7 @@ export default function Duplicates() {
 function DuplicatesApp() {
   const [data, setData] = useState<any>(null);
   const [error, setError] = useState('');
-  const [notice, setNotice] = useState('');
+
 
   const load = async () => {
     try {
@@ -35,10 +38,9 @@ function DuplicatesApp() {
       for (const other of others) {
         await api.post(`/api/crm/${kind}/${keep.id}/merge`, { drop_id: other.id });
       }
-      setNotice(`Merged into ${keep.name}.`);
+      toast.success(`Merged into ${keep.name}`, { detail: `${others.length} ${others.length === 1 ? 'record' : 'records'} combined. Their timelines moved across.` });
     } catch (err: any) {
-      setNotice('');
-      setError(err.message);
+      toast.error('Could not merge', { detail: err.message });
     }
     await load().catch(() => null);
   };
@@ -48,11 +50,20 @@ function DuplicatesApp() {
   return (
     <div className="stack">
       <CrmNav />
-      <h1>Duplicates</h1>
+      <div className="page-head">
+        <div>
+          <h1>Duplicates</h1>
+          <p className="muted">People who look like they're in here twice. Keep the best one and merge the rest into it.</p>
+        </div>
+      </div>
       {error && <p className="error">{error}</p>}
-      {notice && <p className="notice">{notice}</p>}
-      {!data && !error && <p className="empty">Loading…</p>}
-      {empty && <div className="card"><p className="empty">No duplicates found</p></div>}
+      {!data && !error && <SkeletonTable rows={4} columns={4} />}
+      {empty && (
+        <div className="card">
+          <EmptyState tone="done" icon="inbox" title="No duplicates" line="Every contact and lead is here once. Nice and tidy."
+            action={{ label: 'See contacts', href: '/saas/crm/contacts' }} />
+        </div>
+      )}
 
       {data && data.contacts.length > 0 && <Groups title="Contacts" kind="contacts" path="contact" groups={data.contacts} merge={merge} />}
       {data && data.leads.length > 0 && <Groups title="Leads" kind="leads" path="lead" groups={data.leads} merge={merge} />}

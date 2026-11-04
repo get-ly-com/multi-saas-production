@@ -1,11 +1,19 @@
 import Link from 'next/link';
 import { FormEvent, useEffect, useState } from 'react';
+import {
+  Amount, CreateMenu, DrawerActions, DrawerHero, DrawerSection, Facts, FilterPills, PageHead, StatusPill,
+  isOverdue, rowOpener, shownStatus, styles
+} from '@/components/AccountingKit';
 import AccountingNav from '@/components/AccountingNav';
-import AppShell from '@/components/AppShell';
+import AppShell, { useAccount } from '@/components/AppShell';
 import CurrencyFields from '@/components/CurrencyFields';
+import Drawer from '@/components/Drawer';
+import EmptyState from '@/components/EmptyState';
 import Modal from '@/components/Modal';
 import PaymentForm from '@/components/PaymentForm';
 import ReceiptReader, { ReceiptFields } from '@/components/ReceiptReader';
+import { SkeletonTable } from '@/components/Skeleton';
+import { toast } from '@/components/Toast';
 import { api, formatDate, money, today } from '@/lib/api';
 import useSubmit from '@/lib/useSubmit';
 
@@ -14,11 +22,30 @@ const blankBill = { vendor_id: '', vendor_ref: '', bill_date: '', due_date: '', 
 
 const billBalance = (bill: any) => Number(bill.amount) - Number(bill.amount_paid);
 
+const payable = (bill: any) => bill.status === 'open' || bill.status === 'partial';
+
+const sharedCurrency = (rows: any[]) => {
+  const codes = new Set(rows.map((row) => row.currency || ''));
+  return codes.size === 1 ? Array.from(codes)[0] : null;
+};
+
+type Filter = 'all' | 'draft' | 'unpaid' | 'overdue' | 'paid';
+
+const FILTERS: Record<Filter, (bill: any) => boolean> = {
+  all: () => true,
+  draft: (bill) => bill.status === 'draft',
+  unpaid: (bill) => payable(bill),
+  overdue: (bill) => isOverdue(bill),
+  paid: (bill) => bill.status === 'paid'
+};
+
 export default function Bills() {
   return <AppShell><BillsApp /></AppShell>;
 }
 
 function BillsApp() {
+  const account = useAccount();
+  const canEdit = account?.canEdit !== false;
   const [bills, setBills] = useState<any[]>([]);
   const [vendors, setVendors] = useState<any[]>([]);
   const [accounts, setAccounts] = useState<any[]>([]);
@@ -30,7 +57,8 @@ function BillsApp() {
   const [error, setError] = useState('');
   const [form, setForm] = useState<any>(null);
   const [paying, setPaying] = useState<any>(null);
-  const [historyId, setHistoryId] = useState('');
+  const [openId, setOpenId] = useState('');
+  const [filter, setFilter] = useState<Filter>('all');
 
   const load = async () => {
     try {
@@ -64,96 +92,248 @@ function BillsApp() {
 
   const { busy, run: once } = useSubmit();
   // One action at a time, so a double click cannot repeat it
-  const run = (action: () => Promise<unknown>) => once(async () => {
+  const run = (action: () => Promise<unknown>, title?: string, detail?: string) => once(async () => {
     try {
       await action();
       await load();
+      if (title) toast.success(title, { detail });
     } catch (err: any) {
       setError(err.message);
+      toast.error('That did not work', { detail: err.message });
     }
   });
 
   const remove = (bill: any) => {
     if (window.confirm(`Delete ${bill.bill_number}? This can't be undone.`)) {
-      run(() => api.delete(`/api/accounting/bills/${bill.id}`));
+      setOpenId('');
+      run(() => api.delete(`/api/accounting/bills/${bill.id}`), `${bill.bill_number} deleted`, 'The draft is gone for good.');
     }
   };
 
   const voidBill = (bill: any) => {
     if (window.confirm(`Void ${bill.bill_number}? Its ledger entry will be reversed.`)) {
-      run(() => api.put(`/api/accounting/bills/${bill.id}`, { status: 'void' }));
+      run(() => api.put(`/api/accounting/bills/${bill.id}`, { status: 'void' }), `${bill.bill_number} voided`, 'Its ledger entry was reversed. You no longer owe it.');
     }
   };
 
+  const approve = (bill: any) =>
+    run(() => api.put(`/api/accounting/bills/${bill.id}`, { status: 'open' }), `${bill.bill_number} approved`, `${money(bill.amount, bill.currency)} is now ready to pay.`);
+
   const voidPayment = (payment: any) => {
     if (window.confirm('Void this payment? Its ledger entry will be reversed.')) {
-      run(() => api.post(`/api/accounting/payments/${payment.id}/void`, {}));
+      run(() => api.post(`/api/accounting/payments/${payment.id}/void`, {}), 'Payment voided', 'Its ledger entry was reversed and the bill is owed again.');
     }
   };
 
   const voidCredit = (credit: any) => {
     if (window.confirm(`Void ${credit.credit_number}? Its ledger entry will be reversed.`)) {
-      run(() => api.post(`/api/accounting/vendor-credits/${credit.id}/void`, {}));
+      run(() => api.post(`/api/accounting/vendor-credits/${credit.id}/void`, {}), `${credit.credit_number} voided`, 'Its ledger entry was reversed.');
     }
   };
 
-  const history = bills.find((bill) => bill.id === historyId);
+  const newBill = () => setForm({ ...blankBill, bill_date: today() });
+  const editBill = (bill: any) => setForm({ ...bill, vendor_ref: bill.vendor_ref || '', due_date: bill.due_date || '', notes: bill.notes || '' });
+  const fromDrawer = (open: () => void) => () => {
+    setOpenId('');
+    open();
+  };
+
+  const open = bills.find((bill) => bill.id === openId);
+  const shown = bills.filter(FILTERS[filter]);
+  const counts = (Object.keys(FILTERS) as Filter[]).reduce((all, key) => ({ ...all, [key]: bills.filter(FILTERS[key]).length }), {} as Record<Filter, number>);
+  const listCurrency = sharedCurrency(shown);
 
   return (
     <div className="stack">
       <AccountingNav />
-      <div className="page-head">
-        <h1>Bills</h1>
-        <button className="primary" onClick={() => setForm({ ...blankBill, bill_date: today() })}>New bill</button>
-      </div>
+      <PageHead title="Bills" line="What you owe your vendors, and when it is due.">
+        <CreateMenu
+          label="New bill"
+          onClick={newBill}
+          items={[
+            { label: 'Bill', icon: 'accounting', onClick: newBill },
+            { label: 'Purchase order', icon: 'quote', href: '/saas/accounting/purchase-orders?new=1' },
+            { label: 'Expense', icon: 'money', href: '/saas/accounting?create=expense' },
+            { label: 'Vendor', icon: 'contact', href: '/saas/accounting/vendors?new=1' }
+          ]}
+        />
+      </PageHead>
 
       {error && <p className="error">{error}</p>}
 
-      <div className="card table-wrap">
-        {loading ? <p className="empty">Loading…</p> : (
+      {!loading && bills.length > 0 && (
+        <FilterPills<Filter>
+          label="Show bills"
+          value={filter}
+          onChange={setFilter}
+          options={[
+            { id: 'all', label: 'All', count: counts.all },
+            { id: 'draft', label: 'Drafts', count: counts.draft },
+            { id: 'unpaid', label: 'To pay', count: counts.unpaid },
+            { id: 'overdue', label: 'Overdue', count: counts.overdue },
+            { id: 'paid', label: 'Paid', count: counts.paid }
+          ]}
+        />
+      )}
+
+      {loading ? <SkeletonTable rows={6} columns={6} /> : shown.length === 0 ? (
+        <div className="card">
+          {bills.length === 0 ? (
+            <EmptyState
+              icon="accounting"
+              title="No bills yet"
+              line={vendors.length === 0
+                ? 'Bills need a vendor. Add one, then snap the bill and we fill in the date and amount.'
+                : 'Add a bill when one arrives. Snap it and we fill in the date and amount.'}
+              action={canEdit ? (vendors.length === 0 ? { label: 'Add a vendor', href: '/saas/accounting/vendors?new=1' } : { label: 'New bill', onClick: newBill }) : undefined}
+            />
+          ) : filter === 'overdue' || filter === 'unpaid' ? (
+            <EmptyState tone="done" icon="paid" title={filter === 'overdue' ? 'No overdue bills' : 'Nothing left to pay'} line="Your vendors are all paid up." secondary={{ label: 'See all bills', onClick: () => setFilter('all') }} />
+          ) : (
+            <EmptyState icon="accounting" title={filter === 'draft' ? 'No drafts' : 'No paid bills yet'} line={filter === 'draft' ? 'Every bill has been approved.' : 'Bills show up here once you pay them.'} secondary={{ label: 'See all bills', onClick: () => setFilter('all') }} />
+          )}
+        </div>
+      ) : (
+        <div className="card table-wrap">
           <table>
             <thead>
               <tr><th>Bill</th><th>Vendor</th><th>Due</th><th>Status</th><th className="num">Amount</th><th className="num">Balance</th><th /></tr>
             </thead>
             <tbody>
-              {bills.length === 0 && <tr><td colSpan={7} className="empty">No bills yet</td></tr>}
-              {bills.map((bill) => (
-                <tr key={bill.id}>
-                  <td>{bill.bill_number}{bill.vendor_ref && <span className="muted"> · {bill.vendor_ref}</span>}</td>
+              {shown.map((bill) => (
+                <tr key={bill.id} {...rowOpener(() => setOpenId(bill.id))}>
+                  <td>
+                    <button type="button" className={`${styles.rowTitle} always`} onClick={() => setOpenId(bill.id)}>{bill.bill_number}</button>
+                    {bill.vendor_ref && <span className={styles.rowSub}>Their ref {bill.vendor_ref}</span>}
+                  </td>
                   <td className="wrap">{bill.vendor?.name}</td>
                   <td>{formatDate(bill.due_date)}</td>
-                  <td><span className={`badge ${bill.status}`}>{bill.status}</span></td>
-                  <td className="num">{money(bill.amount, bill.currency)}</td>
-                  <td className="num">{bill.status === 'void' || bill.status === 'draft' ? '—' : money(billBalance(bill), bill.currency)}</td>
+                  <td><StatusPill status={shownStatus(bill)} /></td>
+                  <td className="num"><Amount value={bill.amount} currency={bill.currency} /></td>
+                  <td className="num">
+                    {bill.status === 'void' || bill.status === 'draft'
+                      ? null
+                      : <Amount value={billBalance(bill)} currency={bill.currency} dim={billBalance(bill) <= 0} strong={isOverdue(bill)} />}
+                  </td>
                   <td>
                     <div className="row-actions">
-                      {bill.status === 'draft' && (
-                        <button onClick={() => run(() => api.put(`/api/accounting/bills/${bill.id}`, { status: 'open' }))}>Approve</button>
-                      )}
-                      {(bill.status === 'open' || bill.status === 'partial') && (
-                        <>
-                          <button onClick={() => setPaying(bill)}>Pay</button>
-                          <button onClick={() => setCrediting(bill)}>Vendor credit</button>
-                        </>
-                      )}
-                      {bill.payments.length + bill.vendor_credits.length > 0 && <button onClick={() => setHistoryId(bill.id)}>Payments</button>}
-                      {bill.status !== 'void' && (
-                        <button onClick={() => setForm({ ...bill, vendor_ref: bill.vendor_ref || '', due_date: bill.due_date || '', notes: bill.notes || '' })}>Edit</button>
-                      )}
-                      {bill.status === 'draft' && <button className="danger" onClick={() => remove(bill)}>Delete</button>}
-                      {bill.status === 'open' && <button className="danger" onClick={() => voidBill(bill)}>Void</button>}
+                      {bill.status === 'draft' && <button className="small" disabled={busy} onClick={() => approve(bill)}>Approve</button>}
+                      {payable(bill) && <button className="small" onClick={() => setPaying(bill)}>Pay</button>}
                     </div>
                   </td>
                 </tr>
               ))}
+              {listCurrency !== null && shown.length > 1 && (
+                <tr className={styles.totalRow}>
+                  <td colSpan={4}>Total of {shown.length} bills</td>
+                  <td className="num"><Amount value={shown.reduce((sum, bill) => sum + Number(bill.amount), 0)} currency={listCurrency || undefined} strong /></td>
+                  <td className="num"><Amount value={shown.filter((bill) => bill.status !== 'void' && bill.status !== 'draft').reduce((sum, bill) => sum + billBalance(bill), 0)} currency={listCurrency || undefined} strong /></td>
+                  <td />
+                </tr>
+              )}
             </tbody>
           </table>
-        )}
-      </div>
-
-      {vendors.length === 0 && !loading && (
-        <p className="muted">Bills need a vendor. <Link href="/saas/accounting/vendors">Add your first vendor</Link>.</p>
+        </div>
       )}
+
+      <Drawer
+        open={Boolean(open)}
+        title={open?.bill_number}
+        subtitle={open?.vendor?.name}
+        onClose={() => setOpenId('')}
+        footer={open && canEdit && (
+          <>
+            {open.status === 'draft' && <button className="primary" disabled={busy} onClick={() => approve(open)}>Approve bill</button>}
+            {payable(open) && <button className="primary" onClick={fromDrawer(() => setPaying(open))}>Pay bill</button>}
+          </>
+        )}
+      >
+        {open && (
+          <>
+            <DrawerHero
+              label={open.status === 'paid' ? 'Paid in full' : open.status === 'draft' ? 'Draft total' : 'Left to pay'}
+              value={<Amount value={open.status === 'paid' || open.status === 'draft' ? open.amount : open.status === 'void' ? 0 : billBalance(open)} currency={open.currency} />}
+              line={open.status === 'draft'
+                ? 'Approve it to add it to what you owe.'
+                : open.status === 'void' ? 'This bill was voided.'
+                : `${money(open.amount_paid, open.currency)} of ${money(open.amount, open.currency)} paid`}
+              pill={<StatusPill status={shownStatus(open)} />}
+              paidShare={open.status === 'draft' || open.status === 'void' || !Number(open.amount) ? undefined : Number(open.amount_paid) / Number(open.amount)}
+            />
+
+            <Facts items={[
+              ['Vendor', open.vendor?.name],
+              ["Vendor's number", open.vendor_ref],
+              ['Bill date', formatDate(open.bill_date)],
+              ['Due', open.due_date ? formatDate(open.due_date) : <span className="muted">No due date</span>],
+              ['Currency', Number(open.exchange_rate) !== 1 ? `${open.currency} at ${Number(open.exchange_rate)}` : null],
+              ['Notes', open.notes ? <span style={{ whiteSpace: 'pre-wrap' }}>{open.notes}</span> : null]
+            ]} />
+
+            {(open.line_items || []).length > 0 && (
+              <DrawerSection title="Lines">
+                <table className={styles.mini}>
+                  <tbody>
+                    {open.line_items.map((line: any, index: number) => (
+                      <tr key={index}>
+                        <td className="wrap">{line.description || <span className="muted">No description</span>}{line.quantity ? <span className={styles.rowSub}>{Number(line.quantity)} units</span> : null}</td>
+                        <td className="num"><Amount value={line.amount} currency={open.currency} /></td>
+                      </tr>
+                    ))}
+                    <tr className="total"><td>Total</td><td className="num"><Amount value={open.amount} currency={open.currency} strong /></td></tr>
+                  </tbody>
+                </table>
+              </DrawerSection>
+            )}
+
+            {open.payments.length + open.vendor_credits.length > 0 && (
+              <DrawerSection title="Payments and credits">
+                <table className={styles.mini}>
+                  <tbody>
+                    {open.payments.map((payment: any) => (
+                      <tr key={payment.id}>
+                        <td>
+                          {formatDate(payment.payment_date)}
+                          <span className={styles.rowSub}>{payment.account?.code} {payment.account?.name}{payment.reference ? ` · ${payment.reference}` : ''}</span>
+                        </td>
+                        <td className="num"><Amount value={payment.amount} currency={open.currency} dim={Boolean(payment.voided_at)} /></td>
+                        <td className="num">
+                          {payment.voided_at
+                            ? <StatusPill status="void" />
+                            : canEdit && <button className="small danger" disabled={busy} onClick={() => voidPayment(payment)}>Void</button>}
+                        </td>
+                      </tr>
+                    ))}
+                    {open.vendor_credits.map((credit: any) => (
+                      <tr key={credit.id}>
+                        <td className="wrap">
+                          {formatDate(credit.credit_date)}
+                          <span className={styles.rowSub}>{credit.credit_number}: {credit.reason}</span>
+                        </td>
+                        <td className="num"><Amount value={credit.amount} currency={open.currency} dim={Boolean(credit.voided_at)} /></td>
+                        <td className="num">
+                          {credit.voided_at
+                            ? <StatusPill status="void" />
+                            : canEdit && <button className="small danger" disabled={busy} onClick={() => voidCredit(credit)}>Void</button>}
+                        </td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </DrawerSection>
+            )}
+
+            {canEdit && open.status !== 'void' && (
+              <DrawerActions>
+                {payable(open) && <button onClick={fromDrawer(() => setCrediting(open))}>Vendor credit</button>}
+                <button onClick={fromDrawer(() => editBill(open))}>Edit</button>
+                {open.status === 'draft' && <button className="danger" disabled={busy} onClick={() => remove(open)}>Delete draft</button>}
+                {open.status === 'open' && <button className="danger" disabled={busy} onClick={() => voidBill(open)}>Void</button>}
+              </DrawerActions>
+            )}
+          </>
+        )}
+      </Drawer>
 
       {form && <BillForm initial={form} vendors={vendors} accounts={accounts} items={items} taxRates={taxRates} costCenters={costCenters} onClose={() => setForm(null)} onSaved={load} />}
       {paying && (
@@ -167,44 +347,6 @@ function BillsApp() {
         />
       )}
       {crediting && <VendorCreditForm bill={crediting} accounts={accounts} onClose={() => setCrediting(null)} onSaved={load} />}
-      {history && (
-        <Modal title={`Payments for ${history.bill_number}`} onClose={() => setHistoryId('')}>
-          <div className="table-wrap">
-            <table>
-              <thead><tr><th>Date</th><th>Account</th><th>Reference</th><th className="num">Amount</th><th /></tr></thead>
-              <tbody>
-                {history.payments.map((payment: any) => (
-                  <tr key={payment.id}>
-                    <td>{formatDate(payment.payment_date)}</td>
-                    <td>{payment.account?.code} {payment.account?.name}</td>
-                    <td>{payment.reference || '—'}</td>
-                    <td className="num">{money(payment.amount, history.currency)}</td>
-                    <td className="num">
-                      {payment.voided_at
-                        ? <span className="badge void">void</span>
-                        : <button className="danger" onClick={() => voidPayment(payment)}>Void</button>}
-                    </td>
-                  </tr>
-                ))}
-                {history.vendor_credits.map((credit: any) => (
-                  <tr key={credit.id}>
-                    <td>{formatDate(credit.credit_date)}</td>
-                    <td>{credit.account?.code} {credit.account?.name}</td>
-                    <td className="wrap">{credit.credit_number}: {credit.reason}</td>
-                    <td className="num">{money(credit.amount, history.currency)}</td>
-                    <td className="num">
-                      {credit.voided_at
-                        ? <span className="badge void">void</span>
-                        : <button className="danger" onClick={() => voidCredit(credit)}>Void</button>}
-                    </td>
-                  </tr>
-                ))}
-              </tbody>
-            </table>
-          </div>
-          <div className="form-actions"><button onClick={() => setHistoryId('')}>Close</button></div>
-        </Modal>
-      )}
     </div>
   );
 }
@@ -221,6 +363,7 @@ function VendorCreditForm({ bill, accounts, onClose, onSaved }: { bill: any; acc
     return run(async () => {
       try {
         await api.post('/api/accounting/vendor-credits', { bill_id: bill.id, ...form });
+        toast.success('Vendor credit saved', { detail: `${money(form.amount, bill.currency)} taken off ${bill.bill_number}.` });
         await onSaved();
         onClose();
       } catch (err: any) {
@@ -305,6 +448,9 @@ function BillForm({ initial, vendors, accounts, items, taxRates, costCenters, on
       try {
         if (form.id) await api.put(`/api/accounting/bills/${form.id}`, body);
         else await api.post('/api/accounting/bills', body);
+        const vendor = vendors.find(({ id }) => id === vendor_id)?.name;
+        if (form.id) toast.success('Bill saved', { detail: `${form.bill_number} is up to date.` });
+        else toast.success('Draft bill added', { detail: `${money(subtotal + tax, currency || undefined)} from ${vendor || 'your vendor'}. Approve it when you are ready to pay.` });
         await onSaved();
         onClose();
       } catch (err: any) {
@@ -372,7 +518,11 @@ function BillForm({ initial, vendors, accounts, items, taxRates, costCenters, on
           ))}
         </div>
         <button type="button" onClick={() => set('line_items', [...form.line_items, blankLine])}>Add line</button>
-        <p>Subtotal {money(subtotal, form.currency || undefined)} · Tax {money(tax, form.currency || undefined)} · Total: <strong>{money(subtotal + tax, form.currency || undefined)}</strong></p>
+        <div className="document-totals" style={{ margin: '12px 0 12px auto' }}>
+          <div><span className="muted">Subtotal</span><Amount value={subtotal} currency={form.currency || undefined} /></div>
+          <div><span className="muted">Tax</span><Amount value={tax} currency={form.currency || undefined} /></div>
+          <div className="due"><span>Total</span><Amount value={subtotal + tax} currency={form.currency || undefined} strong /></div>
+        </div>
         <label>Notes<textarea rows={2} value={form.notes} onChange={(e) => set('notes', e.target.value)} /></label>
         {error && <p className="error">{error}</p>}
         <div className="form-actions">

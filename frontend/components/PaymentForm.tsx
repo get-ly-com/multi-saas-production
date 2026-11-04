@@ -1,5 +1,7 @@
-import { FormEvent, useEffect, useState } from 'react';
+import { FormEvent, useEffect, useRef, useState } from 'react';
+import { celebrate } from '@/components/Celebrate';
 import Modal from '@/components/Modal';
+import { toast } from '@/components/Toast';
 import { api, money, today } from '@/lib/api';
 import useSubmit from '@/lib/useSubmit';
 
@@ -38,12 +40,23 @@ export default function PaymentForm({ target, label, balance, currency, onClose,
       .catch((err) => setError(err.message));
   }, []);
 
+  const button = useRef<HTMLButtonElement>(null);
   const { busy, run } = useSubmit();
   const submit = async (event: FormEvent) => {
     event.preventDefault();
     return run(async () => {
       try {
         await api.post('/api/accounting/payments', { ...target, ...form });
+        // Paying off the whole of an invoice is a real win; a part payment or a bill is routine
+        const settled = Math.round(Number(form.amount) * 100) >= Math.round(balance * 100);
+        if (target.invoice_id && settled) {
+          celebrate({ from: button.current });
+          toast.success(`${label} is paid`, { detail: `${money(form.amount, currency)} received. Nothing left to chase.` });
+        } else if (target.invoice_id) {
+          toast.success('Payment recorded', { detail: `${money(form.amount, currency)} on ${label}. ${money(balance - Number(form.amount), currency)} still to come.` });
+        } else {
+          toast.success(settled ? `${label} is paid` : 'Payment recorded', { detail: `${money(form.amount, currency)} paid${settled ? '' : `, ${money(balance - Number(form.amount), currency)} left to pay`}.` });
+        }
         await onSaved();
         onClose();
       } catch (err: any) {
@@ -73,7 +86,7 @@ export default function PaymentForm({ target, label, balance, currency, onClose,
         </div>
         {error && <p className="error">{error}</p>}
         <div className="form-actions">
-          <button disabled={busy} className="primary">Record payment</button>
+          <button ref={button} disabled={busy} className="primary">Record payment</button>
           <button type="button" onClick={onClose}>Cancel</button>
         </div>
       </form>

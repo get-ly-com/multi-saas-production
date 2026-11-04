@@ -7,9 +7,13 @@ import CrmNav from '@/components/CrmNav';
 import { TagChips, useTags } from '@/components/Tags';
 import { CompanyForm, ContactForm, DealForm } from '@/components/CrmForms';
 import { CustomValues } from '@/components/CustomFields';
+import { RecordHeader, RecordSkeleton, StatTile } from '@/components/CrmRecord';
+import EmptyState from '@/components/EmptyState';
+import { toast } from '@/components/Toast';
 import Timeline from '@/components/Timeline';
 import { api, money, queryId } from '@/lib/api';
 import useSubmit from '@/lib/useSubmit';
+import styles from '@/styles/crm.module.css';
 
 export default function Company() {
   return <AppShell><CompanyApp /></AppShell>;
@@ -50,6 +54,7 @@ function CompanyApp() {
     if (!window.confirm(`Delete ${company.name}? Its contacts, deals and timeline stay.`)) return;
     try {
       await api.delete(`/api/crm/companies/${id}`);
+      toast.success('Company deleted', { detail: company.name });
       router.push('/saas/crm/companies');
     } catch (err: any) {
       setError(err.message);
@@ -63,32 +68,43 @@ function CompanyApp() {
     <div className="stack">
       <CrmNav />
       {error && <p className="error">{error}</p>}
+      {!company && !error && <RecordSkeleton />}
       {company && (
         <>
-          <div className="page-head">
-            <div>
-              <h1>{company.name}</h1>
-              <TagChips ids={company.tags} tags={tags} />
-              <p className="muted">{[company.industry, company.website, company.phone].filter(Boolean).join(' · ')}</p>
-            </div>
-            <div className="row-actions">
-              <button onClick={() => setForm('contact')}>New contact</button>
-              <button onClick={() => setForm('deal')}>New deal</button>
-              <button onClick={() => setForm('edit')}>Edit</button>
-              <button disabled={busy} className="danger" onClick={remove}>Delete</button>
-            </div>
-          </div>
+          <RecordHeader
+            name={company.name}
+            square
+            line={company.industry}
+            chips={[
+              company.website && { icon: 'globe', label: company.website.replace(/^https?:\/\//, ''), href: /^https?:\/\//.test(company.website) ? company.website : `https://${company.website}`, external: true, title: 'Open the website' },
+              company.phone && { icon: 'phone', label: company.phone, href: `tel:${company.phone}`, external: true, title: 'Call' },
+              { icon: 'contact', label: `${contacts.length} ${contacts.length === 1 ? 'person' : 'people'}` },
+              { icon: 'deal', label: `${deals.length} ${deals.length === 1 ? 'deal' : 'deals'}` }
+            ]}
+            tags={company.tags?.length ? <TagChips ids={company.tags} tags={tags} /> : null}
+            actions={(
+              <>
+                <button onClick={() => setForm('contact')}>New contact</button>
+                <button onClick={() => setForm('edit')}>Edit</button>
+                <button disabled={busy} className="danger ghost" onClick={remove}>Delete</button>
+                <button className="primary" onClick={() => setForm('deal')}>New deal</button>
+              </>
+            )}
+          />
           <div className="stats">
-            <div className="card"><div className="stat-label">Open deals</div><div className="stat-value">{money(openValue)}</div></div>
-            <div className="card"><div className="stat-label">Won so far</div><div className="stat-value">{money(wonValue)}</div></div>
+            <StatTile label="Open deals" icon="deal" value={money(openValue)} note={`${deals.filter((deal) => deal.stage?.kind === 'open').length} in progress`} />
+            <StatTile label="Won so far" icon="paid" tone="good" value={money(wonValue)} note={`${deals.filter((deal) => deal.stage?.kind === 'won').length} won`} />
           </div>
           {company.notes && <div className="card wrap">{company.notes}</div>}
           <CustomValues entity="company" values={company.custom} />
           <div className="card table-wrap">
-            <h2>People</h2>
+            <div className={styles.cardHead}><h2>People</h2></div>
             <table>
               <tbody>
-                {contacts.length === 0 && <tr><td className="empty">No contacts yet</td></tr>}
+                {contacts.length === 0 && (
+                  <tr><td><EmptyState compact icon="contact" title="No people yet" line="Add the people you talk to here."
+                    action={{ label: 'New contact', onClick: () => setForm('contact') }} /></td></tr>
+                )}
                 {contacts.map((contact) => (
                   <tr key={contact.id}>
                     <td className="wrap"><Link href={`/saas/crm/contact/${contact.id}`}>{contact.name}</Link></td>
@@ -100,10 +116,13 @@ function CompanyApp() {
             </table>
           </div>
           <div className="card table-wrap">
-            <h2>Deals</h2>
+            <div className={styles.cardHead}><h2>Deals</h2></div>
             <table>
               <tbody>
-                {deals.length === 0 && <tr><td className="empty">No deals yet</td></tr>}
+                {deals.length === 0 && (
+                  <tr><td><EmptyState compact icon="deal" title="No deals yet" line="Start a deal when there's something to sell."
+                    action={{ label: 'New deal', onClick: () => setForm('deal') }} /></td></tr>
+                )}
                 {deals.map((deal) => (
                   <tr key={deal.id}>
                     <td className="wrap"><Link href={`/saas/crm/deal/${deal.id}`}>{deal.title}</Link></td>
@@ -116,9 +135,9 @@ function CompanyApp() {
           </div>
           <Billing query={`company_id=${company.id}`} />
           <Timeline links={{ company_id: company.id }} />
-          {form === 'edit' && <CompanyForm initial={company} onClose={() => setForm('')} onSaved={load} />}
-          {form === 'contact' && <ContactForm initial={{ company_id: company.id }} onClose={() => setForm('')} onSaved={load} />}
-          {form === 'deal' && <DealForm initial={{ company_id: company.id }} onClose={() => setForm('')} onSaved={load} />}
+          {form === 'edit' && <CompanyForm initial={company} onClose={() => setForm('')} onSaved={async () => { toast.success('Saved'); await load(); }} />}
+          {form === 'contact' && <ContactForm initial={{ company_id: company.id }} onClose={() => setForm('')} onSaved={async () => { toast.success('Contact added'); await load(); }} />}
+          {form === 'deal' && <DealForm initial={{ company_id: company.id }} onClose={() => setForm('')} onSaved={async () => { toast.success('Deal added'); await load(); }} />}
         </>
       )}
     </div>

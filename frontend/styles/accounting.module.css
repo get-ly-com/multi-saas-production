@@ -1,0 +1,102 @@
+/* Accounting only. Tokens come from globals.css, so dark mode works without extra rules. */
+
+/* Money */
+.amount { font-variant-numeric: tabular-nums; white-space: nowrap; }
+.negative { color: var(--danger); }
+.strong { font-weight: 650; color: var(--text); }
+.dim { color: var(--muted); }
+
+/* Page header: title and a muted line on the left, actions on the right */
+.head { display: flex; justify-content: space-between; align-items: center; gap: var(--s-3); flex-wrap: wrap; }
+.headText { display: grid; gap: 4px; min-width: 0; }
+.headText h1 { margin: 0; }
+.headText p { margin: 0; }
+.headActions { display: flex; gap: var(--s-2); align-items: center; flex-wrap: wrap; }
+
+/* Split "New invoice" + chevron button */
+.split { display: inline-flex; align-items: stretch; }
+.split > button:first-child { border-top-right-radius: 0; border-bottom-right-radius: 0; }
+.split > button.splitToggle {
+  border-top-left-radius: 0; border-bottom-left-radius: 0; padding-left: 8px; padding-right: 8px;
+  border-left: 1px solid color-mix(in srgb, var(--accent-text) 28%, transparent);
+}
+.menuHint { margin-left: auto; color: var(--faint); font-size: var(--text-xs); }
+
+/* Clickable list rows that open a drawer */
+.rowLink { cursor: pointer; }
+.rowLink:focus-within td { background: var(--surface-2); }
+.rowTitle { font-weight: 550; color: var(--text); padding: 0; background: none; border: 0; box-shadow: none; cursor: pointer; text-align: left; }
+.rowTitle:hover { color: var(--link); text-decoration: underline; text-underline-offset: 2px; }
+.rowSub { display: block; color: var(--muted); font-size: var(--text-xs); margin-top: 2px; }
+
+/* Filter pills above a list */
+.filters { display: flex; gap: 6px; flex-wrap: wrap; align-items: center; }
+.filter {
+  display: inline-flex; align-items: center; gap: 6px; padding: 5px 12px; border-radius: var(--r-full);
+  border: 1px solid var(--border); background: var(--surface); color: var(--text-2); font-weight: 500; font-size: var(--text-sm);
+  box-shadow: none; cursor: pointer;
+}
+.filter:hover { background: var(--hover); color: var(--text); }
+.filterActive, .filterActive:hover { background: var(--accent-soft); border-color: transparent; color: var(--link); }
+.filterCount { font-variant-numeric: tabular-nums; color: var(--muted); font-size: var(--text-xs); }
+.filterActive .filterCount { color: inherit; opacity: 0.8; }
+
+/* Drawer contents */
+.hero { display: grid; gap: 6px; padding-bottom: var(--s-4); border-bottom: 1px solid var(--border); margin-bottom: var(--s-4); }
+.heroTop { display: flex; justify-content: space-between; align-items: center; gap: var(--s-3); }
+.heroLabel { color: var(--muted); font-size: var(--text-xs); font-weight: 550; letter-spacing: 0.02em; text-transform: uppercase; }
+.heroValue { font-size: var(--text-3xl); font-weight: 650; letter-spacing: -0.02em; font-variant-numeric: tabular-nums; line-height: 1.1; }
+.heroLine { color: var(--text-2); font-variant-numeric: tabular-nums; }
+.progress { height: 6px; border-radius: var(--r-full); background: var(--sunken); overflow: hidden; margin-top: 6px; }
+.progress > span { display: block; height: 100%; background: var(--good); border-radius: inherit; transition: width var(--dur-3) var(--ease-out); }
+
+.facts { display: grid; grid-template-columns: max-content 1fr; gap: 8px 20px; margin: 0 0 var(--s-5); }
+.facts dt { color: var(--muted); }
+.facts dd { margin: 0; color: var(--text); min-width: 0; overflow-wrap: anywhere; }
+
+.section { margin-top: var(--s-5); }
+.section h3 { font-size: var(--text-sm); font-weight: 600; color: var(--text-2); margin: 0 0 var(--s-2); }
+.mini { width: 100%; border-collapse: collapse; }
+.mini td, .mini th { padding: 7px 0; border-bottom: 1px solid var(--border); background: none !important; }
+.mini th { font-size: var(--text-xs); color: var(--muted); font-weight: 550; text-align: left; }
+.mini td + td, .mini th + th { padding-left: 12px; }
+.mini tr:last-child td { border-bottom: 0; }
+.mini .total td { border-top: 1px solid var(--border-strong); font-weight: 650; }
+
+.actions { display: flex; flex-wrap: wrap; gap: 8px; margin-top: var(--s-5); padding-top: var(--s-4); border-top: 1px solid var(--border); }
+.footSpacer { margin-right: auto; display: inline-flex; align-items: center; gap: 6px; }
+
+/* Financial statements: section headings, indented accounts, subtotals, right-aligned numbers */
+.statement { width: 100%; border-collapse: collapse; }
+.statement td, .statement th { border-bottom: 0; padding: 6px 12px; background: none !important; }
+.statement th { color: var(--muted); font-size: var(--text-xs); font-weight: 550; text-transform: uppercase; letter-spacing: 0.03em; border-bottom: 1px solid var(--border); }
+.statement td:not(:first-child), .statement th:not(:first-child) { text-align: right; font-variant-numeric: tabular-nums; white-space: nowrap; width: 1%; }
+.statement .heading td {
+  padding-top: 22px; padding-bottom: 6px; font-weight: 650; color: var(--text);
+  font-size: var(--text-xs); text-transform: uppercase; letter-spacing: 0.05em;
+}
+.statement .heading:first-child td { padding-top: 10px; }
+.statement .account td:first-child { padding-left: 28px; color: var(--text-2); }
+.statement .account td:first-child a { color: var(--text-2); }
+.statement .account td:first-child a:hover { color: var(--link); }
+.statement .account:hover td { background: var(--surface-2) !important; }
+.statement .code { color: var(--faint); margin-right: 8px; font-variant-numeric: tabular-nums; }
+.statement .subtotal td { font-weight: 600; color: var(--text); border-top: 1px solid var(--border); }
+.statement .subtotal td:first-child { padding-left: 12px; }
+.statement .grand td {
+  font-weight: 700; color: var(--text); font-size: var(--text-md);
+  border-top: 1px solid var(--border-strong); border-bottom: 3px double var(--border-strong); padding-top: 10px; padding-bottom: 10px;
+}
+.statement .spacer td { padding: 6px 0; }
+.statement .empty td { color: var(--muted); padding-left: 28px; font-style: normal; }
+
+.statementHead { display: flex; justify-content: space-between; align-items: flex-end; gap: var(--s-3); flex-wrap: wrap; margin-bottom: var(--s-3); }
+.statementHead h2 { margin: 0; }
+.statementHead p { margin: 2px 0 0; }
+
+/* A total row in an ordinary table */
+.totalRow td { font-weight: 650; color: var(--text); border-top: 1px solid var(--border-strong); background: var(--surface-2); }
+
+@media print {
+  .statement .account:hover td { background: none !important; }
+}

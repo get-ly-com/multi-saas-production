@@ -2,6 +2,7 @@ import { FormEvent, useEffect, useState } from 'react';
 import AppShell from '@/components/AppShell';
 import InventoryNav from '@/components/InventoryNav';
 import Modal from '@/components/Modal';
+import { toast } from '@/components/Toast';
 import { api, formatDate, money } from '@/lib/api';
 import useSubmit from '@/lib/useSubmit';
 
@@ -14,7 +15,6 @@ function LocationsApp() {
   const [transfers, setTransfers] = useState<any[]>([]);
   const [items, setItems] = useState<any[]>([]);
   const [error, setError] = useState('');
-  const [notice, setNotice] = useState('');
   const [editing, setEditing] = useState<any>(null);
   const [moving, setMoving] = useState<any>(null);
   const [viewing, setViewing] = useState<any>(null);
@@ -67,7 +67,6 @@ function LocationsApp() {
         the main warehouse first, then the other places. Moving stock between places doesn't change its value or the books.
       </p>
       {error && <p className="error">{error}</p>}
-      {notice && <p className="notice">{notice}</p>}
 
       <div className="card table-wrap">
         <table>
@@ -76,15 +75,15 @@ function LocationsApp() {
             {places.map((place) => (
               <tr key={place.id}>
                 <td>
-                  {place.name} {place.is_main && <span className="badge paid">main</span>} {!place.active && <span className="badge">archived</span>}
+                  <strong>{place.name}</strong> {place.is_main && <span className="badge new">Main</span>} {!place.active && <span className="badge archived">Archived</span>}
                 </td>
                 <td className="num">{place.items}</td>
                 <td className="num">{place.quantity}</td>
                 <td className="num">{money(place.value)}</td>
                 <td>
                   <div className="row-actions">
-                    <button onClick={() => setViewing(place)}>Stock</button>
-                    <button onClick={() => setEditing(place)}>Rename</button>
+                    <button className="small" onClick={() => setViewing(place)}>Stock</button>
+                    <button className="small" onClick={() => setEditing(place)}>Rename</button>
                     {place.active && !place.is_main && <button disabled={busy} onClick={() => save(place, { is_main: true })}>Make main</button>}
                     {!place.is_main && (place.active
                       ? <button disabled={busy} onClick={() => save(place, { active: false })}>Archive</button>
@@ -120,7 +119,7 @@ function LocationsApp() {
       {editing && <PlaceForm place={editing} onClose={() => setEditing(null)} onSaved={load} />}
       {moving && (
         <TransferForm places={places} items={items} from={moving.from} onClose={() => setMoving(null)}
-          onSaved={async (result: any) => { setNotice(`Move ${result.number} saved.`); await load(); }} />
+          onSaved={async (result: any) => { toast.success(`Move ${result.number} saved`, { detail: 'Stock is in its new place. Value and the books are unchanged.' }); await load(); }} />
       )}
       {viewing && (
         <PlaceStock place={viewing} onClose={() => setViewing(null)}

@@ -3,7 +3,10 @@ import { useRouter } from 'next/router';
 import { FormEvent, useEffect, useState } from 'react';
 import { AddToCalendar, AnswerList } from '@/components/SchedulerForms';
 import { LOCATIONS, addDays, dayLabel, placesText } from '@/components/SchedulerNav';
+import Icon from '@/components/Icon';
+import Skeleton from '@/components/Skeleton';
 import useSubmit from '@/lib/useSubmit';
+import p from '@/styles/public.module.css';
 
 const BASE_URL = process.env.NEXT_PUBLIC_API_BASE_URL;
 const WINDOW = 7;
@@ -110,75 +113,105 @@ export default function ManageBooking() {
   for (const row of slots || []) (byDay[row.date] = byDay[row.date] || []).push(row);
 
   return (
-    <div className="public-form">
+    <div className={p.page}>
       <Head><title>Your booking</title></Head>
-      {missing && <p className="empty">We couldn't find this booking. Check the link.</p>}
-      {booking && (
-        <div className="stack">
-          <h1>Your booking with {booking.company}</h1>
-          {notice && <p className="notice">{notice}</p>}
-          <div className="card">
-            <p><strong>{booking.service}</strong> with {booking.with}{booking.group ? ' (group session)' : ''}</p>
-            <p>{dayLabel(booking.local_date, true)}, {booking.start_time} to {booking.end_time} ({booking.time_zone})</p>
-            <p>{LOCATIONS[booking.location_type]}{booking.location_detail ? `: ${booking.location_detail}` : ''}</p>
-            {booking.room_url && (
-              <p><a className="button primary" href={booking.room_url} target="_blank" rel="noopener noreferrer">Join video call</a><br />
-                <span className="muted">Calls run on Jitsi Meet, a free video service.</span></p>
-            )}
-            <p><span className={`badge ${booking.status === 'booked' ? 'paid' : 'void'}`}>{booking.status === 'booked' ? 'booked' : 'cancelled'}</span></p>
-            <AnswerList answers={booking.answers} />
-            {token && <AddToCalendar booking={booking} token={token} />}
+      <div className={p.narrow}>
+        {missing && (
+          <div className={`${p.panel} ${p.message}`}>
+            <div className="empty-state is-compact">
+              <div className="empty-art" aria-hidden="true"><span className="empty-ring" /><Icon name="scheduler" size={20} /></div>
+              <h3>We couldn&apos;t find this booking</h3>
+              <p>Check the link you saved when you booked.</p>
+            </div>
           </div>
-
-          {booking.can_reschedule && !moving && (
-            <div>
-              <button type="button" className="primary" onClick={startMoving}>Change the time</button>
-              <span className="muted"> You can move it {booking.moves_left === 1 ? 'once more' : `${booking.moves_left} more times`}.</span>
+        )}
+        {!booking && !missing && (
+          <div className={`${p.panel} ${p.payBody}`} role="status" aria-label="Loading"><Skeleton width="60%" height={24} /><Skeleton height={120} radius={12} /></div>
+        )}
+        {booking && (
+          <>
+            <div className={p.brand}>
+              <div className={p.logo} aria-hidden="true">{(booking.company || '?').charAt(0).toUpperCase()}</div>
+              <div><div className={p.brandName}>{booking.company}</div><div className={p.brandLine}>Your booking</div></div>
             </div>
-          )}
-          {moving && (
-            <div className="stack" style={{ gap: 8 }}>
-              <div className="page-head" style={{ marginBottom: 0 }}>
-                <h2 style={{ margin: 0 }}>Pick a new time with {booking.with}</h2>
-                <div className="row-actions">
-                  <button type="button" disabled={from <= firstDay} onClick={() => setFrom(addDays(from, -WINDOW) < firstDay ? firstDay : addDays(from, -WINDOW))}>Earlier</button>
-                  <button type="button" disabled={addDays(from, WINDOW) > lastDay} onClick={() => setFrom(addDays(from, WINDOW))}>Later</button>
-                  <button type="button" onClick={() => setMoving(false)}>Keep my time</button>
-                </div>
+            <div className={p.panel}>
+              <div className={p.payHead}>
+                <span className={p.payLabel}>{booking.service}{booking.group ? ', group session' : ''}</span>
+                <span style={{ fontSize: 'var(--text-2xl)', fontWeight: 650, letterSpacing: '-0.02em' }}>{dayLabel(booking.local_date, true)}</span>
+                <span className="muted">{booking.start_time} to {booking.end_time}, {booking.time_zone}</span>
+                <span><span className={`badge ${booking.status === 'booked' ? 'booked' : 'cancelled'}`}>{booking.status === 'booked' ? 'booked' : 'cancelled'}</span></span>
               </div>
-              <p className="muted">Times are in {booking.time_zone}.</p>
-              {slots === null && <p>Loading times…</p>}
-              {slots?.length === 0 && <p className="empty">No free times in these days. Try later dates.</p>}
-              {Object.entries(byDay).map(([date, times]) => (
-                <div key={date}>
-                  <div className="stat-label">{dayLabel(date, true)}</div>
-                  <div className="slot-list">
-                    {times.map((row) => (
-                      <button type="button" key={row.start} disabled={sending} className={row.start === booking.starts_at ? 'primary' : ''}
-                        onClick={() => row.start !== booking.starts_at && move(row)}>
-                        {row.time}{row.seats_left ? <small className="slot-places"> {placesText(row.seats_left)}</small> : null}
-                      </button>
-                    ))}
+              <div className={p.payBody}>
+                {notice && <p className="notice" style={{ margin: 0 }}>{notice}</p>}
+                <dl className={p.payRows}>
+                  <div><dt>With</dt><dd>{booking.with}</dd></div>
+                  <div><dt>Where</dt><dd>{LOCATIONS[booking.location_type]}{booking.location_detail ? `: ${booking.location_detail}` : ''}</dd></div>
+                </dl>
+                {booking.room_url && (
+                  <div>
+                    <a className="button primary" href={booking.room_url} target="_blank" rel="noopener noreferrer"><Icon name="meetings" size={16} />Join video call</a>
+                    <p className="muted small" style={{ margin: '6px 0 0' }}>Calls run on Jitsi Meet, a free video service.</p>
                   </div>
-                </div>
-              ))}
-            </div>
-          )}
+                )}
+                <AnswerList answers={booking.answers} />
+                {token && <AddToCalendar booking={booking} token={token} />}
 
-          {error && <p className="error">{error}</p>}
-          {booking.can_cancel && !moving && (
-            <form onSubmit={cancel} className="stack">
-              <label>Reason for cancelling (optional)<textarea rows={2} maxLength={500} value={reason} onChange={(e) => setReason(e.target.value)} /></label>
-              <div><button className="danger" disabled={busy || sending}>Cancel booking</button></div>
-            </form>
-          )}
-          {booking.status === 'cancelled' && <p>This booking is cancelled. You can book again from the company's booking page.</p>}
-          {booking.status === 'booked' && !booking.can_cancel && <p className="muted">This booking has started, so it can't be changed here. Please contact {booking.company}.</p>}
-          {booking.status === 'booked' && booking.can_cancel && !booking.can_reschedule && (
-            <p className="muted">To change the time, please contact {booking.company}, or cancel and book again.</p>
-          )}
-        </div>
-      )}
+                {booking.can_reschedule && !moving && (
+                  <div className="row-actions" style={{ alignItems: 'center', flexWrap: 'wrap' }}>
+                    <button type="button" className="primary" onClick={startMoving}>Change the time</button>
+                    <span className="muted small">You can move it {booking.moves_left === 1 ? 'once more' : `${booking.moves_left} more times`}.</span>
+                  </div>
+                )}
+
+                {moving && (
+                  <div className="stack" style={{ gap: 12 }}>
+                    <div className={p.weekHead}>
+                      <strong>Pick a new time with {booking.with}</strong>
+                      <div className="row-actions">
+                        <button type="button" className="icon-button" aria-label="Earlier days" disabled={from <= firstDay}
+                          onClick={() => setFrom(addDays(from, -WINDOW) < firstDay ? firstDay : addDays(from, -WINDOW))}><Icon name="chevron-left" size={18} /></button>
+                        <button type="button" className="icon-button" aria-label="Later days" disabled={addDays(from, WINDOW) > lastDay}
+                          onClick={() => setFrom(addDays(from, WINDOW))}><Icon name="chevron-right" size={18} /></button>
+                      </div>
+                    </div>
+                    <p className="muted small" style={{ margin: 0 }}>Times are in {booking.time_zone}.</p>
+                    {slots === null && <div className={p.times} aria-busy="true">{Array.from({ length: 6 }, (_, n) => <Skeleton key={n} height={42} radius={8} />)}</div>}
+                    {slots?.length === 0 && <p className="muted" style={{ margin: 0 }}>No free times in these days. Try the next week with the arrow above.</p>}
+                    {Object.entries(byDay).map(([date, times]) => (
+                      <div key={date}>
+                        <p className="muted small" style={{ marginBottom: 6 }}>{dayLabel(date, true)}</p>
+                        <div className={p.times}>
+                          {times.map((row) => (
+                            <button type="button" key={row.start} disabled={sending} className={`${p.time} ${row.start === booking.starts_at ? 'primary' : ''}`}
+                              aria-current={row.start === booking.starts_at ? 'true' : undefined}
+                              onClick={() => row.start !== booking.starts_at && move(row)}>
+                              {row.time}{row.seats_left ? <small>{placesText(row.seats_left)}</small> : null}
+                            </button>
+                          ))}
+                        </div>
+                      </div>
+                    ))}
+                    <div><button type="button" onClick={() => setMoving(false)}>Keep my time</button></div>
+                  </div>
+                )}
+
+                {error && <p className="error">{error}</p>}
+                {booking.can_cancel && !moving && (
+                  <form onSubmit={cancel} className="stack" style={{ gap: 10, borderTop: '1px solid var(--border)', paddingTop: 16 }}>
+                    <label>Reason for cancelling (optional)<textarea rows={2} maxLength={500} value={reason} onChange={(e) => setReason(e.target.value)} /></label>
+                    <div><button className="danger" disabled={busy || sending}>Cancel booking</button></div>
+                  </form>
+                )}
+                {booking.status === 'cancelled' && <p className="muted" style={{ margin: 0 }}>This booking is cancelled. You can book again from the company&apos;s booking page.</p>}
+                {booking.status === 'booked' && !booking.can_cancel && <p className="muted" style={{ margin: 0 }}>This booking has started, so it can&apos;t be changed here. Please contact {booking.company}.</p>}
+                {booking.status === 'booked' && booking.can_cancel && !booking.can_reschedule && (
+                  <p className="muted" style={{ margin: 0 }}>To change the time, please contact {booking.company}, or cancel and book again.</p>
+                )}
+              </div>
+            </div>
+          </>
+        )}
+      </div>
     </div>
   );
 }

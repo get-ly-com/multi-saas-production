@@ -2,8 +2,73 @@ import { FormEvent, useEffect, useState } from 'react';
 import Modal from '@/components/Modal';
 import { api, money } from '@/lib/api';
 import useSubmit from '@/lib/useSubmit';
+import Icon from '@/components/Icon';
+import styles from '@/styles/hr.module.css';
 
 export const fullName = (person: any) => (person ? `${person.first_name} ${person.last_name || ''}`.trim() : '');
+
+// "Sam Jones" becomes "SJ". One letter is fine for a single name.
+export const initials = (person: any) => {
+  const name = typeof person === 'string' ? person : fullName(person);
+  const parts = name.trim().split(/\s+/).filter(Boolean);
+  if (!parts.length) return '?';
+  return ((parts[0][0] || '') + (parts.length > 1 ? parts[parts.length - 1][0] : '')).toUpperCase();
+};
+
+// The same person always gets the same soft colour
+export const toneOf = (key: string | number | null | undefined) => {
+  const text = String(key ?? '');
+  let hash = 0;
+  for (let n = 0; n < text.length; n += 1) hash = (hash * 31 + text.charCodeAt(n)) | 0;
+  return Math.abs(hash) % 5;
+};
+
+export function Avatar({ person, name, size, gone }: { person?: any; name?: string; size?: 'small' | 'large'; gone?: boolean }) {
+  const label = name ?? fullName(person);
+  return (
+    <span className={`${styles.avatar} ${size ? styles[size] : ''} ${gone ? styles.gone : ''}`} data-tone={toneOf(person?.id ?? label)} aria-hidden="true">
+      {initials(label)}
+    </span>
+  );
+}
+
+// Avatar, name and one quiet line, for lists and tables
+export function PersonCell({ person, name, sub, size }: { person?: any; name?: string; sub?: string | null; size?: 'small' }) {
+  const label = name ?? fullName(person);
+  return (
+    <span className={styles.person}>
+      <Avatar person={person} name={label} size={size} />
+      <span className={styles.personText}>
+        <span className={styles.personName}>{label || 'Someone'}</span>
+        {sub && <span className={styles.personSub}>{sub}</span>}
+      </span>
+    </span>
+  );
+}
+
+// Pill style for a leave request's status
+export const leaveBadge = (status: string) => (status === 'approved' ? 'approved' : status === 'pending' ? 'pending' : status === 'rejected' ? 'declined' : 'cancelled');
+export const LEAVE_WORDS: Record<string, string> = { pending: 'Waiting', approved: 'Approved', rejected: 'Declined', cancelled: 'Cancelled' };
+
+// Draft, then Approved, then Paid. Void runs show the steps greyed out.
+export function PayStepper({ status, large }: { status: string; large?: boolean }) {
+  const steps = ['draft', 'approved', 'paid'];
+  const at = steps.indexOf(status);
+  return (
+    <ol className={`${styles.stepper} ${large ? styles.large : ''} ${status === 'void' ? styles.void : ''}`} aria-label={`Pay run is ${status}`}>
+      {steps.map((step, index) => {
+        const done = at > index || status === 'paid';
+        const current = at === index && status !== 'paid';
+        return (
+          <li key={step} className={`${styles.step} ${done ? styles.done : ''} ${current ? styles.current : ''}`} aria-current={current ? 'step' : undefined}>
+            <span className={styles.dot}>{done && <Icon name="check" size={large ? 14 : 11} strokeWidth={3} />}</span>
+            {step[0].toUpperCase() + step.slice(1)}
+          </li>
+        );
+      })}
+    </ol>
+  );
+}
 
 export const EMPLOYMENT_TYPES: Record<string, string> = { full_time: 'Full time', part_time: 'Part time', contractor: 'Contractor' };
 
@@ -223,5 +288,35 @@ export function LeaveForm({ people, employeeId, onClose, onSaved }: {
         </div>
       </form>
     </Modal>
+  );
+}
+
+// Leave balances with a small meter, so "how much is left" reads at a glance
+export function Balances({ rows }: { rows: any[] }) {
+  if (!rows?.length) return <p className="muted">No leave types set up yet.</p>;
+  return (
+    <div className={styles.balanceGrid}>
+      {rows.map((row: any) => {
+        const allowance = Number(row.allowance) + Number(row.carried_over || 0);
+        const used = allowance ? Math.min(100, Math.round((Number(row.taken) / allowance) * 100)) : 0;
+        const left = Number(row.left);
+        return (
+          <div key={row.leave_type_id} className={styles.balance}>
+            <div className={styles.balanceName}>{row.name}</div>
+            <div className={styles.balanceValue}>{row.limited ? `${row.left} left` : `${row.taken} taken`}</div>
+            {row.limited ? (
+              <>
+                <div className={styles.meter} aria-hidden="true">
+                  <span style={{ width: `${used}%` }} data-tone={left <= 0 ? 'warn' : undefined} />
+                </div>
+                <div className="muted small" style={{ marginTop: 6 }}>
+                  {row.taken} of {row.allowance} days{Number(row.carried_over) > 0 ? ` + ${row.carried_over} carried over` : ''}{Number(row.pending) > 0 ? `, ${row.pending} waiting` : ''}
+                </div>
+              </>
+            ) : null}
+          </div>
+        );
+      })}
+    </div>
   );
 }

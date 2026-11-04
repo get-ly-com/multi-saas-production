@@ -1,10 +1,17 @@
-import { FormEvent, useEffect, useState } from 'react';
+import { FormEvent, KeyboardEvent, MouseEvent, useEffect, useState } from 'react';
 import AppShell from '@/components/AppShell';
 import { ScanWithCamera } from '@/components/BarcodeScanner';
-import InventoryNav from '@/components/InventoryNav';
+import Drawer from '@/components/Drawer';
+import EmptyState from '@/components/EmptyState';
+import Icon from '@/components/Icon';
+import InventoryNav, { StockBar, stockLevel } from '@/components/InventoryNav';
 import Modal from '@/components/Modal';
+import Skeleton, { SkeletonStats, SkeletonTable } from '@/components/Skeleton';
+import { toast } from '@/components/Toast';
 import { api, formatDate, money } from '@/lib/api';
+import { count } from '@/lib/format';
 import useSubmit from '@/lib/useSubmit';
+import styles from '@/styles/inventory.module.css';
 
 const blankItem = {
   sku: '', name: '', barcode: '', unit: 'units', category_id: '', vendor_id: '',
@@ -13,11 +20,7 @@ const blankItem = {
 
 const UNITS = ['units', 'pcs', 'boxes', 'packs', 'pairs', 'kg', 'g', 'litres', 'ml', 'metres', 'rolls', 'sets'];
 
-const stockState = (item: any) => {
-  if (item.quantity === 0) return { label: 'out of stock', style: 'out' };
-  if (item.quantity <= item.reorder_level) return { label: 'low', style: 'low' };
-  return { label: 'in stock', style: '' };
-};
+const STOCK_WORDS: Record<string, string> = { good: 'In stock', low: 'Low', out: 'Out of stock' };
 
 const margin = (item: any) => {
   const price = Number(item.price);
@@ -40,14 +43,14 @@ function InventoryApp() {
   const [search, setSearch] = useState('');
   const [category, setCategory] = useState('');
   const [place, setPlace] = useState('');
+  const [level, setLevel] = useState('');
   const [scan, setScan] = useState('');
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState('');
   const [itemForm, setItemForm] = useState<any>(null);
   const [adjusting, setAdjusting] = useState<any>(null);
   const [costing, setCosting] = useState<any>(null);
-  const [history, setHistory] = useState<any>(null);
-  const [found, setFound] = useState<any>(null);
+  const [open, setOpen] = useState<any>(null);
   const [managingCategories, setManagingCategories] = useState(false);
 
   const load = async () => {
@@ -78,9 +81,11 @@ function InventoryApp() {
     if (!window.confirm(`Delete ${item.name} and its history? This can't be undone.`)) return;
     try {
       await api.delete(`/api/inventory/items/${item.id}`);
+      setOpen(null);
       await load();
+      toast.success('Item deleted', { detail: item.name });
     } catch (err: any) {
-      setError(err.message);
+      toast.error('Could not delete', { detail: err.message });
     }
   });
 
@@ -100,11 +105,12 @@ function InventoryApp() {
       const code = typed.trim();
       if (!code) return;
       try {
-        setFound(await api.get(`/api/inventory/items/lookup?code=${encodeURIComponent(code)}`));
+        const found = await api.get(`/api/inventory/items/lookup?code=${encodeURIComponent(code)}`);
+        setOpen(items.find((row) => row.id === found.id) || found);
         setScan('');
         setError('');
       } catch (err: any) {
-        setError(err.message);
+        toast.error('No item with that code', { detail: err.message });
       }
     });
   };
@@ -117,22 +123,41 @@ function InventoryApp() {
     vendor_id: item.vendor_id || ''
   });
 
+  // Opening a form closes the drawer, so only one panel is ever on top
+  const fromDrawer = (show: () => void) => {
+    setOpen(null);
+    show();
+  };
+
+  const openRow = (event: KeyboardEvent<HTMLTableRowElement>, item: any) => {
+    if (event.key === 'Enter' || event.key === ' ') {
+      event.preventDefault();
+      setOpen(item);
+    }
+  };
+
   const activePlaces = places.filter((row) => row.active);
   const query = search.trim().toLowerCase();
   const visible = items.filter((item) =>
     `${item.name} ${item.sku} ${item.barcode || ''}`.toLowerCase().includes(query)
     && (!category || (category === 'none' ? !item.category_id : item.category_id === category))
-    && (!place || levelAt(item, place) > 0));
+    && (!place || levelAt(item, place) > 0)
+    && (!level || stockLevel(item) === level || (level === 'low' && stockLevel(item) === 'out')));
   const costValue = items.reduce((sum, item) => sum + Number(item.stock_value || 0), 0);
   const priceValue = items.reduce((sum, item) => sum + item.quantity * Number(item.price || 0), 0);
   const uncosted = items.filter((item) => item.quantity > 0 && !Number(item.stock_value)).length;
   const lowCount = items.filter((item) => item.quantity <= item.reorder_level).length;
+  const outCount = items.filter((item) => item.quantity === 0).length;
   const placeName = places.find((row) => row.id === place)?.name;
+  const filtered = Boolean(query || category || place || level);
 
   return (
     <div className="stack">
       <div className="page-head">
-        <h1>Inventory</h1>
+        <div>
+          <h1>Inventory</h1>
+          <p className="muted">{loading ? ' ' : `${count(items.length)} items, ${money(costValue)} at cost`}</p>
+        </div>
         <div className="row-actions">
           <button onClick={() => setManagingCategories(true)}>Categories</button>
           <button className="primary" onClick={() => setItemForm({ ...blankItem })}>New item</button>
@@ -142,17 +167,29 @@ function InventoryApp() {
 
       {error && <p className="error">{error}</p>}
 
-      <div className="stats">
-        <div className="card"><div className="stat-label">Items</div><div className="stat-value">{items.length}</div></div>
-        <div className="card"><div className="stat-label">Stock value at cost</div><div className="stat-value">{money(costValue)}</div><div className="muted">Matches the Inventory account</div></div>
-        <div className="card"><div className="stat-label">At selling price</div><div className="stat-value">{money(priceValue)}</div></div>
-        <div className="card"><div className="stat-label">Low or out of stock</div><div className="stat-value">{lowCount}</div></div>
-      </div>
+      {loading ? <SkeletonStats count={4} /> : (
+        <div className="stats">
+          <div className="card"><div className="stat-label">Items</div><div className="stat-value">{count(items.length)}</div><div className="muted">{categories.length} categories</div></div>
+          <div className="card"><div className="stat-label">Stock value at cost</div><div className="stat-value">{money(costValue)}</div><div className="muted">Matches the Inventory account</div></div>
+          <div className="card"><div className="stat-label">At selling price</div><div className="stat-value">{money(priceValue)}</div>
+            {priceValue > costValue && costValue > 0 && <div className="muted">{money(priceValue - costValue)} above cost</div>}</div>
+          <div className="card">
+            <div className="stat-label">Low or out of stock</div>
+            <div className="stat-value">{lowCount}</div>
+            {lowCount > 0 ? (
+              <button type="button" className="link small always" aria-pressed={level === 'low'} onClick={() => setLevel(level === 'low' ? '' : 'low')}>
+                {level === 'low' ? 'Show everything' : `${outCount} out. Show them`}
+              </button>
+            ) : <div className="muted">All stocked up</div>}
+          </div>
+        </div>
+      )}
 
       {uncosted > 0 && (
         <p className="muted">
-          {uncosted} {uncosted === 1 ? 'item has' : 'items have'} stock with no cost yet, so sales of {uncosted === 1 ? 'it' : 'them'} show full profit.
-          Use Set cost to value what's on hand. Buy new stock on a bill in Accounting so it comes in at what you paid.
+          <span className="badge low">{uncosted} without a cost</span>{' '}
+          {uncosted === 1 ? 'This item has' : 'These items have'} stock with no cost yet, so sales of {uncosted === 1 ? 'it' : 'them'} show full profit.
+          Use Set cost to value what&apos;s on hand. Buy new stock on a bill in Accounting so it comes in at what you paid.
         </p>
       )}
 
@@ -164,13 +201,21 @@ function InventoryApp() {
           </span>
         </label>
         <label>Search
-          <input aria-label="Search items" placeholder="Name, SKU or barcode" value={search} onChange={(e) => setSearch(e.target.value)} />
+          <input type="search" aria-label="Search items" placeholder="Name, SKU or barcode" value={search} onChange={(e) => setSearch(e.target.value)} />
         </label>
         <label>Category
           <select value={category} onChange={(e) => setCategory(e.target.value)}>
             <option value="">All categories</option>
             {categories.map((row) => <option key={row.id} value={row.id}>{row.name}</option>)}
             <option value="none">No category</option>
+          </select>
+        </label>
+        <label>Stock
+          <select value={level} onChange={(e) => setLevel(e.target.value)}>
+            <option value="">Any level</option>
+            <option value="low">Low or out</option>
+            <option value="out">Out of stock</option>
+            <option value="good">In stock</option>
           </select>
         </label>
         {places.length > 1 && (
@@ -183,67 +228,166 @@ function InventoryApp() {
         )}
       </form>
 
-      <div className="card table-wrap">
-        {loading ? <p className="empty">Loading…</p> : (
+      {loading ? <SkeletonTable rows={8} columns={6} /> : items.length === 0 ? (
+        <div className="card">
+          <EmptyState icon="inventory" title="No items yet" line="Add what you sell or keep on the shelf, and we track stock and its value as it moves."
+            action={{ label: 'New item', onClick: () => setItemForm({ ...blankItem }) }} />
+        </div>
+      ) : visible.length === 0 ? (
+        <div className="card">
+          <EmptyState compact icon="search" title={level === 'low' && !query && !category && !place ? 'Nothing low on stock' : 'No matches'}
+            line={level === 'low' && !query && !category && !place ? 'Every item is above its reorder level.' : 'Try another name or code, or clear the filters.'}
+            tone={level === 'low' && !query && !category && !place ? 'done' : 'plain'}
+            action={filtered ? { label: 'Clear filters', onClick: () => { setSearch(''); setCategory(''); setPlace(''); setLevel(''); } } : undefined} />
+        </div>
+      ) : (
+        <div className={`card table-wrap ${styles.list}`}>
           <table>
             <thead>
               <tr>
-                <th>SKU</th><th>Name</th><th>Status</th>
-                <th className="num">{placeName ? `At ${placeName}` : 'On hand'}</th>
+                <th>Item</th><th>SKU</th>
+                <th>{placeName ? `At ${placeName}` : 'Stock'}</th>
                 <th className="num">Average cost</th><th className="num">Value</th><th className="num">Price</th><th className="num">Margin</th><th />
               </tr>
             </thead>
             <tbody>
-              {visible.length === 0 && <tr><td colSpan={9} className="empty">{items.length ? 'No matches' : 'No items yet'}</td></tr>}
-              {visible.map((item) => {
-                const state = stockState(item);
-                return (
-                  <tr key={item.id}>
-                    <td>{item.sku}</td>
-                    <td className="wrap">
-                      {item.name}
-                      {item.category && <div className="muted">{item.category.name}</div>}
-                    </td>
-                    <td><span className={`badge ${state.style}`}>{state.label}</span></td>
-                    <td className="num">
-                      {place ? levelAt(item, place) : item.quantity} <span className="muted">{item.unit}</span>
-                      {place && <div className="muted">of {item.quantity}</div>}
-                    </td>
-                    <td className="num">{Number(item.avg_cost) ? money(item.avg_cost) : '—'}</td>
-                    <td className="num">{money(item.stock_value)}</td>
-                    <td className="num">{item.price === null ? '—' : money(item.price)}</td>
-                    <td className="num">{margin(item)}</td>
-                    <td>
-                      <div className="row-actions">
-                        <button onClick={() => setAdjusting(item)}>Adjust stock</button>
-                        <button onClick={() => setCosting(item)}>Set cost</button>
-                        <button onClick={() => setHistory(item)}>History</button>
-                        <button onClick={() => setItemForm(editForm(item))}>Edit</button>
-                        <button disabled={busy} className="danger" onClick={() => remove(item)}>Delete</button>
-                      </div>
-                    </td>
-                  </tr>
-                );
-              })}
+              {visible.map((item) => (
+                <tr key={item.id} tabIndex={0} onClick={() => setOpen(item)} onKeyDown={(e) => openRow(e, item)} aria-label={`Open ${item.name}`}>
+                  <td className="wrap">
+                    <div className={styles.itemName}>{item.name}</div>
+                    {item.category && <span className="muted small">{item.category.name}</span>}
+                  </td>
+                  <td><span className={styles.sku}>{item.sku}</span></td>
+                  <td>
+                    <StockBar item={item} quantity={place ? levelAt(item, place) : undefined} />
+                    {place && <div className="muted small">of {item.quantity} in all</div>}
+                  </td>
+                  <td className="num">{Number(item.avg_cost) ? money(item.avg_cost) : '—'}</td>
+                  <td className="num">{money(item.stock_value)}</td>
+                  <td className="num">{item.price === null ? '—' : money(item.price)}</td>
+                  <td className="num">{margin(item)}</td>
+                  <td>
+                    <div className="row-actions">
+                      <button className="small" onClick={(e: MouseEvent) => { e.stopPropagation(); setAdjusting(item); }}>Adjust</button>
+                    </div>
+                  </td>
+                </tr>
+              ))}
             </tbody>
           </table>
-        )}
-      </div>
+        </div>
+      )}
+
+      <Drawer open={!!open} title={open?.name || ''} subtitle={open ? <span className={styles.sku}>{open.sku}</span> : undefined} onClose={() => setOpen(null)}
+        footer={open && (
+          <>
+            <button className="danger" disabled={busy} onClick={() => remove(open)}>Delete</button>
+            <button onClick={() => fromDrawer(() => setItemForm(editForm(open)))}>Edit</button>
+            <button onClick={() => fromDrawer(() => setCosting(open))}>Set cost</button>
+            <button className="primary" onClick={() => fromDrawer(() => setAdjusting(open))}>Adjust stock</button>
+          </>
+        )}>
+        {open && <ItemDetails item={open} places={places} suppliers={suppliers} />}
+      </Drawer>
 
       {itemForm && (
         <ItemForm initial={itemForm} categories={categories} suppliers={suppliers} places={activePlaces}
-          onClose={() => setItemForm(null)} onSaved={load} />
+          onClose={() => setItemForm(null)} onSaved={async () => { await load(); toast.success(itemForm.id ? 'Item saved' : 'Item added', { detail: itemForm.name }); }} />
       )}
-      {adjusting && <AdjustForm item={adjusting} places={places} onClose={() => setAdjusting(null)} onSaved={load} />}
-      {costing && <CostForm item={costing} onClose={() => setCosting(null)} onSaved={load} />}
-      {history && <History item={history} onClose={() => setHistory(null)} />}
-      {found && (
-        <Found item={found} places={places} onClose={() => setFound(null)}
-          onAdjust={() => { setAdjusting(found); setFound(null); }}
-          onHistory={() => { setHistory(found); setFound(null); }} />
+      {adjusting && (
+        <AdjustForm item={adjusting} places={places} onClose={() => setAdjusting(null)}
+          onSaved={async () => { await load(); toast.success('Stock adjusted', { detail: adjusting.name }); }} />
+      )}
+      {costing && (
+        <CostForm item={costing} onClose={() => setCosting(null)}
+          onSaved={async () => { await load(); toast.success('Cost set', { detail: `${costing.name} is valued at the new cost.` }); }} />
       )}
       {managingCategories && <Categories rows={categories} onClose={() => setManagingCategories(false)} onSaved={load} />}
     </div>
+  );
+}
+
+// What the drawer shows: the numbers, where it is, and every stock change
+function ItemDetails({ item, places, suppliers }: { item: any; places: any[]; suppliers: any[] }) {
+  const [rows, setRows] = useState<any[] | null>(null);
+  const [error, setError] = useState('');
+
+  useEffect(() => {
+    setRows(null);
+    setError('');
+    api.get(`/api/inventory/items/${item.id}/movements`).then(setRows).catch((err) => setError(err.message));
+  }, [item.id]);
+
+  const state = stockLevel(item);
+  const held = places.filter((row) => levelAt(item, row.id) > 0);
+  const most = Math.max(1, ...held.map((row) => levelAt(item, row.id)));
+  const supplier = suppliers.find((row) => row.id === item.vendor_id)?.name;
+
+  return (
+    <>
+      <div className={styles.drawerTop}>
+        <div className={styles.tile}><span className="stat-label">On hand</span><strong>{count(item.quantity)} <span className="muted small">{item.unit}</span></strong></div>
+        <div className={styles.tile}><span className="stat-label">Value</span><strong>{money(item.stock_value)}</strong></div>
+        <div className={styles.tile}><span className="stat-label">Margin</span><strong>{margin(item)}</strong></div>
+      </div>
+      <div style={{ marginBottom: 20 }}>
+        <div className="row-actions" style={{ justifyContent: 'space-between', marginBottom: 8 }}>
+          <span className={`badge ${state === 'good' ? 'active' : state}`}>{STOCK_WORDS[state]}</span>
+          <span className="muted small">Reorder at {item.reorder_level}{item.reorder_to > item.reorder_level ? `, up to ${item.reorder_to}` : ''}</span>
+        </div>
+        <StockBar item={item} bare />
+      </div>
+      <dl className={styles.facts}>
+        <div><dt>SKU</dt><dd className={styles.sku}>{item.sku}</dd></div>
+        <div><dt>Barcode</dt><dd className={styles.sku}>{item.barcode || '—'}</dd></div>
+        <div><dt>Category</dt><dd>{item.category?.name || 'None'}</dd></div>
+        <div><dt>Usual supplier</dt><dd>{supplier || 'None'}</dd></div>
+        <div><dt>Average cost</dt><dd>{Number(item.avg_cost) ? money(item.avg_cost) : '—'}</dd></div>
+        <div><dt>Selling price</dt><dd>{item.price === null ? '—' : money(item.price)}</dd></div>
+      </dl>
+
+      {places.length > 1 && (
+        <>
+          <h3 className={styles.section}>Where it is</h3>
+          {held.length === 0 ? <p className="muted">None in any place.</p> : (
+            <div className={styles.places}>
+              {held.map((row) => (
+                <div key={row.id} className={styles.place}>
+                  <span>{row.name}</span>
+                  <span className={styles.bar}><span style={{ width: `${Math.round((levelAt(item, row.id) / most) * 100)}%` }} /></span>
+                  <strong className="num">{levelAt(item, row.id)}</strong>
+                </div>
+              ))}
+            </div>
+          )}
+        </>
+      )}
+
+      <h3 className={styles.section}>Stock changes</h3>
+      {error && <p className="error">{error}</p>}
+      {!rows && !error && <div style={{ display: 'grid', gap: 12 }}>{[0, 1, 2].map((n) => <Skeleton key={n} height={28} />)}</div>}
+      {rows && rows.length === 0 && <EmptyState compact icon="inventory" title="No stock changes yet" line="Sales, bills, counts and adjustments show up here." />}
+      {rows && rows.length > 0 && (
+        <ul className={styles.moves}>
+          {rows.map((row) => {
+            const way = row.change > 0 ? 'in' : row.change < 0 ? 'out' : '';
+            return (
+              <li key={row.id} className={styles.move}>
+                <span className={`${styles.moveIcon} ${way ? styles[way] : ''}`} aria-hidden="true">
+                  <Icon name={row.change > 0 ? 'plus' : row.change < 0 ? 'arrow-right' : 'money'} size={14} />
+                </span>
+                <span className={styles.moveText}>
+                  <span>{row.reason || 'Stock change'}</span>
+                  <span className="muted small">{formatDate(row.created_at)}{row.location?.name ? ` · ${row.location.name}` : ''}
+                    {Number(row.cost) ? ` · ${Number(row.cost) > 0 ? '+' : '−'}${money(Math.abs(Number(row.cost)))}` : ''}</span>
+                </span>
+                <span className={`${styles.moveQty} ${way ? styles[way] : ''}`}>{row.change > 0 ? `+${row.change}` : row.change || '—'}</span>
+              </li>
+            );
+          })}
+        </ul>
+      )}
+    </>
   );
 }
 
@@ -441,63 +585,6 @@ function CostForm({ item, onClose, onSaved }: { item: any; onClose: () => void; 
           <button type="button" onClick={onClose}>Cancel</button>
         </div>
       </form>
-    </Modal>
-  );
-}
-
-function History({ item, onClose }: { item: any; onClose: () => void }) {
-  const [rows, setRows] = useState<any[] | null>(null);
-  const [error, setError] = useState('');
-
-  useEffect(() => {
-    api.get(`/api/inventory/items/${item.id}/movements`).then(setRows).catch((err) => setError(err.message));
-  }, []);
-
-  return (
-    <Modal title={`History for ${item.name}`} onClose={onClose}>
-      {error && <p className="error">{error}</p>}
-      {rows && rows.length === 0 && <p className="empty">No stock changes yet</p>}
-      {rows && rows.length > 0 && (
-        <div className="table-wrap">
-          <table>
-            <thead><tr><th>Date</th><th>Reason</th><th>Where</th><th className="num">Change</th><th className="num">Value</th></tr></thead>
-            <tbody>
-              {rows.map((row) => (
-                <tr key={row.id}>
-                  <td>{formatDate(row.created_at)}</td>
-                  <td className="wrap">{row.reason || '—'}</td>
-                  <td>{row.location?.name || '—'}</td>
-                  <td className="num">{row.change > 0 ? `+${row.change}` : row.change || '—'}</td>
-                  <td className="num">{Number(row.cost) ? `${Number(row.cost) > 0 ? '+' : '−'}${money(Math.abs(Number(row.cost)))}` : '—'}</td>
-                </tr>
-              ))}
-            </tbody>
-          </table>
-        </div>
-      )}
-      <div className="form-actions"><button onClick={onClose}>Close</button></div>
-    </Modal>
-  );
-}
-
-function Found({ item, places, onClose, onAdjust, onHistory }: {
-  item: any; places: any[]; onClose: () => void; onAdjust: () => void; onHistory: () => void;
-}) {
-  return (
-    <Modal title={item.name} onClose={onClose}>
-      <div className="facts">
-        <div><div className="stat-label">SKU</div>{item.sku}</div>
-        <div><div className="stat-label">Barcode</div>{item.barcode || '—'}</div>
-        <div><div className="stat-label">On hand</div>{item.quantity} {item.unit}</div>
-        <div><div className="stat-label">Value</div>{money(item.stock_value)}</div>
-        <div><div className="stat-label">Price</div>{item.price === null ? '—' : money(item.price)}</div>
-      </div>
-      {places.length > 1 && <PlaceBreakdown item={item} places={places} />}
-      <div className="form-actions">
-        <button className="primary" onClick={onAdjust}>Adjust stock</button>
-        <button onClick={onHistory}>History</button>
-        <button onClick={onClose}>Close</button>
-      </div>
     </Modal>
   );
 }

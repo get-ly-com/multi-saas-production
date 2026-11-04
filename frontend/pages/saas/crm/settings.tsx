@@ -1,6 +1,7 @@
 import { FormEvent, useEffect, useState } from 'react';
 import AppShell from '@/components/AppShell';
 import CrmNav from '@/components/CrmNav';
+import { toast } from '@/components/Toast';
 import CustomFieldSettings from '@/components/CustomFieldSettings';
 import EmailSettings from '@/components/EmailSettings';
 import LeadSettings from '@/components/LeadSettings';
@@ -25,7 +26,8 @@ function SettingsApp() {
   const [pipelines, setPipelines] = useState<any[]>([]);
   const [editing, setEditing] = useState<any>(null);
   const [error, setError] = useState('');
-  const [notice, setNotice] = useState('');
+  // Finished actions show as a toast
+  const setNotice = (message: string) => { if (message) toast.success(message.replace(/\.$/, '')); };
 
   const load = async () => {
     try {
@@ -41,7 +43,6 @@ function SettingsApp() {
   }, []);
 
   const open = (pipeline: any) => {
-    setNotice('');
     setError('');
     setEditing({ ...pipeline, stages: [...pipeline.stages].sort((a: any, b: any) => a.position - b.position) });
   };
@@ -94,7 +95,6 @@ function SettingsApp() {
       <p className="muted">Each stage's chance of winning drives the weighted forecast. A deal goes stale when nothing has happened on it for the stage's number of days (14 if left blank); stale deals are marked on the pipeline. Only owners and admins can change these settings.</p>
 
       {error && <p className="error">{error}</p>}
-      {notice && <p className="notice">{notice}</p>}
 
       {pipelines.map((pipeline) => (
         <div className="card table-wrap" key={pipeline.id}>

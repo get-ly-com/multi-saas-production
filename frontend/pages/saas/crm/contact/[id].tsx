@@ -7,10 +7,14 @@ import CrmNav from '@/components/CrmNav';
 import { TagChips, useTags } from '@/components/Tags';
 import { ContactForm, DealForm } from '@/components/CrmForms';
 import { CustomValues } from '@/components/CustomFields';
+import { CrmIcon, RecordHeader, RecordSkeleton } from '@/components/CrmRecord';
+import EmptyState from '@/components/EmptyState';
+import { toast } from '@/components/Toast';
 import Timeline from '@/components/Timeline';
 import { api, money, queryId } from '@/lib/api';
 import useSubmit from '@/lib/useSubmit';
-import { whatsappLink } from '@/lib/whatsapp';
+import { whatsappLink, whatsappNumber } from '@/lib/whatsapp';
+import styles from '@/styles/crm.module.css';
 
 export default function Contact() {
   return <AppShell><ContactApp /></AppShell>;
@@ -46,6 +50,7 @@ function ContactApp() {
     if (!window.confirm(`Delete ${contact.name}? Their deals and timeline stay.`)) return;
     try {
       await api.delete(`/api/crm/contacts/${id}`);
+      toast.success('Contact deleted', { detail: contact.name });
       router.push('/saas/crm/contacts');
     } catch (err: any) {
       setError(err.message);
@@ -56,35 +61,48 @@ function ContactApp() {
     <div className="stack">
       <CrmNav />
       {error && <p className="error">{error}</p>}
+      {!contact && !error && <RecordSkeleton />}
       {contact && (
         <>
-          <div className="page-head">
-            <div>
-              <h1>{contact.name}</h1>
-              <TagChips ids={contact.tags} tags={tags} />
-              <p className="muted">
-                {[contact.job_title, contact.email, contact.phone, contact.source].filter(Boolean).join(' · ')}
-                {contact.company && <> · <Link href={`/saas/crm/company/${contact.company.id}`}>{contact.company.name}</Link></>}
-              </p>
-              {contact.campaign && <p className="muted">Campaign: {contact.campaign}</p>}
-            </div>
-            <div className="row-actions">
-              {contact.phone && (
-                <a className="button" href={whatsappLink(contact.phone)} target="_blank" rel="noopener noreferrer"
-                  title="Opens a WhatsApp chat with this number">Send on WhatsApp</a>
-              )}
-              <button onClick={() => setAdding(true)}>New deal</button>
-              <button onClick={() => setEditing(true)}>Edit</button>
-              <button disabled={busy} className="danger" onClick={remove}>Delete</button>
-            </div>
-          </div>
+          <RecordHeader
+            name={contact.name}
+            line={(contact.job_title || contact.company) && (
+              <>
+                {contact.job_title}
+                {contact.job_title && contact.company && ' at '}
+                {contact.company && <Link href={`/saas/crm/company/${contact.company.id}`}>{contact.company.name}</Link>}
+              </>
+            )}
+            chips={[
+              contact.email && { icon: 'mail', label: contact.email, href: `mailto:${contact.email}`, external: true, title: 'Write an email' },
+              contact.phone && { icon: 'phone', label: contact.phone, href: `tel:${contact.phone}`, external: true, title: 'Call' },
+              contact.source && { icon: 'globe', label: contact.source, title: 'Source' },
+              contact.campaign && { icon: 'target', label: contact.campaign, title: 'Campaign' },
+              deals.length > 0 && { icon: 'deal', label: `${deals.length} ${deals.length === 1 ? 'deal' : 'deals'}` }
+            ]}
+            tags={contact.tags?.length ? <TagChips ids={contact.tags} tags={tags} /> : null}
+            actions={(
+              <>
+                {whatsappNumber(contact.phone) && (
+                  <a className="button" href={whatsappLink(contact.phone)} target="_blank" rel="noopener noreferrer"
+                    title="Opens a WhatsApp chat with this number"><CrmIcon name="whatsapp" />Send on WhatsApp</a>
+                )}
+                <button onClick={() => setEditing(true)}>Edit</button>
+                <button disabled={busy} className="danger ghost" onClick={remove}>Delete</button>
+                <button className="primary" onClick={() => setAdding(true)}>New deal</button>
+              </>
+            )}
+          />
           {contact.notes && <div className="card wrap">{contact.notes}</div>}
           <CustomValues entity="contact" values={contact.custom} />
           <div className="card table-wrap">
-            <h2>Deals</h2>
+            <div className={styles.cardHead}><h2>Deals</h2></div>
             <table>
               <tbody>
-                {deals.length === 0 && <tr><td className="empty">No deals yet</td></tr>}
+                {deals.length === 0 && (
+                  <tr><td><EmptyState compact icon="deal" title="No deals yet" line={`When ${contact.name.split(' ')[0]} wants to buy, start a deal to track it.`}
+                    action={{ label: 'New deal', onClick: () => setAdding(true) }} /></td></tr>
+                )}
                 {deals.map((deal) => (
                   <tr key={deal.id}>
                     <td className="wrap"><Link href={`/saas/crm/deal/${deal.id}`}>{deal.title}</Link></td>
@@ -97,8 +115,8 @@ function ContactApp() {
           </div>
           <Billing query={`contact_id=${contact.id}`} />
           <Timeline links={{ contact_id: contact.id }} />
-          {editing && <ContactForm initial={contact} onClose={() => setEditing(false)} onSaved={load} />}
-          {adding && <DealForm initial={{ contact_id: contact.id }} onClose={() => setAdding(false)} onSaved={load} />}
+          {editing && <ContactForm initial={contact} onClose={() => setEditing(false)} onSaved={async () => { toast.success('Saved'); await load(); }} />}
+          {adding && <DealForm initial={{ contact_id: contact.id }} onClose={() => setAdding(false)} onSaved={async () => { toast.success('Deal added'); await load(); }} />}
         </>
       )}
     </div>

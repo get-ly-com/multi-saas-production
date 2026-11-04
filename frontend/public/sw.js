@@ -2,7 +2,7 @@
    - Next's build files (/_next/static/*) and the app shell are served from the cache first.
    - Pages go to the network first and fall back to the last copy, then to the offline page.
    - API calls, Next data requests and anything on another site are never touched or cached. */
-const VERSION = 'v1';
+const VERSION = 'v2';
 const SHELL_CACHE = `getly-shell-${VERSION}`;
 const STATIC_CACHE = `getly-static-${VERSION}`;
 const PAGE_CACHE = `getly-pages-${VERSION}`;

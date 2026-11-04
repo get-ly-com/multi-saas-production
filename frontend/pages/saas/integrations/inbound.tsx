@@ -1,9 +1,12 @@
 import Link from 'next/link';
 import { FormEvent, useEffect, useState } from 'react';
 import AppShell from '@/components/AppShell';
-import IntegrationsNav, { OnlyManagers, ShowOnce, dateTime } from '@/components/IntegrationsNav';
+import EmptyState from '@/components/EmptyState';
+import Icon from '@/components/Icon';
+import IntegrationsNav, { CodeBlock, IntegrationsLoading, OnlyManagers, ShowOnce, dateTime } from '@/components/IntegrationsNav';
 import Modal from '@/components/Modal';
 import { api } from '@/lib/api';
+import { toast } from '@/components/Toast';
 import useSubmit from '@/lib/useSubmit';
 
 export default function Inbound() {
@@ -53,14 +56,14 @@ function InboundApp() {
     try {
       await work();
       await load();
-      setNotice(done);
+      if (done) toast.success(done);
     } catch (err: any) {
       setError(err.message);
     }
   });
 
-  if (!data) return <div className="stack"><IntegrationsNav />{error ? <p className="error">{error}</p> : <p className="empty">Loading…</p>}</div>;
-  if (!data.is_manager) return <div className="stack"><IntegrationsNav /><h1>Incoming webhooks</h1><OnlyManagers /></div>;
+  if (!data) return <div className="stack"><IntegrationsNav />{error ? <p className="error">{error}</p> : <IntegrationsLoading />}</div>;
+  if (!data.is_manager) return <div className="stack"><IntegrationsNav /><div className="page-head"><h1>Incoming webhooks</h1></div><OnlyManagers /></div>;
 
   const hooks: Hook[] = data.hooks;
 
@@ -95,10 +98,13 @@ function InboundApp() {
     <div className="stack">
       <IntegrationsNav />
       <div className="page-head">
-        <h1>Incoming webhooks</h1>
-        <button className="primary" onClick={() => setEditing('new')} disabled={hooks.length >= data.limits.inbound_hooks_per_company}>Add incoming webhook</button>
+        <div>
+          <h1>Incoming webhooks</h1>
+          <p className="muted">Turn form fills and ads from other tools into CRM leads.</p>
+        </div>
+        <button className="primary" onClick={() => setEditing('new')} disabled={hooks.length >= data.limits.inbound_hooks_per_company}><Icon name="plus" size={16} />Add incoming webhook</button>
       </div>
-      <p className="muted">
+      <p className="muted small">
         An incoming webhook is a secret web address. When another tool (a form builder, Zapier, an ad platform) sends a person's
         details to it, a new lead appears in CRM. If an open lead already has that email, a note is added to it instead.
         Anyone who knows the address can send leads, so treat it like a password.
@@ -110,12 +116,12 @@ function InboundApp() {
         <table>
           <thead><tr><th>Name</th><th>Leads come in as</th><th>Status</th><th>Last used</th><th className="num">Last 7 days</th><th /></tr></thead>
           <tbody>
-            {hooks.length === 0 && <tr><td colSpan={6} className="empty">No incoming webhooks yet</td></tr>}
+            {hooks.length === 0 && <tr><td colSpan={6}><EmptyState compact icon="lead" title="No incoming webhooks yet" line="Add one, paste its address into your form builder or Zapier, and new leads arrive in CRM." action={{ label: 'Add incoming webhook', onClick: () => setEditing('new') }} /></td></tr>}
             {hooks.map((hook) => (
               <tr key={hook.id}>
-                <td>{hook.name}<div className="muted"><code>{hook.prefix}…</code></div></td>
+                <td><strong>{hook.name}</strong><div className="muted"><code>{hook.prefix}…</code></div></td>
                 <td>Source: {hook.source}</td>
-                <td>{hook.enabled ? <span className="badge delivered">On</span> : <span className="badge failed">Off</span>}</td>
+                <td>{hook.enabled ? <span className="badge active">On</span> : <span className="badge inactive">Off</span>}</td>
                 <td>{hook.last_used_at ? dateTime(hook.last_used_at) : 'Never'}</td>
                 <td className="num">
                   {hook.created_7} new · {hook.updated_7} added to
@@ -123,20 +129,20 @@ function InboundApp() {
                 </td>
                 <td>
                   <div className="row-actions">
-                    <button onClick={() => showLog(hook)}>Log</button>
-                    <button onClick={() => setEditing(hook)}>Edit</button>
-                    <button onClick={() => run(() => api.post(`/api/integration/inbound/${hook.id}/enabled`, { enabled: !hook.enabled }), hook.enabled ? `${hook.name} turned off` : `${hook.name} turned on`)}>
+                    <button className="small" onClick={() => showLog(hook)}>Log</button>
+                    <button className="small" onClick={() => setEditing(hook)}>Edit</button>
+                    <button className="small ghost" onClick={() => run(() => api.post(`/api/integration/inbound/${hook.id}/enabled`, { enabled: !hook.enabled }), hook.enabled ? `${hook.name} turned off` : `${hook.name} turned on`)}>
                       {hook.enabled ? 'Turn off' : 'Turn on'}
                     </button>
-                    <button onClick={() => newAddress(hook)}>New address</button>
-                    <button className="danger" onClick={() => remove(hook)}>Delete</button>
+                    <button className="small ghost" onClick={() => newAddress(hook)}>New address</button>
+                    <button className="small ghost danger" onClick={() => remove(hook)}>Delete</button>
                   </div>
                 </td>
               </tr>
             ))}
           </tbody>
         </table>
-        <p className="muted">
+        <p className="muted small" style={{ padding: '12px 16px', margin: 0 }}>
           Up to {data.limits.inbound_hooks_per_company} incoming webhooks. Each takes up to {data.limits.inbound_per_minute} a minute,
           and the company up to {data.limits.inbound_per_day} leads a day ({data.used_today} today). An address stops working if the
           person who made it is no longer an owner or admin.
@@ -146,10 +152,10 @@ function InboundApp() {
       <div className="card">
         <h2>What to send</h2>
         <p>Send a POST with JSON or a normal form. Field names can be in any case. A name (or first and last name) and an email or phone are needed.</p>
-        <pre className="code-block">{`curl -X POST ${addressFor('ih_your_secret')} \\
+        <CodeBlock label="Code copied" value={`curl -X POST ${addressFor('ih_your_secret')} \\
   -H "Content-Type: application/json" \\
   -d '{"name": "Ada Lovelace", "email": "ada@example.com", "phone": "+44 20 7946 0000",
-       "company": "Analytical Engines", "message": "Please call me", "utm_campaign": "autumn"}'`}</pre>
+       "company": "Analytical Engines", "message": "Please call me", "utm_campaign": "autumn"}'`} />
         <table>
           <thead><tr><th>Lead field</th><th>Names we look for</th></tr></thead>
           <tbody>

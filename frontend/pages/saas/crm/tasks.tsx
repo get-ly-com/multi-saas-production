@@ -1,10 +1,14 @@
-import Link from 'next/link';
 import { useEffect, useState } from 'react';
-import AppShell from '@/components/AppShell';
-import { FinishForm, PLANNED_KINDS, PlanForm, dueState, dueText, kindName } from '@/components/ActivityForms';
+import AppShell, { useAccount } from '@/components/AppShell';
+import { FinishForm, PLANNED_KINDS, PlanForm, dueState, kindName } from '@/components/ActivityForms';
+import { celebrate } from '@/components/Celebrate';
 import CrmNav from '@/components/CrmNav';
 import { useTeam } from '@/components/CrmForms';
+import { ActivityChecklist, ChecklistSkeleton } from '@/components/CrmRecord';
+import EmptyState from '@/components/EmptyState';
+import { toast } from '@/components/Toast';
 import { api, today } from '@/lib/api';
+import { store } from '@/lib/ui';
 
 export default function Activities() {
   return <AppShell><ActivitiesApp /></AppShell>;
@@ -39,15 +43,8 @@ const shiftMonth = (month: string, by: number) => {
   return isoDate(date).slice(0, 7);
 };
 
-function LinkedTo({ item }: { item: any }) {
-  if (item.deal) return <Link href={`/saas/crm/deal/${item.deal.id}`}>{item.deal.title}</Link>;
-  if (item.lead) return <Link href={`/saas/crm/lead/${item.lead.id}`}>{item.lead.name}</Link>;
-  if (item.contact) return <Link href={`/saas/crm/contact/${item.contact.id}`}>{item.contact.name}</Link>;
-  if (item.company) return <Link href={`/saas/crm/company/${item.company.id}`}>{item.company.name}</Link>;
-  return <>—</>;
-}
-
 function ActivitiesApp() {
+  const account = useAccount();
   const members = useTeam();
   const [me, setMe] = useState('');
   const [tab, setTab] = useState('overdue');
@@ -165,32 +162,35 @@ function ActivitiesApp() {
           <p className="muted">Click a planned item to mark it done. Done items are greyed out.</p>
         </div>
       ) : (
-        <div className="card table-wrap">
-          {loading ? <p className="empty">Loading…</p> : (
-            <table>
-              <thead><tr><th>Type</th><th>What</th><th>Linked to</th><th>For</th><th>When</th><th /></tr></thead>
-              <tbody>
-                {shown.filter((item) => dueState(item) === tab).length === 0 && (
-                  <tr><td colSpan={6} className="empty">{tab === 'overdue' ? 'Nothing overdue' : tab === 'today' ? 'Nothing due today' : 'Nothing planned'}</td></tr>
-                )}
-                {shown.filter((item) => dueState(item) === tab).map((item) => (
-                  <tr key={item.id}>
-                    <td><span className={`badge ${tab === 'overdue' ? 'lost' : tab === 'today' ? 'sent' : ''}`}>{kindName(item.kind)}</span></td>
-                    <td className="wrap">{item.subject}{item.automation_id && <span className="muted"> · automated</span>}{item.body && <div className="muted">{item.body}</div>}</td>
-                    <td className="wrap"><LinkedTo item={item} /></td>
-                    <td>{ownerName(item.owner_id)}</td>
-                    <td><span className={tab === 'overdue' ? 'late' : ''}>{dueText(item)}</span></td>
-                    <td><div className="row-actions"><button onClick={() => setFinishing(item)}>Done</button></div></td>
-                  </tr>
-                ))}
-              </tbody>
-            </table>
+        <section className="card todo" aria-label={TABS.find(({ id }) => id === tab)?.name}>
+          {loading ? <ChecklistSkeleton rows={4} /> : (
+            <ActivityChecklist
+              key={tab}
+              items={shown.filter((item) => dueState(item) === tab)}
+              onChanged={load}
+              ownerName={who === 'me' ? undefined : ownerName}
+              onCleared={(from) => {
+                if (tab === 'later') return;
+                const key = `getly:crm-caught-up:${account?.tenantId || ''}:${today()}`;
+                if (store.get(key, false)) return;
+                store.set(key, true);
+                setTimeout(() => celebrate({ from: document.querySelector('.todo .empty-art') || from }), 260);
+              }}
+              empty={tab === 'overdue' ? (
+                <EmptyState tone="done" icon="inbox" compact title="Nothing overdue" line="You're on top of every call and to-do." />
+              ) : tab === 'today' ? (
+                <EmptyState tone="done" icon="inbox" compact title="All caught up" line="Nothing left for today. Time is yours again." />
+              ) : (
+                <EmptyState icon="calendar" compact title="Nothing planned" line="Plan a call or a to-do and it shows up here."
+                  action={{ label: 'Plan an activity', onClick: () => setPlanning(true) }} />
+              )}
+            />
           )}
-        </div>
+        </section>
       )}
 
-      {finishing && <FinishForm activity={finishing} onClose={() => setFinishing(null)} onSaved={load} />}
-      {planning && <PlanForm onClose={() => setPlanning(false)} onSaved={load} />}
+      {finishing && <FinishForm activity={finishing} onClose={() => setFinishing(null)} onSaved={async () => { toast.success('Done', { detail: finishing.subject }); await load(); }} />}
+      {planning && <PlanForm onClose={() => setPlanning(false)} onSaved={async () => { toast.success('Planned'); await load(); }} />}
     </div>
   );
 }

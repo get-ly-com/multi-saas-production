@@ -1,5 +1,7 @@
 import { FormEvent, useEffect, useState } from 'react';
 import AppShell from '@/components/AppShell';
+import Icon from '@/components/Icon';
+import EmptyState from '@/components/EmptyState';
 import Modal from '@/components/Modal';
 import { priceText } from '@/components/SchedulerForms';
 import SchedulerNav, { LOCATIONS } from '@/components/SchedulerNav';
@@ -52,8 +54,8 @@ function ServiceList() {
     <div className="stack">
       <SchedulerNav />
       <div className="page-head">
-        <h1>Services</h1>
-        {data?.is_manager && <button className="primary" onClick={() => setEditing(blank)}>Add a service</button>}
+        <div><h1>Services</h1><p className="muted">What customers can book, how long it takes and who offers it.</p></div>
+        {data?.is_manager && <button className="primary" onClick={() => setEditing(blank)}><Icon name="plus" size={16} />Add a service</button>}
       </div>
       {error && <p className="error">{error}</p>}
 
@@ -61,7 +63,7 @@ function ServiceList() {
         <table>
           <thead><tr><th>Service</th><th className="num">Length</th><th className="num">Buffer</th><th className="num">Price</th><th>Where</th><th className="num">Places</th><th>Who offers it</th><th>Status</th><th /></tr></thead>
           <tbody>
-            {services.length === 0 && <tr><td colSpan={9} className="empty">No services yet. Add what people can book, like "30 minute consultation".</td></tr>}
+            {services.length === 0 && <tr><td colSpan={9}><EmptyState compact icon="scheduler" title="No services yet" line={'Add what people can book, like "30 minute consultation".'} action={data?.is_manager ? { label: 'Add a service', onClick: () => setEditing(blank) } : undefined} /></td></tr>}
             {services.map((row) => (
               <tr key={row.id}>
                 <td className="wrap"><strong>{row.name}</strong>{row.description && <div className="muted">{row.description}</div>}</td>

@@ -1,7 +1,10 @@
 import Head from 'next/head';
 import { useRouter } from 'next/router';
 import { CSSProperties, FormEvent, KeyboardEvent, useCallback, useEffect, useRef, useState } from 'react';
+import Icon from '@/components/Icon';
+import Skeleton from '@/components/Skeleton';
 import { campaignFromUrl } from '@/lib/campaign';
+import c from '@/styles/chat.module.css';
 
 const BASE_URL = process.env.NEXT_PUBLIC_API_BASE_URL;
 
@@ -286,78 +289,113 @@ export default function PublicChat() {
   const lastMine = [...shown].reverse().find((message) => message.from === 'visitor');
   const seen = Boolean(lastMine && state?.seen_up_to && lastMine.id <= state.seen_up_to);
 
+  const companyInitial = (info?.company || '?').trim().charAt(0).toUpperCase();
+
   return (
-    <div className={`chat-public ${embedded ? 'embedded' : ''}`} style={style}>
+    <div className={`${c.public} ${embedded ? c.embedded : ''}`} style={style}>
       <Head><title>{info ? `Chat with ${info.company}` : 'Chat'}</title></Head>
-      {closed && <p className="empty">This chat is not available.</p>}
-      {!closed && !info && <p className="empty">Loading…</p>}
+      {closed && (
+        <div className={c.window}>
+          <div className="empty-state" style={{ margin: 'auto' }}>
+            <div className="empty-art" aria-hidden="true"><span className="empty-ring" /><Icon name="chat" size={24} /></div>
+            <h3>This chat is not available</h3>
+            <p>Please try again later, or contact the company another way.</p>
+          </div>
+        </div>
+      )}
+      {!closed && !info && (
+        <div className={c.window} role="status" aria-label="Loading">
+          <div className={c.wHead} style={{ background: 'var(--sunken)' }}><Skeleton width={42} height={42} radius={999} /><div style={{ flex: 1, display: 'grid', gap: 6 }}><Skeleton width="50%" height={14} /><Skeleton width="30%" height={10} /></div></div>
+          <div className={c.wMessages}><Skeleton width="70%" height={44} radius={16} /></div>
+        </div>
+      )}
       {info && (
-        <div className="chat-window">
-          <header className="chat-header">
-            <strong>{info.company}</strong>
-            {info.hours && <small>Hours: {info.hours}</small>}
-            {!online && <small>We're away right now. Leave a message and your email, and we'll reply when we're back.</small>}
+        <div className={c.window}>
+          <header className={c.wHead}>
+            <span className={c.wLogo} aria-hidden="true">{companyInitial}</span>
+            <div style={{ minWidth: 0, display: 'grid', gap: 2 }}>
+              <h1>{info.company}</h1>
+              <span className={`${c.wStatus} ${online ? '' : c.away}`}>{online ? 'Online now' : 'Away right now'}{info.hours ? ` · ${info.hours}` : ''}</span>
+            </div>
           </header>
 
-          <div className="chat-messages" aria-live="polite">
-            {shown.map((message) => (
-              message.from === 'system'
-                ? <p key={message.id} className="chat-system">{message.body}</p>
-                : (
-                  <div key={message.id} className={`chat-bubble ${message.from === 'visitor' ? 'mine' : 'theirs'}`}>
-                    <small>{message.from === 'visitor' ? 'You' : message.from === 'bot' ? `${info.company} (automatic reply)` : info.company}
-                      {message.at && ` · ${timeText(message.at)}`}</small>
-                    <div className="chat-body">{message.body}</div>
-                    {seen && message.id === lastMine?.id && <small className="chat-seen">Seen</small>}
+          <div className={c.wMessages} aria-live="polite">
+            {!online && (
+              <p className={c.system}>We&apos;re away right now. Leave a message and your email, and we&apos;ll reply when we&apos;re back.</p>
+            )}
+            {shown.map((message) => {
+              if (message.from === 'system') return <p key={message.id} className={c.system}>{message.body}</p>;
+              const mine = message.from === 'visitor';
+              return (
+                <div key={message.id} className={`${c.row} ${mine ? c.mine : ''} ${message.from === 'bot' ? c.botRow : ''}`}>
+                  {!mine && (
+                    <span className={`${c.avatar} ${c.small} ${message.from === 'bot' ? c.bot : c.staff}`} aria-hidden="true">
+                      {message.from === 'bot' ? <Icon name="assistant" size={14} /> : companyInitial}
+                    </span>
+                  )}
+                  <div className={c.bubble}>
+                    <span className={c.meta}>{mine ? 'You' : message.from === 'bot' ? `${info.company} (automatic reply)` : info.company}
+                      {message.at && ` · ${timeText(message.at)}`}</span>
+                    <div className={c.body}>{message.body}</div>
+                    {seen && message.id === lastMine?.id && <span className={c.meta} style={{ marginTop: 2, marginBottom: 0 }}>Seen</span>}
                   </div>
-                )
-            ))}
-            {state?.staff_typing && <p className="chat-typing">{info.company} is typing…</p>}
+                </div>
+              );
+            })}
+            {state?.staff_typing && (
+              <div className={c.typing} role="status" aria-label={`${info.company} is typing`}>
+                <span className={`${c.avatar} ${c.small} ${c.staff}`} aria-hidden="true">{companyInitial}</span>
+                <span className={c.dots} aria-hidden="true"><i /><i /><i /></span>
+              </div>
+            )}
 
             {state?.needs_contact && (
-              <form className="chat-contact" onSubmit={saveContact}>
-                <label>Your name<input maxLength={100} value={contact.name} onChange={(e) => setContact({ ...contact, name: e.target.value })} /></label>
-                <label>Your email<input type="email" required maxLength={254} value={contact.email} onChange={(e) => setContact({ ...contact, email: e.target.value })} /></label>
-                <button className="chat-send" disabled={busy}>Send my details</button>
+              <form className={c.wCard} onSubmit={saveContact}>
+                <p><strong>Where can we reach you?</strong></p>
+                <label>Your name<input maxLength={100} autoComplete="name" value={contact.name} onChange={(e) => setContact({ ...contact, name: e.target.value })} /></label>
+                <label>Your email<input type="email" required maxLength={254} autoComplete="email" value={contact.email} onChange={(e) => setContact({ ...contact, email: e.target.value })} /></label>
+                <button className={`chat-send ${c.sendWide}`} disabled={busy}>Send my details</button>
               </form>
             )}
             {state?.can_rate && (
-              <form className="chat-contact" onSubmit={sendRating}>
-                <strong>How was this chat?</strong>
-                <div className="chat-stars" role="radiogroup" aria-label="Rating">
+              <form className={c.wCard} onSubmit={sendRating} style={{ textAlign: 'center' }}>
+                <p><strong>How was this chat?</strong></p>
+                <div className={c.stars} role="radiogroup" aria-label="Rating">
                   {[1, 2, 3, 4, 5].map((value) => (
                     <button key={value} type="button" role="radio" aria-checked={rating === value} aria-label={`${value} of 5`}
-                      className={value <= rating ? 'on' : ''} onClick={() => setRating(value)}>★</button>
+                      className={value <= rating ? c.on : ''} onClick={() => setRating(value)}>★</button>
                   ))}
                 </div>
-                <label>Anything to add? (optional)<textarea rows={2} maxLength={500} value={comment} onChange={(e) => setComment(e.target.value)} /></label>
+                <label style={{ textAlign: 'left' }}>Anything to add? (optional)<textarea rows={2} maxLength={500} value={comment} onChange={(e) => setComment(e.target.value)} /></label>
                 <button className="chat-send" disabled={busy || !rating}>Send rating</button>
               </form>
             )}
             <div ref={bottom} />
           </div>
 
-          {error && <p className="error chat-error">{error}</p>}
+          {error && <p className="error chat-error" style={{ margin: '8px 12px 0' }}>{error}</p>}
 
-          <form className="chat-compose" onSubmit={send}>
+          <form className={c.wCompose} onSubmit={send}>
             {!token && (
               <>
-                <input aria-label="Your name (optional)" placeholder="Your name (optional)" maxLength={100} value={name} onChange={(e) => setName(e.target.value)} />
+                <input aria-label="Your name (optional)" placeholder="Your name (optional)" maxLength={100} autoComplete="name" value={name} onChange={(e) => setName(e.target.value)} />
                 <label className="trap" aria-hidden="true">Website<input tabIndex={-1} autoComplete="off" value={website} onChange={(e) => setWebsite(e.target.value)} /></label>
               </>
             )}
-            <textarea rows={2} maxLength={1000} aria-label="Message" placeholder="Type your message"
-              value={text} onChange={(e) => typed(e.target.value)} onKeyDown={onKey} />
+            <div className={c.wInput}>
+              <textarea rows={1} maxLength={1000} aria-label="Message" placeholder="Type your message"
+                value={text} onChange={(e) => typed(e.target.value)} onKeyDown={onKey} />
+              <button className={c.send} disabled={busy || !text.trim()} aria-label="Send"><Icon name="arrow-right" size={18} strokeWidth={2.2} /></button>
+            </div>
             <div className="chat-compose-actions">
               {state?.status !== 'waiting' && (
                 <button type="button" className="link" disabled={busy} onClick={askPerson}>Talk to a person</button>
               )}
               {state?.status === 'waiting' && <small className="muted">A person will reply here soon.</small>}
-              <button className="chat-send" disabled={busy || !text.trim()}>Send</button>
+              {token && state?.status === 'closed' && (
+                <button type="button" className="link" onClick={startOver}>Start a new chat</button>
+              )}
             </div>
-            {token && state?.status === 'closed' && (
-              <button type="button" className="link" onClick={startOver}>Start a new chat</button>
-            )}
           </form>
         </div>
       )}

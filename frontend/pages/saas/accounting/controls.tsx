@@ -1,6 +1,11 @@
-import { useEffect, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
+import { PageHead } from '@/components/AccountingKit';
 import AccountingNav from '@/components/AccountingNav';
 import AppShell from '@/components/AppShell';
+import { celebrate } from '@/components/Celebrate';
+import EmptyState from '@/components/EmptyState';
+import Skeleton, { SkeletonTable } from '@/components/Skeleton';
+import { toast } from '@/components/Toast';
 import { api, formatDate, money, today } from '@/lib/api';
 import useSubmit from '@/lib/useSubmit';
 
@@ -62,7 +67,8 @@ function ControlsApp() {
   const [yearEnd, setYearEnd] = useState(`${Number(today().slice(0, 4)) - 1}-12-31`);
   const [audit, setAudit] = useState<any[]>([]);
   const [error, setError] = useState('');
-  const [notice, setNotice] = useState('');
+  const [loaded, setLoaded] = useState(false);
+  const closeButton = useRef<HTMLButtonElement>(null);
 
   const load = async () => {
     try {
@@ -75,6 +81,8 @@ function ControlsApp() {
       setError('');
     } catch (err: any) {
       setError(err.message);
+    } finally {
+      setLoaded(true);
     }
   };
 
@@ -84,21 +92,39 @@ function ControlsApp() {
 
   const { busy, run: once } = useSubmit();
   // One action at a time, so a double click cannot repeat it
-  const run = (action: () => Promise<unknown>, done: string) => once(async () => {
+  const run = (action: () => Promise<unknown>, done: string, detail?: string, undo?: () => void) => once(async () => {
     try {
       await action();
-      setNotice(done);
       await load();
+      setError('');
+      toast.success(done, { detail, action: undo ? { label: 'Undo', onClick: undo } : undefined });
     } catch (err: any) {
-      setNotice('');
       setError(err.message);
     }
   });
 
+  const saveLimit = (value: string, before: string | null, undoing = false): Promise<unknown> => run(
+    () => api.put('/api/accounting/books/approval-limit', { bill_approval_limit: value }),
+    undoing ? 'Approval limit put back' : 'Approval limit saved',
+    undoing ? undefined : value === '' ? 'Anyone who can enter bills can approve them.' : `Bills over ${money(value)} need an owner or admin.`,
+    undoing ? undefined : () => { setLimit(before ?? ''); saveLimit(before ?? '', null, true); }
+  );
+
   const closeYear = () => {
     const question = `Close the year to ${formatDate(yearEnd)}? Profit moves to Retained Earnings and everything up to that date is locked.`;
     if (window.confirm(question)) {
-      run(() => api.post('/api/accounting/books/close-year', { date: yearEnd }), `Year closed to ${formatDate(yearEnd)}.`);
+      once(async () => {
+        try {
+          await api.post('/api/accounting/books/close-year', { date: yearEnd });
+          await load();
+          setError('');
+          // Closing a year is a milestone worth a moment
+          celebrate({ from: closeButton.current });
+          toast.success(`Books closed to ${formatDate(yearEnd)}`, { detail: 'Profit moved to Retained Earnings and the year is locked. Nice work.' });
+        } catch (err: any) {
+          setError(err.message);
+        }
+      });
     }
   };
 
@@ -107,11 +133,22 @@ function ControlsApp() {
   return (
     <div className="stack">
       <AccountingNav />
-      <div className="page-head"><h1>Controls</h1></div>
+      <PageHead title="Controls" line="Lock finished periods, set who approves bills, and close the year." />
 
       {error && <p className="error">{error}</p>}
-      {notice && <p className="notice">{notice}</p>}
 
+      {!loaded ? (
+        <>
+          {[0, 1].map((n) => (
+            <div className="card" key={n} style={{ display: 'grid', gap: 10 }}>
+              <Skeleton width={140} height={18} />
+              <Skeleton width="70%" height={13} />
+              <Skeleton width={170} height={36} radius={8} />
+            </div>
+          ))}
+          <SkeletonTable rows={5} columns={5} />
+        </>
+      ) : <>
       <div className="card">
         <h2>Period lock</h2>
         <p>{lockDate ? `Books are locked through ${formatDate(lockDate)}. Nothing can be posted on or before that date.` : 'No period is locked.'}</p>
@@ -121,9 +158,9 @@ function ControlsApp() {
               <label>Lock through<input type="date" value={newLock} onChange={(e) => setNewLock(e.target.value)} /></label>
             </div>
             <div className="form-actions">
-              <button className="primary" disabled={!newLock} onClick={() => run(() => api.put('/api/accounting/books/lock', { lock_date: newLock }), `Locked through ${formatDate(newLock)}.`)}>Lock</button>
+              <button className="primary" disabled={busy || !newLock} onClick={() => run(() => api.put('/api/accounting/books/lock', { lock_date: newLock }), `Locked through ${formatDate(newLock)}`, 'Nothing can be posted on or before that date.')}>Lock</button>
               {role === 'owner' && lockDate && (
-                <button onClick={() => run(() => api.put('/api/accounting/books/lock', { lock_date: null }), 'All periods reopened.')}>Reopen all</button>
+                <button disabled={busy} onClick={() => run(() => api.put('/api/accounting/books/lock', { lock_date: null }), 'All periods reopened', 'You can post to any date again.')}>Reopen all</button>
               )}
             </div>
           </>
@@ -138,7 +175,7 @@ function ControlsApp() {
             <label>Limit<input type="number" min="0" step="0.01" placeholder="No limit" value={limit} onChange={(e) => setLimit(e.target.value)} /></label>
           </div>
           <div className="form-actions">
-            <button className="primary" onClick={() => run(() => api.put('/api/accounting/books/approval-limit', { bill_approval_limit: limit }), 'Approval limit saved.')}>Save limit</button>
+            <button className="primary" disabled={busy} onClick={() => saveLimit(limit, savedLimit)}>Save limit</button>
           </div>
         </div>
       )}
@@ -150,7 +187,7 @@ function ControlsApp() {
           <div className="report-filters">
             <label>Year end<input type="date" value={yearEnd} onChange={(e) => setYearEnd(e.target.value)} /></label>
           </div>
-          <div className="form-actions"><button className="primary" disabled={!yearEnd} onClick={closeYear}>Close year</button></div>
+          <div className="form-actions"><button ref={closeButton} className="primary" disabled={busy || !yearEnd} onClick={closeYear}>Close year</button></div>
         </div>
       )}
 
@@ -158,10 +195,10 @@ function ControlsApp() {
         <div className="card table-wrap">
           <h2>Audit trail</h2>
           <p className="muted">The latest 200 changes in accounting and to your team. This record can't be edited or deleted by anyone.</p>
+          {audit.length === 0 ? <EmptyState compact icon="clock" title="No changes recorded yet" line="Every change in accounting shows up here, with who made it." /> : (
           <table>
             <thead><tr><th>When</th><th>Who</th><th>What</th><th>Record</th><th>Details</th></tr></thead>
             <tbody>
-              {audit.length === 0 && <tr><td colSpan={5} className="empty">No changes recorded yet</td></tr>}
               {audit.map((row) => (
                 <tr key={row.id}>
                   <td>{new Date(`${row.created_at}Z`).toLocaleString()}</td>
@@ -173,8 +210,10 @@ function ControlsApp() {
               ))}
             </tbody>
           </table>
+          )}
         </div>
       )}
+      </>}
     </div>
   );
 }

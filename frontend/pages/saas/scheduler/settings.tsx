@@ -1,5 +1,7 @@
 import { FormEvent, useEffect, useState } from 'react';
 import AppShell from '@/components/AppShell';
+import { toast } from '@/components/Toast';
+import Skeleton, { SkeletonTable } from '@/components/Skeleton';
 import SchedulerNav, { timeZones } from '@/components/SchedulerNav';
 import { api } from '@/lib/api';
 import useSubmit from '@/lib/useSubmit';
@@ -18,7 +20,8 @@ const STEPS = [5, 10, 15, 20, 30, 45, 60, 90, 120];
 function SettingsApp() {
   const [data, setData] = useState<any>(null);
   const [form, setForm] = useState<any>(null);
-  const [notice, setNotice] = useState('');
+  // Saves and copies finish in place, so they say so with a toast
+  const setNotice = (text: string) => { if (text) (/^Select/.test(text) ? toast.info(text) : toast.success(text)); };
   const [error, setError] = useState('');
   const [link, setLink] = useState('');
 
@@ -78,15 +81,14 @@ function SettingsApp() {
     }
   };
 
-  if (!form) return <div className="stack"><SchedulerNav />{error ? <p className="error">{error}</p> : <p>Loading…</p>}</div>;
+  if (!form) return <div className="stack"><SchedulerNav />{error ? <p className="error">{error}</p> : <SkeletonTable rows={5} columns={2} />}</div>;
   const manager = data.is_manager;
   const zones = timeZones();
 
   return (
     <div className="stack">
       <SchedulerNav />
-      <div className="page-head"><h1>Scheduler settings</h1></div>
-      {notice && <p className="notice">{notice}</p>}
+      <div className="page-head"><div><h1>Scheduler settings</h1><p className="muted">Your booking page, notice times and calendar links.</p></div></div>
       {error && <p className="error">{error}</p>}
 
       <div className="card">
@@ -189,7 +191,7 @@ function CalendarFeed({ canEdit, onNotice, onError }: {
     <div className="card">
       <h2>See your bookings in your own calendar</h2>
       <p className="muted">Subscribe to this link in Google Calendar ("Other calendars", then "From URL"), Outlook ("Add calendar", then "Subscribe from web") or Apple Calendar. It shows your bookings from the last 60 days and the next year, and your video meetings. Calendar apps check it every few hours. It is read-only: changes are made here.</p>
-      {token === undefined && <p>Loading…</p>}
+      {token === undefined && <Skeleton width="70%" height={34} />}
       {token === null && (canEdit
         ? <button disabled={busy} type="button" className="primary" onClick={make}>Make my calendar link</button>
         : <p className="muted">Viewers don't take bookings, so there's no calendar link.</p>)}
@@ -317,7 +319,7 @@ function BusyCalendar({ canEdit, onNotice, onError }: {
         <p className="muted">Events marked "free" and cancelled events don't block anything. If you also subscribe to your get-ly calendar link, those bookings are not counted twice.</p>
       </details>
 
-      {!status && <p>Loading…</p>}
+      {!status && <Skeleton width="70%" height={34} style={{ marginTop: 12 }} />}
       {status && !feed && (canEdit ? form : <p className="muted">Viewers don't take bookings, so there's nothing to block.</p>)}
       {status && feed && (
         <>

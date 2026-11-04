@@ -2,16 +2,23 @@ import Link from 'next/link';
 import { useRouter } from 'next/router';
 import { useEffect, useState } from 'react';
 import AppShell from '@/components/AppShell';
-import { EMPLOYMENT_TYPES, EmployeeForm, LeaveForm, employeeForm, fullName, leaveDates } from '@/components/HrForms';
+import EmptyState from '@/components/EmptyState';
+import { Avatar, Balances, EMPLOYMENT_TYPES, EmployeeForm, LEAVE_WORDS, LeaveForm, PersonCell, employeeForm, fullName, leaveBadge, leaveDates } from '@/components/HrForms';
 import HrNav from '@/components/HrNav';
 import { EmployeeChecklists } from '@/components/HrWork';
-import { api, formatDate, money, queryId } from '@/lib/api';
+import Icon from '@/components/Icon';
+import Skeleton, { SkeletonTable } from '@/components/Skeleton';
+import { toast } from '@/components/Toast';
+import { api, formatDate, money, queryId, today } from '@/lib/api';
 import { getSupabase } from '@/lib/supabase';
 import useSubmit from '@/lib/useSubmit';
+import styles from '@/styles/hr.module.css';
 
 export default function EmployeePage() {
   return <AppShell><EmployeeApp /></AppShell>;
 }
+
+type Tab = 'overview' | 'leave' | 'pay' | 'checklists' | 'documents';
 
 function EmployeeApp() {
   const router = useRouter();
@@ -24,6 +31,7 @@ function EmployeeApp() {
   const [myId, setMyId] = useState('');
   const [editing, setEditing] = useState(false);
   const [asking, setAsking] = useState(false);
+  const [tab, setTab] = useState<Tab>('overview');
   const [error, setError] = useState('');
 
   const load = async () => {
@@ -53,13 +61,32 @@ function EmployeeApp() {
     if (!window.confirm(`Delete ${fullName(person)} and their leave history? This can't be undone.`)) return;
     try {
       await api.delete(`/api/hr/employees/${person.id}`);
+      toast.success('Employee deleted', { detail: `${fullName(person)} is off the people list.` });
       router.push('/saas/hr');
     } catch (err: any) {
-      setError(err.message);
+      toast.error('Could not delete', { detail: err.message });
     }
   });
 
-  if (!person) return <div className="stack"><HrNav />{error ? <p className="error">{error}</p> : <p className="empty">Loading…</p>}</div>;
+  if (!person) {
+    return (
+      <div className="stack">
+        <HrNav />
+        {error ? <p className="error">{error}</p> : (
+          <div className="stack" role="status" aria-label="Loading">
+            <div className={styles.profile}>
+              <Skeleton width={64} height={64} radius={999} />
+              <div style={{ display: 'grid', gap: 8, flex: 1 }}>
+                <Skeleton width={220} height={26} />
+                <Skeleton width={320} height={14} />
+              </div>
+            </div>
+            <SkeletonTable rows={4} columns={3} />
+          </div>
+        )}
+      </div>
+    );
+  }
 
   const setProbation = () => once(async () => {
     const value = window.prompt('Probation ends on (YYYY-MM-DD). Leave empty for no probation.', person.terms?.probation_end_date || '');
@@ -67,8 +94,9 @@ function EmployeeApp() {
     try {
       await api.put(`/api/hr/employees/${person.id}/probation`, { probation_end_date: value.trim() || null });
       await load();
+      toast.success(value.trim() ? 'Probation set' : 'Probation removed', { detail: value.trim() ? `Ends ${formatDate(value.trim())}.` : undefined });
     } catch (err: any) {
-      setError(err.message);
+      toast.error('Could not change probation', { detail: err.message });
     }
   });
 
@@ -77,128 +105,195 @@ function EmployeeApp() {
     if (!value) return;
     try {
       await api.post('/api/hr/attendance/pin', { employee_id: person.id, pin: value.trim() });
-      window.alert('Kiosk PIN saved.');
+      toast.success('Kiosk PIN saved', { detail: `${fullName(person)} can clock in with it now.` });
     } catch (err: any) {
-      setError(err.message);
+      toast.error('Could not save the PIN', { detail: err.message });
     }
   });
 
   const pay = person.pay;
   const reports = people.filter((row) => row.manager_id === person.id);
+  const now = today();
+  const state = person.start_date > now ? { label: 'Starting', style: 'new' }
+    : person.end_date && person.end_date < now ? { label: 'Left', style: 'inactive' } : { label: 'Active', style: 'active' };
+  const slips = (person.payslips || []).filter((slip: any) => slip.run);
+  const waiting = (person.leave || []).filter((row: any) => row.status === 'pending').length;
+
+  const tabs: { id: Tab; label: string; count?: number }[] = [
+    { id: 'overview', label: 'Overview' },
+    ...(person.balances ? [{ id: 'leave' as Tab, label: 'Leave', count: waiting || undefined }] : []),
+    ...(payroll ? [{ id: 'pay' as Tab, label: 'Pay' }] : []),
+    { id: 'checklists', label: 'Checklists' },
+    ...(manager || isMe ? [{ id: 'documents' as Tab, label: 'Documents' }] : [])
+  ];
+  const shown = tabs.some((row) => row.id === tab) ? tab : 'overview';
 
   return (
     <div className="stack">
       <HrNav />
-      <div className="page-head">
-        <div>
+
+      <header className={styles.profile}>
+        <Avatar person={person} size="large" gone={state.label === 'Left'} />
+        <div className={styles.profileText}>
           <h1>{fullName(person)}</h1>
-          <p className="muted">#{person.employee_number}{person.job_title ? ` · ${person.job_title}` : ''}{person.department ? ` · ${person.department.name}` : ''}</p>
+          <div className="muted">{person.job_title || 'No job title'}{person.manager ? ` · reports to ${fullName(person.manager)}` : ''}</div>
+          <div className={styles.chips}>
+            <span className={`badge ${state.style}`}>{state.label}</span>
+            {person.department && <span className="chip">{person.department.name}</span>}
+            <span className="chip">{EMPLOYMENT_TYPES[person.employment_type]}</span>
+            <span className="chip">#{person.employee_number}</span>
+          </div>
         </div>
-        <div className="row-actions">
-          {(manager || isMe) && <button onClick={() => setAsking(true)}>Request leave</button>}
+        <div className={styles.profileActions}>
+          {(manager || isMe) && <button className="always" onClick={() => setAsking(true)}>Request leave</button>}
           {manager && <button onClick={() => setEditing(true)}>Edit</button>}
           {manager && <button disabled={busy} className="danger" onClick={remove}>Delete</button>}
         </div>
-      </div>
+      </header>
 
       {error && <p className="error">{error}</p>}
 
-      <div className="stats">
-        <div className="card">
-          <div className="stat-label">Contact</div>
-          <div>{person.email || 'No email'}</div>
-          <div>{person.phone || 'No phone'}</div>
-        </div>
-        <div className="card">
-          <div className="stat-label">Employment</div>
-          <div>{EMPLOYMENT_TYPES[person.employment_type]}</div>
-          <div>Started {formatDate(person.start_date)}</div>
-          {person.end_date && <div>Leaves {formatDate(person.end_date)}</div>}
-          {person.terms?.probation_end_date && <div>Probation ends {formatDate(person.terms.probation_end_date)}</div>}
-          {manager && <div className="row-actions" style={{ justifyContent: 'flex-start' }}>
-            <button disabled={busy} onClick={setProbation}>{person.terms?.probation_end_date ? 'Change probation' : 'Set probation'}</button>
-            <button disabled={busy} onClick={setPin}>Set kiosk PIN</button>
-          </div>}
-        </div>
-        <div className="card">
-          <div className="stat-label">Reports to</div>
-          <div>{person.manager ? <Link href={`/saas/hr/employee/${person.manager.id}`}>{fullName(person.manager)}</Link> : 'No one'}</div>
-          {reports.length > 0 && <div className="muted">{reports.length} {reports.length === 1 ? 'person reports' : 'people report'} to them</div>}
-        </div>
-        {payroll && pay && (
-          <div className="card">
-            <div className="stat-label">Pay (only those who run payroll see this)</div>
-            <div>{pay.pay_type === 'salary' ? `${money(pay.amount)} a year` : `${money(pay.amount)} an hour, ${pay.hours_per_week} hours a week`}</div>
-            {pay.notes && <div className="muted" style={{ whiteSpace: 'pre-wrap' }}>{pay.notes}</div>}
-          </div>
-        )}
+      <div className="tabs" role="tablist" aria-label="Sections">
+        {tabs.map((row) => (
+          <button key={row.id} type="button" role="tab" aria-selected={shown === row.id} className={`always ${shown === row.id ? 'active' : ''}`} onClick={() => setTab(row.id)}>
+            {row.label}{row.count ? <> <span className="count-pill">{row.count}</span></> : null}
+          </button>
+        ))}
       </div>
 
-      {person.balances && (
-        <div className="card">
-          <h2>Leave this year</h2>
-          <div className="stats">
-            {person.balances.map((row: any) => (
-              <div key={row.leave_type_id}>
-                <div className="stat-label">{row.name}</div>
-                <div className="stat-value">{row.limited ? `${row.left} left` : `${row.taken} taken`}</div>
-                {row.limited && <div className="muted">{row.taken} taken of {row.allowance}{Number(row.carried_over) > 0 ? ` + ${row.carried_over} carried over` : ''}{Number(row.pending) > 0 ? `, ${row.pending} waiting` : ''}</div>}
+      {shown === 'overview' && (
+        <>
+          <div className="card">
+            <dl className={styles.facts}>
+              <div><dt>Email</dt><dd>{person.email ? <a href={`mailto:${person.email}`}>{person.email}</a> : <span className="muted">None</span>}</dd></div>
+              <div><dt>Phone</dt><dd>{person.phone ? <a href={`tel:${person.phone}`}>{person.phone}</a> : <span className="muted">None</span>}</dd></div>
+              <div><dt>Started</dt><dd>{formatDate(person.start_date)}</dd></div>
+              <div><dt>Last day</dt><dd>{person.end_date ? formatDate(person.end_date) : <span className="muted">Not set</span>}</dd></div>
+              <div><dt>Probation ends</dt><dd>{person.terms?.probation_end_date ? formatDate(person.terms.probation_end_date) : <span className="muted">No probation</span>}</dd></div>
+              <div><dt>Reports to</dt><dd>{person.manager ? <Link href={`/saas/hr/employee/${person.manager.id}`}>{fullName(person.manager)}</Link> : 'No one'}</dd></div>
+            </dl>
+            {manager && (
+              <div className="row-actions" style={{ justifyContent: 'flex-start', marginTop: 16 }}>
+                <button className="small" disabled={busy} onClick={setProbation}>{person.terms?.probation_end_date ? 'Change probation' : 'Set probation'}</button>
+                <button className="small" disabled={busy} onClick={setPin}>Set kiosk PIN</button>
               </div>
-            ))}
+            )}
           </div>
-        </div>
+
+          {reports.length > 0 && (
+            <div className="card">
+              <h2>{plural(reports.length)} to them</h2>
+              <div className={styles.balanceGrid} style={{ marginTop: 12 }}>
+                {reports.map((row) => (
+                  <Link key={row.id} href={`/saas/hr/employee/${row.id}`} className="org-card">
+                    <PersonCell person={row} sub={row.job_title || 'No job title'} size="small" />
+                  </Link>
+                ))}
+              </div>
+            </div>
+          )}
+
+          {person.balances && (
+            <div className="card">
+              <h2>Leave this year</h2>
+              <div style={{ marginTop: 12 }}><Balances rows={person.balances} /></div>
+            </div>
+          )}
+        </>
       )}
 
-      {person.balances && (
-        <div className="card table-wrap">
-          <h2>Leave requests</h2>
-          <table>
-            <thead><tr><th>Dates</th><th>Type</th><th className="num">Days</th><th>Status</th><th>Reason</th></tr></thead>
-            <tbody>
-              {person.leave.length === 0 && <tr><td colSpan={5} className="empty">No leave yet</td></tr>}
-              {person.leave.map((row: any) => (
-                <tr key={row.id}>
-                  <td>{leaveDates(row)}</td>
-                  <td>{row.leave_type?.name}</td>
-                  <td className="num">{Number(row.days)}</td>
-                  <td><span className={`badge ${row.status === 'approved' ? 'paid' : row.status === 'pending' ? 'open' : 'void'}`}>{row.status}</span></td>
-                  <td className="wrap">{row.reason || '—'}{row.decision_note ? ` · ${row.decision_note}` : ''}</td>
-                </tr>
-              ))}
-            </tbody>
-          </table>
-        </div>
+      {shown === 'leave' && person.balances && (
+        <>
+          <div className="card"><Balances rows={person.balances} /></div>
+          {person.leave.length === 0 ? (
+            <div className="card">
+              <EmptyState compact icon="leave" title="No leave yet" line="Time off they ask for shows up here."
+                action={manager || isMe ? { label: 'Request leave', onClick: () => setAsking(true) } : undefined} />
+            </div>
+          ) : (
+            <div className="card table-wrap">
+              <table>
+                <thead><tr><th>Dates</th><th>Type</th><th className="num">Days</th><th>Status</th><th>Reason</th></tr></thead>
+                <tbody>
+                  {person.leave.map((row: any) => (
+                    <tr key={row.id}>
+                      <td>{leaveDates(row)}</td>
+                      <td>{row.leave_type?.name}</td>
+                      <td className="num">{Number(row.days)}</td>
+                      <td><span className={`badge ${leaveBadge(row.status)}`}>{LEAVE_WORDS[row.status] || row.status}</span></td>
+                      <td className="wrap">{row.reason || '—'}{row.decision_note ? <div className="muted">{row.decision_note}</div> : null}</td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+          )}
+        </>
       )}
 
-      {payroll && person.payslips.length > 0 && (
-        <div className="card table-wrap">
-          <h2>Payslips</h2>
-          <table>
-            <thead><tr><th>Month</th><th>Paid on</th><th>Status</th><th className="num">Gross</th><th className="num">Take-home</th></tr></thead>
-            <tbody>
-              {person.payslips.filter((slip: any) => slip.run).map((slip: any) => (
-                <tr key={slip.id}>
-                  <td><Link href={`/saas/hr/payslip/${slip.id}`}>{slip.run.period_start.slice(0, 7)}</Link></td>
-                  <td>{formatDate(slip.run.pay_date)}</td>
-                  <td><span className={`badge ${slip.run.status}`}>{slip.run.status}</span></td>
-                  <td className="num">{money(slip.gross)}</td>
-                  <td className="num">{money(slip.net)}</td>
-                </tr>
-              ))}
-            </tbody>
-          </table>
-        </div>
+      {shown === 'pay' && payroll && (
+        <>
+          <div className="stats">
+            <div className="card">
+              <div className="stat-label">{pay?.pay_type === 'hourly' ? 'Hourly rate' : 'Salary'}</div>
+              <div className="stat-value">{pay && Number(pay.amount) ? money(pay.amount) : '—'}</div>
+              <div className="muted">{pay ? (pay.pay_type === 'salary' ? 'a year' : `an hour, ${pay.hours_per_week} hours a week`) : 'Not set'}</div>
+            </div>
+            {slips[0] && (
+              <Link href={`/saas/hr/payslip/${slips[0].id}`} className="card stat-link">
+                <div className="stat-label">Last take-home</div>
+                <div className="stat-value">{money(slips[0].net)}</div>
+                <div className="muted">{slips[0].run.period_start.slice(0, 7)}</div>
+              </Link>
+            )}
+          </div>
+          {pay?.notes && <p className="muted" style={{ whiteSpace: 'pre-wrap' }}>{pay.notes}</p>}
+          {slips.length === 0 ? (
+            <div className="card">
+              <EmptyState compact icon="money" title="No payslips yet" line="Their payslips appear here after their first pay run."
+                action={{ label: 'Go to payroll', href: '/saas/hr/payroll' }} />
+            </div>
+          ) : (
+            <div className="card table-wrap">
+              <table>
+                <thead><tr><th>Month</th><th>Paid on</th><th>Status</th><th className="num">Gross</th><th className="num">Take-home</th></tr></thead>
+                <tbody>
+                  {slips.map((slip: any) => (
+                    <tr key={slip.id}>
+                      <td><Link href={`/saas/hr/payslip/${slip.id}`}>{slip.run.period_start.slice(0, 7)}</Link></td>
+                      <td>{formatDate(slip.run.pay_date)}</td>
+                      <td><span className={`badge ${slip.run.status === 'approved' ? 'approved_run' : slip.run.status}`}>{slip.run.status}</span></td>
+                      <td className="num">{money(slip.gross)}</td>
+                      <td className="num"><strong>{money(slip.net)}</strong></td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+          )}
+          <p className="muted small"><Icon name="info" size={13} /> Only people who run payroll see this tab.</p>
+        </>
       )}
 
-      <EmployeeChecklists employee={person} manager={manager} isMe={isMe} isTheirManager={Boolean(myId) && person.manager_id === myId} />
+      {shown === 'checklists' && (
+        <EmployeeChecklists employee={person} manager={manager} isMe={isMe} isTheirManager={Boolean(myId) && person.manager_id === myId} />
+      )}
 
-      {(manager || isMe) && <EmployeeDocuments employee={person} manager={manager} />}
+      {shown === 'documents' && (manager || isMe) && <EmployeeDocuments employee={person} manager={manager} />}
 
-      {editing && <EmployeeForm initial={employeeForm(person)} people={people} onClose={() => setEditing(false)} onSaved={load} />}
-      {asking && <LeaveForm people={[person]} employeeId={person.id} onClose={() => setAsking(false)} onSaved={load} />}
+      {editing && (
+        <EmployeeForm initial={employeeForm(person)} people={people} onClose={() => setEditing(false)}
+          onSaved={async () => { await load(); toast.success('Saved', { detail: `${fullName(person)}'s record is up to date.` }); }} />
+      )}
+      {asking && (
+        <LeaveForm people={[person]} employeeId={person.id} onClose={() => setAsking(false)}
+          onSaved={async () => { await load(); toast.success('Leave requested', { detail: 'It is waiting for a decision.' }); }} />
+      )}
     </div>
   );
 }
+
+const plural = (n: number) => (n === 1 ? '1 person reports' : `${n} people report`);
 
 // Contracts, IDs and certificates. Files go straight to private storage; the HR service records them.
 const DOCUMENT_BUCKET = 'hr-documents';
@@ -289,6 +384,7 @@ function EmployeeDocuments({ employee, manager }: { employee: any; manager: bool
       setName('');
       setInputKey((key) => key + 1);
       await load();
+      toast.success('Document added', { detail: name.trim() || file.name });
     } catch (err: any) {
       setError(err.message);
     } finally {
@@ -317,6 +413,7 @@ function EmployeeDocuments({ employee, manager }: { employee: any; manager: bool
       if (removeError) throw new Error('The file couldn’t be deleted. Please try again.');
       await api.delete(`/api/hr/documents/${doc.id}`);
       await load();
+      toast.success('Document deleted', { detail: doc.name });
     } catch (err: any) {
       setError(err.message);
     }
@@ -326,15 +423,18 @@ function EmployeeDocuments({ employee, manager }: { employee: any; manager: bool
     <div className="card table-wrap">
       <h2>Documents</h2>
       {error && <p className="error">{error}</p>}
-      <table>
+      {documents === null && !error && <div style={{ display: 'grid', gap: 10, marginTop: 12 }}><Skeleton height={14} /><Skeleton height={14} width="70%" /></div>}
+      {documents?.length === 0 && (
+        <EmptyState compact icon="invoice" title="No documents yet"
+          line={manager ? 'Keep contracts, IDs and certificates here, private to this person and admins.' : 'Contracts and certificates an admin adds show up here.'} />
+      )}
+      {documents && documents.length > 0 && <table>
         <thead><tr><th>Name</th><th>Type</th><th className="num">Size</th><th>Added</th><th /></tr></thead>
         <tbody>
-          {documents === null && <tr><td colSpan={5} className="empty">Loading…</td></tr>}
-          {documents?.length === 0 && <tr><td colSpan={5} className="empty">No documents yet</td></tr>}
-          {documents?.map((doc) => (
+          {documents.map((doc) => (
             <tr key={doc.id}>
-              <td className="wrap">{doc.name}</td>
-              <td>{DOCUMENT_KINDS[doc.kind] || doc.kind}</td>
+              <td className="wrap"><span className={styles.person}><Icon name="invoice" size={16} /> {doc.name}</span></td>
+              <td><span className="chip">{DOCUMENT_KINDS[doc.kind] || doc.kind}</span></td>
               <td className="num">{fileSize(Number(doc.size_bytes))}</td>
               <td>{formatDate(doc.created_at)}</td>
               <td>
@@ -346,7 +446,7 @@ function EmployeeDocuments({ employee, manager }: { employee: any; manager: bool
             </tr>
           ))}
         </tbody>
-      </table>
+      </table>}
       {manager && (
         <form onSubmit={upload} style={{ marginTop: 12 }}>
           <div className="form-grid">

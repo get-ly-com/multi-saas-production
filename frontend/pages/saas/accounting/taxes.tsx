@@ -1,7 +1,11 @@
 import { FormEvent, useEffect, useState } from 'react';
 import AccountingNav from '@/components/AccountingNav';
-import AppShell from '@/components/AppShell';
+import { PageHead, StatusPill } from '@/components/AccountingKit';
+import AppShell, { useAccount } from '@/components/AppShell';
+import EmptyState from '@/components/EmptyState';
 import Modal from '@/components/Modal';
+import { SkeletonTable } from '@/components/Skeleton';
+import { toast } from '@/components/Toast';
 import { api } from '@/lib/api';
 import useSubmit from '@/lib/useSubmit';
 
@@ -14,6 +18,7 @@ function TaxesApp() {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState('');
   const [adding, setAdding] = useState(false);
+  const canEdit = useAccount()?.canEdit;
 
   const load = async () => {
     try {
@@ -34,6 +39,10 @@ function TaxesApp() {
     try {
       await api.put(`/api/accounting/tax-rates/${rate.id}`, { is_active });
       await load();
+      toast.success(is_active ? 'Tax rate active again' : 'Tax rate deactivated', {
+        detail: `${rate.name} (${Number(rate.rate)}%)`,
+        action: { label: 'Undo', onClick: () => { setActive(rate, !is_active); } }
+      });
     } catch (err: any) {
       setError(err.message);
     }
@@ -42,26 +51,27 @@ function TaxesApp() {
   return (
     <div className="stack">
       <AccountingNav />
-      <div className="page-head">
-        <h1>Tax rates</h1>
+      <PageHead title="Tax rates" line="A rate can't be edited once created, so past invoices stay correct. When a rate changes, deactivate it and add a new one.">
         <button className="primary" onClick={() => setAdding(true)}>New tax rate</button>
-      </div>
-
-      <p className="muted">A rate can't be edited once created, so past invoices stay correct. When a rate changes, deactivate it and add a new one.</p>
+      </PageHead>
 
       {error && <p className="error">{error}</p>}
 
-      <div className="card table-wrap">
-        {loading ? <p className="empty">Loading…</p> : (
+      {loading ? <SkeletonTable rows={3} columns={4} /> : rates.length === 0 ? (
+        <div className="card">
+          <EmptyState icon="invoice" title="No tax rates yet" line="Add the sales tax or VAT you charge, and it shows up on every invoice line."
+            action={canEdit ? { label: 'New tax rate', onClick: () => setAdding(true) } : undefined} />
+        </div>
+      ) : (
+        <div className="card table-wrap">
           <table>
             <thead><tr><th>Name</th><th className="num">Rate</th><th>Status</th><th /></tr></thead>
             <tbody>
-              {rates.length === 0 && <tr><td colSpan={4} className="empty">No tax rates yet</td></tr>}
               {rates.map((rate) => (
                 <tr key={rate.id}>
                   <td className="wrap">{rate.name}</td>
                   <td className="num">{Number(rate.rate)}%</td>
-                  <td><span className="badge">{rate.is_active ? 'active' : 'inactive'}</span></td>
+                  <td><StatusPill status={rate.is_active ? 'active' : 'inactive'} /></td>
                   <td>
                     <div className="row-actions">
                       <button onClick={() => setActive(rate, !rate.is_active)}>{rate.is_active ? 'Deactivate' : 'Activate'}</button>
@@ -71,8 +81,8 @@ function TaxesApp() {
               ))}
             </tbody>
           </table>
-        )}
-      </div>
+        </div>
+      )}
 
       {adding && <RateForm onClose={() => setAdding(false)} onSaved={load} />}
     </div>
@@ -91,6 +101,7 @@ function RateForm({ onClose, onSaved }: { onClose: () => void; onSaved: () => vo
       try {
         await api.post('/api/accounting/tax-rates', form);
         await onSaved();
+        toast.success('Tax rate added', { detail: `${form.name} at ${Number(form.rate)}% is ready to use` });
         onClose();
       } catch (err: any) {
         setError(err.message);

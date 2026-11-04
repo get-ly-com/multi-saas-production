@@ -9,6 +9,7 @@ export const PRODUCTS = [
   { name: 'Chat', path: '/saas/chat', about: 'Talk to website visitors live and turn questions into tickets.' },
   { name: 'Social', path: '/saas/social', about: 'Plan, schedule and review posts across your social accounts.' },
   { name: 'Assistant', path: '/saas/assistant', about: 'See what needs doing today and ask questions about your numbers.' },
+  { name: 'Brain', path: '/saas/brain', about: 'Review ideas for growing the business, based on your own numbers, and approve the ones you like.' },
   { name: 'Analytics', path: '/saas/analytics', about: 'See how the business is doing with reports and goals.' },
   { name: 'Integrations', path: '/saas/integrations', about: 'Connect other tools with API keys, webhooks and imports.' }
 ];

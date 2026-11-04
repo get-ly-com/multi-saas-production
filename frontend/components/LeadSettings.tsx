@@ -1,5 +1,6 @@
 import { FormEvent, useEffect, useState } from 'react';
 import { useTeam } from '@/components/CrmForms';
+import { toast } from '@/components/Toast';
 import { api } from '@/lib/api';
 import useSubmit from '@/lib/useSubmit';
 
@@ -19,7 +20,8 @@ export default function LeadSettings() {
   const [settings, setSettings] = useState<any>(null);
   const [origin, setOrigin] = useState('');
   const [error, setError] = useState('');
-  const [notice, setNotice] = useState('');
+  // Finished actions show as a toast
+  const setNotice = (message: string) => { if (message) toast.success(message.replace(/\.$/, '')); };
   const set = (field: string, value: unknown) => setSettings({ ...settings, [field]: value });
 
   const load = async () => {
@@ -48,7 +50,7 @@ export default function LeadSettings() {
     return run(async () => {
       try {
         await api.post('/api/crm/lead-settings', settings);
-        setNotice('Lead settings saved. Open leads have been scored again.');
+        toast.success('Lead settings saved', { detail: 'Open leads have been scored again.' });
         await load();
       } catch (err: any) {
         setNotice('');
@@ -81,7 +83,6 @@ export default function LeadSettings() {
     <form className="stack" onSubmit={save}>
       <h2>Leads</h2>
       {error && <p className="error">{error}</p>}
-      {notice && <p className="notice">{notice}</p>}
 
       <div className="card stack">
         <h2>Assignment</h2>

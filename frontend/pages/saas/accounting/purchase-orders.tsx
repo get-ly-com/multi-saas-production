@@ -1,8 +1,12 @@
 import { FormEvent, useEffect, useState } from 'react';
 import AccountingNav from '@/components/AccountingNav';
-import AppShell from '@/components/AppShell';
+import { Amount, PageHead, StatusPill } from '@/components/AccountingKit';
+import AppShell, { useAccount } from '@/components/AppShell';
 import CurrencyFields from '@/components/CurrencyFields';
+import EmptyState from '@/components/EmptyState';
 import Modal from '@/components/Modal';
+import { SkeletonTable } from '@/components/Skeleton';
+import { toast } from '@/components/Toast';
 import { api, formatDate, money, today } from '@/lib/api';
 import useSubmit from '@/lib/useSubmit';
 
@@ -22,8 +26,9 @@ function OrdersApp() {
   const [role, setRole] = useState('');
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState('');
-  const [notice, setNotice] = useState('');
   const [form, setForm] = useState<any>(null);
+  const canEdit = useAccount()?.canEdit;
+  const newOrder = () => setForm({ ...blankOrder, order_date: today() });
 
   const load = async () => {
     try {
@@ -56,25 +61,24 @@ function OrdersApp() {
 
   const { busy, run: once } = useSubmit();
   // One action at a time, so a double click cannot repeat it
-  const run = (action: () => Promise<unknown>, done = '') => once(async () => {
+  const run = (action: () => Promise<unknown>, title: string, detail?: string) => once(async () => {
     try {
       await action();
-      setNotice(done);
       await load();
+      toast.success(title, { detail });
     } catch (err: any) {
-      setNotice('');
       setError(err.message);
     }
   });
 
   const reject = (order: any) => {
     const note = window.prompt(`Why are you rejecting ${order.po_number}?`);
-    if (note !== null) run(() => api.post(`/api/accounting/purchase-orders/${order.id}/decide`, { approve: false, note }));
+    if (note !== null) run(() => api.post(`/api/accounting/purchase-orders/${order.id}/decide`, { approve: false, note }), 'Order rejected', `${order.po_number} went back to whoever raised it`);
   };
 
   const remove = (order: any) => {
     if (window.confirm(`Delete ${order.po_number}? This can't be undone.`)) {
-      run(() => api.delete(`/api/accounting/purchase-orders/${order.id}`));
+      run(() => api.delete(`/api/accounting/purchase-orders/${order.id}`), 'Order deleted', `${order.po_number} is gone`);
     }
   };
 
@@ -83,42 +87,42 @@ function OrdersApp() {
   return (
     <div className="stack">
       <AccountingNav />
-      <div className="page-head">
-        <h1>Purchase orders</h1>
-        <button className="primary" onClick={() => setForm({ ...blankOrder, order_date: today() })}>New purchase order</button>
-      </div>
-
-      <p className="muted">An order posts nothing to the books. Once approved it can become a draft bill. People can't approve their own order if someone else in the company can.</p>
+      <PageHead title="Purchase orders" line="An order posts nothing to the books. Once approved it can become a draft bill. People can't approve their own order if someone else in the company can.">
+        <button className="primary" onClick={newOrder}>New purchase order</button>
+      </PageHead>
 
       {error && <p className="error">{error}</p>}
-      {notice && <p className="notice">{notice}</p>}
 
-      <div className="card table-wrap">
-        {loading ? <p className="empty">Loading…</p> : (
+      {loading ? <SkeletonTable rows={5} columns={6} /> : orders.length === 0 ? (
+        <div className="card">
+          <EmptyState icon="quote" title="No purchase orders yet" line="Raise an order before you buy, get it approved, then turn it into a bill in one click."
+            action={canEdit ? { label: 'New purchase order', onClick: newOrder } : undefined} />
+        </div>
+      ) : (
+        <div className="card table-wrap">
           <table>
             <thead><tr><th>Order</th><th>Vendor</th><th>Date</th><th>Status</th><th className="num">Amount</th><th /></tr></thead>
             <tbody>
-              {orders.length === 0 && <tr><td colSpan={6} className="empty">No purchase orders yet</td></tr>}
               {orders.map((order) => (
                 <tr key={order.id}>
                   <td>{order.po_number}</td>
                   <td className="wrap">{order.vendor?.name}{order.decision_note && <div className="muted">{order.decision_note}</div>}</td>
                   <td>{formatDate(order.order_date)}</td>
-                  <td><span className={`badge ${order.status === 'approved' ? 'paid' : order.status === 'rejected' ? 'void' : order.status === 'pending' ? 'sent' : ''}`}>{order.status}</span></td>
-                  <td className="num">{money(order.amount, order.currency)}</td>
+                  <td><StatusPill status={order.status} label={order.status === 'pending' ? 'Waiting for approval' : undefined} /></td>
+                  <td className="num"><Amount value={order.amount} currency={order.currency} /></td>
                   <td>
                     <div className="row-actions">
                       {order.status === 'draft' && (
-                        <button onClick={() => run(() => api.post(`/api/accounting/purchase-orders/${order.id}/submit`, {}))}>Submit</button>
+                        <button onClick={() => run(() => api.post(`/api/accounting/purchase-orders/${order.id}/submit`, {}), 'Sent for approval', `${order.po_number} is waiting for an owner or admin`)}>Send for approval</button>
                       )}
                       {order.status === 'pending' && manager && (
                         <>
-                          <button onClick={() => run(() => api.post(`/api/accounting/purchase-orders/${order.id}/decide`, { approve: true }))}>Approve</button>
+                          <button onClick={() => run(() => api.post(`/api/accounting/purchase-orders/${order.id}/decide`, { approve: true }), 'Order approved', `${order.po_number} can now become a bill`)}>Approve</button>
                           <button className="danger" onClick={() => reject(order)}>Reject</button>
                         </>
                       )}
                       {order.status === 'approved' && (
-                        <button onClick={() => run(() => api.post(`/api/accounting/purchase-orders/${order.id}/bill`, {}), `${order.po_number} is now a draft bill. Approve it under Bills.`)}>Create bill</button>
+                        <button onClick={() => run(() => api.post(`/api/accounting/purchase-orders/${order.id}/bill`, {}), 'Draft bill created', `${order.po_number} is now a draft bill. Approve it under Bills.`)}>Create bill</button>
                       )}
                       {['draft', 'rejected'].includes(order.status) && (
                         <>
@@ -132,8 +136,8 @@ function OrdersApp() {
               ))}
             </tbody>
           </table>
-        )}
-      </div>
+        </div>
+      )}
 
       {form && (
         <OrderForm
@@ -173,6 +177,7 @@ function OrderForm({ initial, vendors, accounts, taxRates, costCenters, onClose,
       try {
         await api.post('/api/accounting/purchase-orders', { id, vendor_id, order_date, expected_date, notes, currency, exchange_rate, line_items });
         await onSaved();
+        toast.success(id ? 'Order saved' : 'Order created', { detail: `${money(subtotal + tax, currency || undefined)} with ${vendors.find((vendor) => vendor.id === vendor_id)?.name || 'your vendor'}` });
         onClose();
       } catch (err: any) {
         setError(err.message);

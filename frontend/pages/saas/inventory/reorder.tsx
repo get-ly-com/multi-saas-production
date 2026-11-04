@@ -1,14 +1,20 @@
 import Link from 'next/link';
+import { useRouter } from 'next/router';
 import { useEffect, useState } from 'react';
 import AppShell from '@/components/AppShell';
-import InventoryNav from '@/components/InventoryNav';
+import EmptyState from '@/components/EmptyState';
+import InventoryNav, { StockBar } from '@/components/InventoryNav';
+import { SkeletonStats, SkeletonTable } from '@/components/Skeleton';
+import { toast } from '@/components/Toast';
 import { api, money } from '@/lib/api';
+import styles from '@/styles/inventory.module.css';
 
 export default function Reorder() {
   return <AppShell><ReorderApp /></AppShell>;
 }
 
 function ReorderApp() {
+  const router = useRouter();
   const [rows, setRows] = useState<any[] | null>(null);
   const [suppliers, setSuppliers] = useState<any[]>([]);
   const [expected, setExpected] = useState('');
@@ -56,8 +62,12 @@ function ReorderApp() {
       });
       setMade(result);
       await load();
+      toast.success(`${result.length} purchase ${result.length === 1 ? 'order' : 'orders'} drafted`, {
+        detail: result.map((order: any) => `${order.po_number} for ${order.vendor}`).join(', '),
+        action: { label: 'Open', onClick: () => router.push('/saas/accounting/purchase-orders') }
+      });
     } catch (err: any) {
-      setError(err.message);
+      toast.error('Could not draft the orders', { detail: err.message });
     } finally {
       setBusy(false);
     }
@@ -66,10 +76,23 @@ function ReorderApp() {
   return (
     <div className="stack">
       <div className="page-head">
-        <h1>Reorder</h1>
+        <div>
+          <h1>Reorder</h1>
+          <p className="muted">What is running low, and one click to draft the orders.</p>
+        </div>
       </div>
       <InventoryNav />
-      <p className="muted">
+
+      {!rows ? <SkeletonStats count={4} /> : rows.length > 0 && (
+        <div className="stats">
+          <div className="card"><div className="stat-label">Items to reorder</div><div className="stat-value">{rows.length}</div></div>
+          <div className="card"><div className="stat-label">Out of stock</div><div className="stat-value">{rows.filter((row) => Number(row.on_hand) <= 0).length}</div></div>
+          <div className="card"><div className="stat-label">Chosen</div><div className="stat-value">{chosen.length}</div><div className="muted">{supplierCount} {supplierCount === 1 ? 'supplier' : 'suppliers'}</div></div>
+          <div className="card"><div className="stat-label">Order total</div><div className="stat-value">{money(total)}</div><div className="muted">before tax</div></div>
+        </div>
+      )}
+
+      <p className="muted small">
         Items at or below their reorder level, counting what's already on purchase orders and draft bills. Choose what to buy and
         draft purchase orders are made, one per supplier, in Accounting. When an order is approved and billed, the stock comes in
         at what you paid.
@@ -82,26 +105,31 @@ function ReorderApp() {
         </p>
       )}
 
+      {!rows ? <SkeletonTable rows={5} columns={6} /> : rows.length === 0 ? (
+        <div className="card">
+          <EmptyState tone="done" icon="inventory" title="Nothing needs reordering" line="Every item is above its reorder level. Set a reorder level on items to see suggestions here."
+            action={{ label: 'See items', href: '/saas/inventory' }} />
+        </div>
+      ) : (
       <div className="card table-wrap">
-        {!rows ? <p className="empty">Loading…</p> : (
           <table>
             <thead>
               <tr>
                 <th aria-label="Choose" /><th>Item</th><th className="num">On hand</th><th className="num">On order</th>
-                <th className="num">Reorder at</th><th className="num">Order</th><th className="num">Cost each</th><th>Supplier</th><th className="num">Line total</th>
+                <th>Stock</th><th className="num">Order</th><th className="num">Cost each</th><th>Supplier</th><th className="num">Line total</th>
               </tr>
             </thead>
             <tbody>
-              {rows.length === 0 && (
-                <tr><td colSpan={9} className="empty">Nothing needs reordering. Set a reorder level on items to see suggestions here.</td></tr>
-              )}
               {rows.map((row) => (
-                <tr key={row.item_id}>
+                <tr key={row.item_id} className={row.chosen ? styles.chosenRow : ''}>
                   <td><input type="checkbox" aria-label={`Order ${row.name}`} checked={row.chosen} onChange={(e) => set(row.item_id, 'chosen', e.target.checked)} style={{ width: 'auto' }} /></td>
-                  <td className="wrap">{row.name}<div className="muted">{row.sku}</div></td>
+                  <td className="wrap"><div className={styles.itemName}>{row.name}</div><span className={styles.sku}>{row.sku}</span></td>
                   <td className="num">{row.on_hand} <span className="muted">{row.unit}</span></td>
-                  <td className="num">{Number(row.on_order)}</td>
-                  <td className="num">{row.reorder_level}{row.reorder_to > row.reorder_level && <div className="muted">up to {row.reorder_to}</div>}</td>
+                  <td className="num">{Number(row.on_order) || <span className="muted">0</span>}</td>
+                  <td>
+                    <StockBar item={{ quantity: row.on_hand, reorder_level: row.reorder_level, reorder_to: row.reorder_to, unit: row.unit }} bare />
+                    <div className="muted small" style={{ marginTop: 4 }}>Reorder at {row.reorder_level}{row.reorder_to > row.reorder_level ? `, up to ${row.reorder_to}` : ''}</div>
+                  </td>
                   <td className="num">
                     <input aria-label={`Quantity of ${row.name}`} type="number" min="1" step="1" style={{ width: 80 }}
                       value={row.quantity} onChange={(e) => set(row.item_id, 'quantity', e.target.value)} />
@@ -121,20 +149,24 @@ function ReorderApp() {
               ))}
             </tbody>
           </table>
-        )}
       </div>
+      )}
 
       {rows && rows.length > 0 && (
-        <div className="report-filters" style={{ alignItems: 'flex-end' }}>
+        <div className={styles.orderBar}>
+          <div className={styles.orderTotal}>
+            <span className="stat-label">{chosen.length} chosen</span>
+            <strong>{money(total)}</strong>
+          </div>
           <label>Expected by<input type="date" value={expected} onChange={(e) => setExpected(e.target.value)} /></label>
-          <div className="form-actions">
+          <div className="form-actions" style={{ margin: 0 }}>
             <button className="primary" onClick={create} disabled={busy || chosen.length === 0 || chosen.some((row) => !row.vendor_id)}>
               {chosen.length === 0 ? 'Choose items to order'
                 : `Draft ${supplierCount} purchase ${supplierCount === 1 ? 'order' : 'orders'} (${money(total)} before tax)`}
             </button>
           </div>
-          {chosen.some((row) => !row.vendor_id) && <p className="muted">Choose a supplier for every ticked item. You can set a usual supplier on each item.</p>}
-          {suppliers.length === 0 && <p className="muted">Add suppliers under Vendors in Accounting first.</p>}
+          {chosen.some((row) => !row.vendor_id) && <p className="muted small" style={{ flexBasis: '100%', margin: 0 }}>Choose a supplier for every ticked item. You can set a usual supplier on each item.</p>}
+          {suppliers.length === 0 && <p className="muted small" style={{ flexBasis: '100%', margin: 0 }}>Add suppliers under Vendors in Accounting first.</p>}
         </div>
       )}
     </div>

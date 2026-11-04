@@ -1,4 +1,6 @@
 import { useRef, useState } from 'react';
+import Icon from '@/components/Icon';
+import Skeleton from '@/components/Skeleton';
 import { api, money } from '@/lib/api';
 import useSubmit from '@/lib/useSubmit';
 
@@ -87,20 +89,24 @@ export default function ReceiptReader({ onRead }: { onRead: (fields: ReceiptFiel
   };
 
   return (
-    <div style={{ margin: '0 0 12px' }}>
+    <div style={{ margin: '0 0 12px', display: 'grid', gap: 8 }}>
       <input ref={input} type="file" accept={TYPES.join(',')} hidden onChange={(e) => choose(e.target.files?.[0])} />
-      <button type="button" className="always" disabled={busy} onClick={() => input.current?.click()}>
-        {busy ? 'Reading receipt…' : 'Read receipt'}
-      </button>
-      {!read && !error && !busy && <span className="muted"> Take or choose a photo and we&apos;ll fill in what we can.</span>}
+      <div style={{ display: 'flex', alignItems: 'center', gap: 10, flexWrap: 'wrap' }}>
+        <button type="button" className="always" disabled={busy} onClick={() => input.current?.click()} aria-busy={busy}>
+          <Icon name={busy ? 'clock' : 'sparkle'} size={16} />
+          {busy ? 'Reading receipt…' : 'Read receipt'}
+        </button>
+        {!read && !error && !busy && <span className="muted small">Take or choose a photo and we&apos;ll fill in what we can.</span>}
+        {busy && <span style={{ flex: '1 1 160px', maxWidth: 240 }} aria-hidden="true"><Skeleton height={10} radius={999} /></span>}
+      </div>
       {read && (
-        <p className="notice">
+        <p className="notice" style={{ margin: 0 }}>
           Filled in from the receipt{read.vendor ? ` from ${read.vendor}` : ''}
           {read.total !== null ? `: ${amount(read.total, read.currency)}` : ''}
           {read.tax ? ` including ${amount(read.tax, read.currency)} tax` : ''}. Please check it before saving.
         </p>
       )}
-      {error && <p className="error">{error}</p>}
+      {error && <p className="error" style={{ margin: 0 }}>{error}</p>}
     </div>
   );
 }

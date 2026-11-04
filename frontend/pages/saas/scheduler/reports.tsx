@@ -1,5 +1,6 @@
 import { FormEvent, useEffect, useState } from 'react';
 import AppShell from '@/components/AppShell';
+import { SkeletonStats, SkeletonTable } from '@/components/Skeleton';
 import SchedulerNav, { addDays } from '@/components/SchedulerNav';
 import { api } from '@/lib/api';
 
@@ -41,14 +42,14 @@ function BookingReports() {
   return (
     <div className="stack">
       <SchedulerNav />
-      <div className="page-head"><h1>Booking reports</h1></div>
+      <div className="page-head"><div><h1>Booking reports</h1><p className="muted">How bookings turn out, by service and by person.</p></div></div>
       <form className="card sched-filters" onSubmit={submit}>
         <label>From<input type="date" required value={form.from} onChange={(e) => setForm({ ...form, from: e.target.value })} /></label>
         <label>To<input type="date" required value={form.to} onChange={(e) => setForm({ ...form, to: e.target.value })} /></label>
         <button className="primary">Show</button>
       </form>
       {error && <p className="error">{error}</p>}
-      {!stats && !error && <p>Loading…</p>}
+      {!stats && !error && <><SkeletonStats count={4} /><SkeletonTable rows={4} columns={6} /></>}
 
       {totals && (
         <>

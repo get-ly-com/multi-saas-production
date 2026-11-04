@@ -1,9 +1,14 @@
 import { FormEvent, Fragment, useEffect, useState } from 'react';
 import AppShell from '@/components/AppShell';
-import IntegrationsNav, { EVENTS, OnlyManagers, ShowOnce, dateTime, eventLabel } from '@/components/IntegrationsNav';
+import EmptyState from '@/components/EmptyState';
+import Icon from '@/components/Icon';
+import IntegrationsNav, { CodeBlock, EVENTS, IntegrationsLoading, OnlyManagers, ShowOnce, dateTime, eventLabel } from '@/components/IntegrationsNav';
 import Modal from '@/components/Modal';
+import Skeleton from '@/components/Skeleton';
+import { toast } from '@/components/Toast';
 import { api } from '@/lib/api';
 import useSubmit from '@/lib/useSubmit';
+import s from '@/styles/settings.module.css';
 
 export default function Webhooks() {
   return <AppShell><WebhooksApp /></AppShell>;
@@ -38,13 +43,13 @@ function WebhooksApp() {
 
   const { busy, run: once } = useSubmit();
   // One action at a time, so a double click cannot repeat it
-  const run = (work: () => Promise<unknown>, done = '') => once(async () => {
+  const run = (work: () => Promise<unknown>, done = '', detail = '') => once(async () => {
     setNotice('');
     setError('');
     try {
       await work();
       await load();
-      setNotice(done);
+      if (done) toast.success(done, detail ? { detail } : undefined);
       return true;
     } catch (err: any) {
       setError(err.message);
@@ -52,10 +57,11 @@ function WebhooksApp() {
     }
   });
 
-  if (!data) return <div className="stack"><IntegrationsNav />{error ? <p className="error">{error}</p> : <p className="empty">Loading…</p>}</div>;
-  if (!data.is_manager) return <div className="stack"><IntegrationsNav /><h1>Webhooks</h1><OnlyManagers /></div>;
+  if (!data) return <div className="stack"><IntegrationsNav />{error ? <p className="error">{error}</p> : <IntegrationsLoading />}</div>;
+  if (!data.is_manager) return <div className="stack"><IntegrationsNav /><div className="page-head"><h1>Webhooks</h1></div><OnlyManagers /></div>;
 
   const hooks: Hook[] = data.webhooks;
+  const full = hooks.length >= data.limits.webhooks_per_company;
   // run already allows one action at a time
   const newSecret = async (hook: Hook) => {
     if (!window.confirm(`Make a new signing secret for ${hook.name}? The old one stops working straight away.`)) return;
@@ -69,55 +75,61 @@ function WebhooksApp() {
     <div className="stack">
       <IntegrationsNav />
       <div className="page-head">
-        <h1>Webhooks</h1>
-        <button className="primary" onClick={() => setEditing('new')} disabled={hooks.length >= data.limits.webhooks_per_company}>Add webhook</button>
+        <div>
+          <h1>Webhooks</h1>
+          <p className="muted">Tell another app straight away when something happens here, like an invoice being paid.</p>
+        </div>
+        <button className="primary" onClick={() => setEditing('new')} disabled={full}><Icon name="plus" size={16} />Add webhook</button>
       </div>
-      <p className="muted">
-        A webhook sends a short message to another app's web address when something happens here, like an invoice being paid.
-        Each message is signed so the other app can check it came from us. Failed messages are tried again up to {data.limits.attempts} times.
-      </p>
       {error && <p className="error">{error}</p>}
       {notice && <p className="notice">{notice}</p>}
 
-      <div className="card table-wrap">
-        <table>
-          <thead><tr><th>Name</th><th>Sends</th><th>Status</th><th className="num">Last 7 days</th><th /></tr></thead>
-          <tbody>
-            {hooks.length === 0 && <tr><td colSpan={5} className="empty">No webhooks yet</td></tr>}
+      <div className="card">
+        {hooks.length === 0 ? (
+          <EmptyState icon="integrations" title="No webhooks yet"
+            line={`Each message is signed so the other app can check it came from us. Failed messages are tried again up to ${data.limits.attempts} times.`}
+            action={{ label: 'Add webhook', onClick: () => setEditing('new') }} />
+        ) : (
+          <ul className={s.list}>
             {hooks.map((hook) => (
-              <tr key={hook.id}>
-                <td>
-                  <strong>{hook.name}</strong>
-                  <div className="muted wrap-anywhere">{hook.url}</div>
-                </td>
-                <td>{hook.events.map(eventLabel).join(', ')}</td>
-                <td>
-                  {hook.enabled
-                    ? <span className="badge delivered">On</span>
-                    : <span className="badge failed">Off</span>}
-                  {hook.disabled_reason && <div className="muted">{hook.disabled_reason}</div>}
-                  {hook.enabled && hook.failures_in_row > 0 && <div className="muted">{hook.failures_in_row} failed in a row</div>}
-                  {hook.waiting > 0 && <div className="muted">{hook.waiting} waiting to send</div>}
-                </td>
-                <td className="num">{hook.delivered_7} sent{hook.failed_7 > 0 ? `, ${hook.failed_7} failed` : ''}</td>
-                <td>
-                  <div className="row-actions">
-                    <button onClick={() => setLog(hook)}>Log</button>
-                    <button disabled={!hook.enabled} onClick={() => run(() => api.post(`/api/integration/webhooks/${hook.id}/test`, {}), 'Test sent. Open the log to see the answer.')}>Send test</button>
-                    <button onClick={() => setEditing(hook)}>Edit</button>
-                    <button onClick={() => run(() => api.post(`/api/integration/webhooks/${hook.id}/enabled`, { enabled: !hook.enabled }))}>{hook.enabled ? 'Turn off' : 'Turn on'}</button>
-                    <button disabled={busy} onClick={() => newSecret(hook)}>New secret</button>
-                    <button className="danger" onClick={() => window.confirm(`Delete ${hook.name} and its log?`) && run(() => api.delete(`/api/integration/webhooks/${hook.id}`))}>Delete</button>
-                  </div>
-                </td>
-              </tr>
+              <li key={hook.id} className={s.row} style={{ alignItems: 'flex-start' }}>
+                <span className={s.tileIcon} aria-hidden="true"><Icon name="integrations" size={18} /></span>
+                <span className={s.rowText}>
+                  <strong style={{ display: 'flex', gap: 8, alignItems: 'center', flexWrap: 'wrap', whiteSpace: 'normal' }}>
+                    {hook.name}
+                    {hook.enabled ? <span className="badge active">On</span> : <span className="badge failed">Off</span>}
+                  </strong>
+                  <span className="wrap-anywhere" style={{ fontFamily: 'var(--font-mono)', fontSize: 'var(--text-xs)' }}>{hook.url}</span>
+                  <span>Sends {hook.events.map(eventLabel).join(', ')}</span>
+                  <span>
+                    <span className="tabular">{hook.delivered_7} sent{hook.failed_7 > 0 ? `, ${hook.failed_7} failed` : ''} in the last 7 days</span>
+                    {hook.waiting > 0 && ` · ${hook.waiting} waiting to send`}
+                    {hook.enabled && hook.failures_in_row > 0 && <span style={{ color: 'var(--warn)' }}> · {hook.failures_in_row} failed in a row</span>}
+                  </span>
+                  {hook.disabled_reason && <span style={{ color: 'var(--danger)' }}>{hook.disabled_reason}</span>}
+                </span>
+                <span className={s.rowActions}>
+                  <button className="small" onClick={() => setLog(hook)}>Log</button>
+                  <button className="small" disabled={!hook.enabled} onClick={() => run(() => api.post(`/api/integration/webhooks/${hook.id}/test`, {}), 'Test sent', 'Open the log to see the answer.')}>Send test</button>
+                  <button className="small" onClick={() => setEditing(hook)}>Edit</button>
+                  <button className="small ghost" onClick={() => run(() => api.post(`/api/integration/webhooks/${hook.id}/enabled`, { enabled: !hook.enabled }), hook.enabled ? 'Webhook turned off' : 'Webhook turned on')}>{hook.enabled ? 'Turn off' : 'Turn on'}</button>
+                  <button className="small ghost" disabled={busy} onClick={() => newSecret(hook)}>New secret</button>
+                  <button className="small ghost danger" onClick={() => window.confirm(`Delete ${hook.name} and its log?`) && run(() => api.delete(`/api/integration/webhooks/${hook.id}`), 'Webhook deleted')}>Delete</button>
+                </span>
+              </li>
             ))}
-          </tbody>
-        </table>
-        <p className="muted">
-          {data.used_today} of {data.limits.deliveries_per_day} messages used today. A webhook that fails {data.limits.failures_before_off} times
-          in a row is turned off and owners and admins get an alert.
-        </p>
+          </ul>
+        )}
+        <div style={{ marginTop: 14 }}>
+          <div className={s.progress}><span style={{ width: `${Math.min(100, (data.used_today / Math.max(1, data.limits.deliveries_per_day)) * 100)}%` }} /></div>
+          <p className={s.progressText}>
+            <span>{data.used_today} of {data.limits.deliveries_per_day} messages used today</span>
+            <span>{hooks.length} of {data.limits.webhooks_per_company} webhooks</span>
+          </p>
+          <p className="muted small" style={{ margin: '6px 0 0' }}>
+            A webhook that fails {data.limits.failures_before_off} times in a row is turned off and owners and admins get an alert.
+          </p>
+        </div>
       </div>
 
       <Checking />
@@ -134,7 +146,7 @@ function WebhooksApp() {
                 : await api.put(`/api/integration/webhooks/${(editing as Hook).id}`, body);
               setEditing(null);
               if (isNew) setSecret({ name: body.name, secret: result.secret });
-            }, isNew ? '' : 'Webhook saved.');
+            }, isNew ? '' : 'Webhook saved');
           }}
         />
       )}
@@ -225,7 +237,7 @@ function DeliveryLog({ hook, onClose }: { hook: Hook; onClose: () => void }) {
         <table>
           <thead><tr><th>Time</th><th>Event</th><th>Result</th><th className="num">Answer</th><th /></tr></thead>
           <tbody>
-            {rows === null && <tr><td colSpan={5} className="empty">Loading…</td></tr>}
+            {rows === null && [0, 1, 2].map((n) => <tr key={n}><td colSpan={5}><Skeleton height={14} width={`${80 - n * 15}%`} /></td></tr>)}
             {rows?.length === 0 && <tr><td colSpan={5} className="empty">Nothing sent yet</td></tr>}
             {rows?.map((row) => (
               <Fragment key={row.id}>
@@ -269,12 +281,12 @@ function Checking() {
         <code> sha256=</code> followed by the HMAC-SHA256 of the timestamp, a dot and the raw body, made with your signing secret.
         Answer with any 2xx status within 5 seconds.
       </p>
-      <pre className="code-block">{`// Node.js
+      <CodeBlock label="Code copied" value={`// Node.js
 const crypto = require('crypto');
 const expected = 'sha256=' + crypto.createHmac('sha256', process.env.WEBHOOK_SECRET)
   .update(req.headers['x-webhook-timestamp'] + '.' + rawBody).digest('hex');
 const ok = crypto.timingSafeEqual(Buffer.from(expected), Buffer.from(req.headers['x-webhook-signature']))
-  && Math.abs(Date.now() / 1000 - Number(req.headers['x-webhook-timestamp'])) < 300;`}</pre>
+  && Math.abs(Date.now() / 1000 - Number(req.headers['x-webhook-timestamp'])) < 300;`} />
     </div>
   );
 }

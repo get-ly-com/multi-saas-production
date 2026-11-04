@@ -1,7 +1,7 @@
 import Link from 'next/link';
 import { useRouter } from 'next/router';
 
-const SECTIONS = [
+export const SECTIONS = [
   { name: 'People', path: '/saas/hr' },
   { name: 'Org chart', path: '/saas/hr/org-chart' },
   { name: 'Leave', path: '/saas/hr/leave' },

@@ -1,8 +1,12 @@
 import { FormEvent, useEffect, useState } from 'react';
 import AccountingNav from '@/components/AccountingNav';
-import AppShell from '@/components/AppShell';
+import { Amount, PageHead, StatusPill, styles } from '@/components/AccountingKit';
+import AppShell, { useAccount } from '@/components/AppShell';
+import EmptyState from '@/components/EmptyState';
 import Modal from '@/components/Modal';
-import { api, formatDate, money, today } from '@/lib/api';
+import { SkeletonTable } from '@/components/Skeleton';
+import { toast } from '@/components/Toast';
+import { api, formatDate, today } from '@/lib/api';
 import useSubmit from '@/lib/useSubmit';
 
 export default function Revenue() {
@@ -15,8 +19,8 @@ function RevenueApp() {
   const [through, setThrough] = useState(today());
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState('');
-  const [notice, setNotice] = useState('');
   const [adding, setAdding] = useState(false);
+  const canEdit = useAccount()?.canEdit;
 
   const load = async () => {
     try {
@@ -43,10 +47,10 @@ function RevenueApp() {
   const recognize = () => once(async () => {
     try {
       const posted = await api.post('/api/accounting/revenue/run', { through });
-      setNotice(posted ? `Posted ${posted} month(s) of revenue.` : 'Nothing new to post. Only finished months are earned.');
       await load();
+      if (posted) toast.success('Revenue recognized', { detail: `${posted} ${posted === 1 ? 'month' : 'months'} earned through ${formatDate(through)}` });
+      else toast.info('Nothing new to post', { detail: 'Only finished months are earned.' });
     } catch (err: any) {
-      setNotice('');
       setError(err.message);
     }
   });
@@ -56,6 +60,7 @@ function RevenueApp() {
     try {
       await api.post(`/api/accounting/revenue/${schedule.id}/cancel`, {});
       await load();
+      toast.success('Schedule cancelled', { detail: `What was left on ${schedule.invoice_number} is earned today` });
     } catch (err: any) {
       setError(err.message);
     }
@@ -64,15 +69,11 @@ function RevenueApp() {
   return (
     <div className="stack">
       <AccountingNav />
-      <div className="page-head">
-        <h1>Revenue schedules</h1>
+      <PageHead title="Revenue schedules" line="For work delivered over time, such as a yearly subscription. The sale moves to Deferred Revenue, then is earned evenly month by month.">
         <button className="primary" onClick={() => setAdding(true)}>New schedule</button>
-      </div>
-
-      <p className="muted">For work delivered over time, such as a yearly subscription. The sale moves to Deferred Revenue, then is earned evenly month by month.</p>
+      </PageHead>
 
       {error && <p className="error">{error}</p>}
-      {notice && <p className="notice">{notice}</p>}
 
       <div className="card">
         <div className="report-filters">
@@ -81,24 +82,28 @@ function RevenueApp() {
         <div className="form-actions"><button className="primary" disabled={!through} onClick={recognize}>Recognize revenue</button></div>
       </div>
 
-      <div className="card table-wrap">
-        {loading ? <p className="empty">Loading…</p> : (
+      {loading ? <SkeletonTable rows={4} columns={8} /> : schedules.length === 0 ? (
+        <div className="card">
+          <EmptyState icon="clock" title="No revenue schedules yet" line="Spread a yearly or multi-month invoice over the months you deliver the work."
+            action={canEdit ? { label: 'New schedule', onClick: () => setAdding(true) } : undefined} />
+        </div>
+      ) : (
+        <div className="card table-wrap">
           <table>
             <thead>
-              <tr><th>Invoice</th><th>Customer</th><th>From</th><th>Months</th><th className="num">Total</th><th className="num">Earned</th><th className="num">Deferred</th><th>Status</th><th /></tr>
+              <tr><th>Invoice</th><th>Customer</th><th>From</th><th className="num">Months</th><th className="num">Total</th><th className="num">Earned</th><th className="num">Deferred</th><th>Status</th><th /></tr>
             </thead>
             <tbody>
-              {schedules.length === 0 && <tr><td colSpan={9} className="empty">No revenue schedules yet</td></tr>}
               {schedules.map((schedule) => (
                 <tr key={schedule.id}>
                   <td>{schedule.invoice_number}</td>
                   <td className="wrap">{schedule.customer_name}</td>
                   <td>{formatDate(schedule.start_date)}</td>
-                  <td>{schedule.months}</td>
-                  <td className="num">{money(schedule.total)}</td>
-                  <td className="num">{money(schedule.earned)}</td>
-                  <td className="num">{money(schedule.deferred)}</td>
-                  <td><span className="badge">{schedule.status}</span></td>
+                  <td className="num">{schedule.months}</td>
+                  <td className="num"><Amount value={schedule.total} /></td>
+                  <td className="num"><Amount value={schedule.earned} /></td>
+                  <td className="num"><Amount value={schedule.deferred} /></td>
+                  <td><StatusPill status={schedule.status === 'completed' ? 'completed' : schedule.status} /></td>
                   <td>
                     {schedule.status === 'active' && (
                       <div className="row-actions"><button disabled={busy} className="danger" onClick={() => cancel(schedule)}>Cancel</button></div>
@@ -106,10 +111,17 @@ function RevenueApp() {
                   </td>
                 </tr>
               ))}
+              <tr className={styles.totalRow}>
+                <td colSpan={4}>Total</td>
+                <td className="num"><Amount value={schedules.reduce((sum, row) => sum + Number(row.total || 0), 0)} /></td>
+                <td className="num"><Amount value={schedules.reduce((sum, row) => sum + Number(row.earned || 0), 0)} /></td>
+                <td className="num"><Amount value={schedules.reduce((sum, row) => sum + Number(row.deferred || 0), 0)} strong /></td>
+                <td colSpan={2} />
+              </tr>
             </tbody>
           </table>
-        )}
-      </div>
+        </div>
+      )}
 
       {adding && <ScheduleForm invoices={invoices} onClose={() => setAdding(false)} onSaved={load} />}
     </div>
@@ -128,6 +140,7 @@ function ScheduleForm({ invoices, onClose, onSaved }: { invoices: any[]; onClose
       try {
         await api.post('/api/accounting/revenue', form);
         await onSaved();
+        toast.success('Schedule set up', { detail: `${invoices.find((invoice) => invoice.id === form.invoice_id)?.invoice_number || 'The invoice'} is earned over ${form.months} months` });
         onClose();
       } catch (err: any) {
         setError(err.message);

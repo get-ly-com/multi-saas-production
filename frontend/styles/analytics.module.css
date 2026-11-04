@@ -1,0 +1,78 @@
+/* Analytics: stat tiles with delta chips, cleaner charts, goal rings. Tokens only. */
+
+.section { display: flex; align-items: baseline; justify-content: space-between; gap: 12px; margin: 8px 0 -8px; }
+.section h2 { margin: 0; font-size: var(--text-sm); text-transform: uppercase; letter-spacing: 0.06em; color: var(--muted); font-weight: 600; }
+
+.tiles { display: grid; grid-template-columns: repeat(auto-fit, minmax(200px, 1fr)); gap: var(--s-3); }
+.tile {
+  display: grid; gap: 4px; align-content: start; padding: 16px 18px; border-radius: var(--r-lg); background: var(--surface);
+  border: 1px solid var(--border); box-shadow: var(--shadow-xs); color: var(--text); position: relative;
+  transition: box-shadow var(--dur-2) var(--ease-out), border-color var(--dur-2), transform var(--dur-2) var(--ease-out);
+}
+.tile:hover { color: var(--text); border-color: var(--border-strong); box-shadow: var(--shadow-md); transform: translateY(-1px); }
+.tile:active { transform: scale(0.995); }
+.tileLabel { display: flex; justify-content: space-between; gap: 8px; align-items: center; color: var(--muted); font-size: var(--text-sm); font-weight: 500; }
+.tileLabel :global(.icon) { color: var(--faint); transition: transform var(--dur-2) var(--ease-out), color var(--dur-2); }
+.tile:hover .tileLabel :global(.icon) { color: var(--text-2); transform: translateX(2px); }
+.tileValue { font-size: var(--text-2xl); font-weight: 650; letter-spacing: -0.02em; line-height: 1.2; font-variant-numeric: tabular-nums; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.tileFoot { display: flex; flex-wrap: wrap; gap: 6px; align-items: center; font-size: var(--text-xs); color: var(--muted); }
+.tileNote { font-size: var(--text-xs); color: var(--muted); }
+
+/* Delta chips: up green, down red, flat grey. "Good" decides the colour, the arrow shows the direction. */
+.delta { display: inline-flex; align-items: center; gap: 2px; font-size: var(--text-xs); font-weight: 650; line-height: 18px; padding: 0 7px; border-radius: var(--r-full); background: var(--sunken); color: var(--text-2); font-variant-numeric: tabular-nums; white-space: nowrap; }
+.delta svg { width: 12px; height: 12px; fill: none; stroke: currentColor; stroke-width: 2.4; stroke-linecap: round; stroke-linejoin: round; }
+.good { background: var(--good-soft); color: var(--good); }
+.bad { background: var(--danger-soft); color: var(--danger); }
+
+/* Goals strip on the dashboard */
+.goalStrip { display: grid; gap: 12px; padding: 16px 18px; border-radius: var(--r-lg); background: var(--surface); border: 1px solid var(--border); box-shadow: var(--shadow-xs); color: var(--text); }
+.goalStrip:hover { color: var(--text); border-color: var(--border-strong); box-shadow: var(--shadow-md); }
+.goalStripHead { display: flex; justify-content: space-between; color: var(--muted); font-size: var(--text-sm); font-weight: 500; }
+.goalItems { display: grid; grid-template-columns: repeat(auto-fit, minmax(190px, 1fr)); gap: 12px; }
+.goalItem { display: flex; align-items: center; gap: 10px; min-width: 0; font-size: var(--text-sm); }
+.goalItem span { min-width: 0; overflow: hidden; text-overflow: ellipsis; }
+
+/* Progress ring */
+.ring { flex: none; transform: rotate(-90deg); overflow: visible; }
+.ring circle { fill: none; }
+.ringTrack { stroke: var(--sunken); }
+.ringFill { stroke: var(--accent); stroke-linecap: round; transition: stroke-dashoffset var(--dur-4) var(--ease-out); }
+.ringFill.done { stroke: var(--good); }
+.ringFill.behind { stroke: var(--warn); }
+.ringText { transform: rotate(90deg); font-weight: 650; fill: var(--text); font-variant-numeric: tabular-nums; }
+
+/* Charts */
+.chartCard { padding: 18px 18px 12px; }
+.chart { margin: 0; }
+.chartHead { display: flex; justify-content: space-between; align-items: baseline; gap: 8px; flex-wrap: wrap; margin-bottom: 6px; }
+.chartHead strong { font-size: var(--text-md); }
+.readout { font-size: var(--text-sm); color: var(--muted); font-variant-numeric: tabular-nums; min-height: 20px; }
+.readout b { color: var(--text); font-weight: 600; }
+.chart svg { width: 100%; height: auto; display: block; overflow: visible; }
+.grid { stroke: var(--border); stroke-width: 1; stroke-dasharray: 2 4; }
+.zero { stroke: var(--border-strong); stroke-width: 1; }
+.tick { fill: var(--muted); font-size: 11px; font-family: var(--font-ui); font-variant-numeric: tabular-nums; }
+.bar { transition: opacity var(--dur-1) var(--ease-out); }
+.tone1 { fill: var(--series-1); background: var(--series-1); }
+.tone2 { fill: var(--series-2); background: var(--series-2); }
+.negative { opacity: 0.75; }
+.column { fill: transparent; }
+.chart svg:hover .bar { opacity: 0.45; }
+.chart svg:hover .on .bar { opacity: 1; }
+.on .column { fill: var(--hover); }
+.hit { fill: transparent; cursor: pointer; }
+.legend { display: flex; gap: 14px; font-size: var(--text-xs); color: var(--muted); margin-bottom: 4px; }
+.legend i { display: inline-block; width: 9px; height: 9px; border-radius: 3px; margin-right: 6px; vertical-align: -1px; }
+
+/* Goals page */
+.goals { display: grid; grid-template-columns: repeat(auto-fill, minmax(260px, 1fr)); gap: var(--s-3); }
+.goalCard { display: grid; grid-template-columns: auto minmax(0, 1fr); gap: 16px; align-items: center; padding: 18px; border-radius: var(--r-lg); background: var(--surface); border: 1px solid var(--border); box-shadow: var(--shadow-xs); }
+.goalCard.isDone { border-color: color-mix(in srgb, var(--good) 35%, var(--border)); }
+.goalText { display: grid; gap: 3px; min-width: 0; }
+.goalText strong { font-size: var(--text-md); }
+.goalText span { color: var(--muted); font-size: var(--text-sm); font-variant-numeric: tabular-nums; }
+.goalValue { font-size: var(--text-xl) !important; color: var(--text) !important; font-weight: 650; letter-spacing: -0.02em; }
+
+@media (prefers-reduced-motion: reduce) {
+  .tile, .ringFill { transition: none; }
+}

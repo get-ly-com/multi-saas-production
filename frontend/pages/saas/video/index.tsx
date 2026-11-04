@@ -1,10 +1,14 @@
 import Link from 'next/link';
 import { FormEvent, useEffect, useState } from 'react';
 import AppShell from '@/components/AppShell';
+import EmptyState from '@/components/EmptyState';
+import Icon from '@/components/Icon';
 import Modal from '@/components/Modal';
 import { dayLabel } from '@/components/SchedulerNav';
+import Skeleton from '@/components/Skeleton';
 import { api } from '@/lib/api';
 import useSubmit from '@/lib/useSubmit';
+import s from '@/styles/scheduler.module.css';
 
 export default function Meetings() {
   return <AppShell><MeetingsApp /></AppShell>;
@@ -79,15 +83,17 @@ function MeetingsApp() {
   return (
     <div className="stack">
       <div className="page-head">
-        <h1>Meetings</h1>
+        <div>
+          <h1>Meetings</h1>
+          <p className="muted">Video calls with customers and your team, one click to join.</p>
+        </div>
         {setup?.can_edit && (
           <div className="row-actions">
-            <button disabled={busy} className="primary" onClick={startNow}>Start now</button>
             <button onClick={() => setEditing({ title: '', date: setup.today, time: '', duration_minutes: '30', notes: '', contacts: [] })}>Schedule a meeting</button>
+            <button disabled={busy} className="primary" onClick={startNow}><Icon name="meetings" size={16} />Start now</button>
           </div>
         )}
       </div>
-      <p className="muted">Calls run on Jitsi Meet, a free video service. Anyone with a meeting's link can join, so share it only with the people you invite. Video bookings from <Link href="/saas/scheduler">Scheduler</Link> show here too.</p>
       {error && <p className="error">{error}</p>}
 
       <div className="tabs">
@@ -95,51 +101,85 @@ function MeetingsApp() {
         <button className={past ? 'active' : ''} onClick={() => setPast(true)}>Past and cancelled</button>
       </div>
 
-      <div className="card table-wrap">
-        <table>
-          <thead><tr><th>When{setup ? ` (${setup.settings.time_zone})` : ''}</th><th>Meeting</th><th>Host</th><th>Invited</th><th /></tr></thead>
-          <tbody>
-            {meetings === null && <tr><td colSpan={5} className="empty">Loading…</td></tr>}
-            {meetings?.length === 0 && <tr><td colSpan={5} className="empty">{past ? 'No past meetings' : 'No meetings coming up. Start one now or schedule one.'}</td></tr>}
-            {meetings?.map((meeting) => (
-              <tr key={meeting.id} className={meeting.status === 'cancelled' ? 'muted' : ''}>
-                <td>{dayLabel(meeting.local_date)} {meeting.start_time}<div className="muted">{meeting.duration_minutes} min</div></td>
-                <td className="wrap">
-                  {meeting.title}
-                  {meeting.is_live && <span className="badge paid"> now</span>}
-                  {meeting.status === 'cancelled' && <span className="badge void"> cancelled</span>}
-                  {meeting.booking_id && <div className="muted">From a booking</div>}
-                </td>
-                <td>{meeting.host_name || '—'}</td>
-                <td className="wrap">
-                  {meeting.contacts.length === 0 ? '—' : meeting.contacts.map((contact: any, i: number) => (
-                    <span key={contact.id}>{i > 0 && ', '}<Link href={`/saas/crm/contact/${contact.id}`}>{contact.name}</Link></span>
-                  ))}
-                </td>
-                <td>
-                  {meeting.status === 'scheduled' && (
-                    <div className="meeting-actions">
-                      <a className="button primary" href={meeting.room_url} target="_blank" rel="noopener noreferrer">Join</a>
-                      <button type="button" onClick={() => copyLink(meeting)} aria-live="polite">{copied === meeting.id ? 'Copied' : 'Copy link'}</button>
-                      {canChange(meeting) && !past && (
-                        <>
-                          <button type="button" onClick={() => setEditing({ ...meeting, date: meeting.local_date, time: meeting.start_time, duration_minutes: String(meeting.duration_minutes) })}>Edit</button>
-                          <button type="button" className="danger" disabled={busy} onClick={() => cancel(meeting)}>Cancel</button>
-                        </>
-                      )}
-                    </div>
-                  )}
-                </td>
-              </tr>
-            ))}
-          </tbody>
-        </table>
-      </div>
+      {meetings === null && (
+        <div className={s.meetings} aria-busy="true">
+          {[0, 1, 2].map((n) => (
+            <div key={n} className={s.meetingCard}>
+              <Skeleton width={64} height={56} radius={8} />
+              <div style={{ display: 'grid', gap: 6 }}><Skeleton width="40%" height={15} /><Skeleton width="65%" height={12} /></div>
+              <Skeleton width={72} height={34} radius={8} />
+            </div>
+          ))}
+        </div>
+      )}
+
+      {meetings?.length === 0 && (
+        <div className="card">
+          {past
+            ? <EmptyState icon="meetings" title="No past meetings yet" line="Meetings you've held or cancelled will show here." />
+            : <EmptyState icon="meetings" title="No meetings coming up"
+                line="Start a call now and share the link, or schedule one for later."
+                action={setup?.can_edit ? { label: 'Start now', onClick: startNow } : undefined}
+                secondary={setup?.can_edit ? { label: 'Schedule a meeting', onClick: () => setEditing({ title: '', date: setup.today, time: '', duration_minutes: '30', notes: '', contacts: [] }) } : undefined} />}
+        </div>
+      )}
+
+      {meetings && meetings.length > 0 && (
+        <div className={s.meetings}>
+          {meetings.map((meeting) => {
+            const date = new Date(`${meeting.local_date}T00:00:00Z`);
+            return (
+              <article key={meeting.id} className={`${s.meetingCard} ${meeting.is_live ? s.live : ''}`} style={meeting.status === 'cancelled' ? { opacity: 0.65 } : undefined}>
+                <div className={s.dateTile} aria-hidden="true">
+                  <small>{date.toLocaleDateString(undefined, { timeZone: 'UTC', month: 'short' })}</small>
+                  <strong>{date.getUTCDate()}</strong>
+                </div>
+                <div className={s.meetingText}>
+                  <h3>
+                    {meeting.title}
+                    {meeting.is_live && <span className={s.livePill}>Live now</span>}
+                    {meeting.status === 'cancelled' && <span className="badge cancelled">cancelled</span>}
+                    {meeting.booking_id && <span className="chip">From a booking</span>}
+                  </h3>
+                  <span>
+                    {dayLabel(meeting.local_date, true)} at {meeting.start_time} · {meeting.duration_minutes} min
+                    {setup ? ` · ${setup.settings.time_zone}` : ''}
+                  </span>
+                  <span>
+                    {meeting.host_name ? `Hosted by ${meeting.host_name}` : ''}
+                    {meeting.contacts.length > 0 && <>{meeting.host_name ? ' · with ' : 'With '}
+                      {meeting.contacts.map((contact: any, i: number) => (
+                        <span key={contact.id}>{i > 0 && ', '}<Link href={`/saas/crm/contact/${contact.id}`}>{contact.name}</Link></span>
+                      ))}</>}
+                  </span>
+                </div>
+                {meeting.status === 'scheduled' && (
+                  <div className={s.meetingActions}>
+                    {canChange(meeting) && !past && (
+                      <>
+                        <button type="button" className="ghost small" onClick={() => setEditing({ ...meeting, date: meeting.local_date, time: meeting.start_time, duration_minutes: String(meeting.duration_minutes) })}>Edit</button>
+                        <button type="button" className="ghost small danger" disabled={busy} onClick={() => cancel(meeting)}>Cancel</button>
+                      </>
+                    )}
+                    <button type="button" className="small always" onClick={() => copyLink(meeting)} aria-live="polite">
+                      <Icon name={copied === meeting.id ? 'check' : 'copy'} size={14} />{copied === meeting.id ? 'Copied' : 'Copy link'}
+                    </button>
+                    <a className="button primary always" href={meeting.room_url} target="_blank" rel="noopener noreferrer"><Icon name="meetings" size={16} />Join</a>
+                  </div>
+                )}
+              </article>
+            );
+          })}
+        </div>
+      )}
+
+      <p className="muted small">Calls run on Jitsi Meet, a free video service. Anyone with a meeting&apos;s link can join, so share it only with the people you invite. Video bookings from <Link href="/saas/scheduler">Scheduler</Link> show here too.</p>
 
       {editing && setup && <MeetingForm initial={editing} timeZone={setup.settings.time_zone} onClose={() => setEditing(null)} onSaved={load} />}
     </div>
   );
 }
+
 
 function MeetingForm({ initial, timeZone, onClose, onSaved }: { initial: any; timeZone: string; onClose: () => void; onSaved: () => void }) {
   const [form, setForm] = useState<any>(initial);

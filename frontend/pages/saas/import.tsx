@@ -1,9 +1,14 @@
 import Link from 'next/link';
-import { ChangeEvent, useMemo, useState } from 'react';
+import { ChangeEvent, useMemo, useRef, useState } from 'react';
 import AppShell from '@/components/AppShell';
+import { celebrate } from '@/components/Celebrate';
+import EmptyState from '@/components/EmptyState';
+import Icon from '@/components/Icon';
+import { toast } from '@/components/Toast';
 import { api, today } from '@/lib/api';
 import { downloadCsv, parseCsv } from '@/lib/csv';
 import useSubmit from '@/lib/useSubmit';
+import s from '@/styles/settings.module.css';
 
 // Moves records in from another product's CSV export, using the same create calls the app's own
 // forms use. Opening balances are not part of this: they go in as one journal entry.
@@ -326,8 +331,9 @@ function ImportApp() {
   const [summary, setSummary] = useState<{ added: number; duplicates: number; failed: Failed[] } | null>(null);
   const [error, setError] = useState('');
   const { busy, run } = useSubmit();
+  const doneRef = useRef<HTMLDivElement>(null);
 
-  const source = SOURCES.find(({ id }) => id === sourceId) || SOURCES[0];
+  const source =SOURCES.find(({ id }) => id === sourceId) || SOURCES[0];
   const fields = FIELDS[kind];
   const presets = source.presets[kind] || {};
   const offered = source.id === 'csv' ? KINDS : KINDS.filter(({ id }) => source.presets[id]);
@@ -468,6 +474,16 @@ function ImportApp() {
     failed.sort((a, b) => a.index - b.index);
     setSummary({ added, duplicates: plan.duplicates.length, failed });
     setPlan(null);
+    // A finished move is a real win: one burst and a toast, once per import
+    if (added > 0) {
+      const what = KINDS.find(({ id }) => id === kind)?.what || 'records';
+      toast.success('Import finished', {
+        detail: `${added.toLocaleString()} ${what} added${failed.length ? `, ${failed.length.toLocaleString()} need a look` : ''}.`
+      });
+      setTimeout(() => celebrate({ from: doneRef.current?.querySelector('[data-celebrate]') }), 120);
+    } else if (failed.length) {
+      toast.error('Nothing was imported', { detail: 'Download the rows to see why each one was skipped.' });
+    }
   });
 
   const downloadFailed = () => {
@@ -480,24 +496,39 @@ function ImportApp() {
 
   const kindLabel = KINDS.find(({ id }) => id === kind);
   const running = busy && progress.total > 0;
+  const stepNow = summary ? 3 : plan ? 2 : headers.length ? 1 : 0;
+  const percent = progress.total ? Math.round((progress.done / progress.total) * 100) : 0;
 
   return (
     <div className="stack">
-      <div className="page-head"><h1>Move your data in</h1></div>
+      <div className="page-head">
+        <div>
+          <h1>Move your data in</h1>
+          <p className="muted">Bring your records from the product you use now. Nothing changes there, and records already here are skipped.</p>
+        </div>
+      </div>
 
-      <p className="muted">
-        Export a CSV from the product you use now and bring your records here. Nothing is changed in your old product,
-        and records already here are skipped, so it is safe to run an import again.
-      </p>
-      <p className="muted">
-        Opening balances aren&apos;t imported here. Enter them as one opening <Link href="/saas/accounting/journal">journal entry</Link> dated
-        the day you switch, after importing your chart of accounts.
-      </p>
+      <div className="card" style={{ display: 'grid', gap: 14 }}>
+        <ol className={s.stepper} aria-label="Import steps">
+          {STEPS.map((name, n) => (
+            <li key={name} className={n === stepNow ? s.now : n < stepNow ? s.past : ''} aria-current={n === stepNow ? 'step' : undefined}>
+              <i>{n < stepNow ? <Icon name="check" size={13} strokeWidth={2.75} /> : n + 1}</i>{name}
+            </li>
+          ))}
+        </ol>
+        <p className="muted small" style={{ margin: 0 }}>
+          It&apos;s safe to run an import again. Opening balances aren&apos;t imported here: enter them as one opening{' '}
+          <Link href="/saas/accounting/journal">journal entry</Link> dated the day you switch, after importing your chart of accounts.
+        </p>
+      </div>
 
       {error && <p className="error">{error}</p>}
 
       <div className="card stack">
-        <h2>1. Where is your data coming from?</h2>
+        <div>
+          <h2 style={{ margin: 0 }}>Where is your data coming from?</h2>
+          <p className="muted small" style={{ margin: '4px 0 0' }}>{source.howTo}</p>
+        </div>
         <div className="form-grid">
           <label>From
             <select value={sourceId} disabled={busy} onChange={(e) => pickSource(e.target.value)}>
@@ -509,20 +540,23 @@ function ImportApp() {
               {offered.map(({ id, label }) => <option key={id} value={id}>{label}</option>)}
             </select>
           </label>
-          <label>CSV file (up to {MAX_ROWS.toLocaleString()} rows)
-            <input type="file" accept=".csv,text/csv" disabled={busy} onChange={readFile} />
-          </label>
         </div>
-        <p className="muted">{source.howTo}</p>
-        {fileName && <p className="notice">Read {rows.length.toLocaleString()} rows from {fileName}.</p>}
+        <label className={s.drop}>
+          <Icon name="import" size={22} />
+          <strong style={{ color: 'var(--text)' }}>{fileName ? `Read ${rows.length.toLocaleString()} rows from ${fileName}` : 'Choose a CSV file'}</strong>
+          <span className="small">{fileName ? 'Pick another file to start over.' : `Up to ${MAX_ROWS.toLocaleString()} rows, with a header row.`}</span>
+          <input type="file" accept=".csv,text/csv" disabled={busy} onChange={readFile} />
+        </label>
       </div>
 
       {headers.length > 0 && !summary && (
         <div className="card stack">
-          <h2>2. Check which column is which</h2>
-          <p className="muted">
-            We matched the columns from a standard {source.label} export. Change any that are wrong. Each row needs {REQUIRED[kind]}.
-          </p>
+          <div>
+            <h2 style={{ margin: 0 }}>Check which column is which</h2>
+            <p className="muted small" style={{ margin: '4px 0 0' }}>
+              We matched the columns from a standard {source.label} export. Change any that are wrong. Each row needs {REQUIRED[kind]}.
+            </p>
+          </div>
           <div className="form-grid">
             {fields.map(({ key, label, hint }) => (
               <label key={key} title={hint}>{label}
@@ -534,21 +568,21 @@ function ImportApp() {
             ))}
           </div>
           {kind === 'accounts' && (
-            <p className="muted">
+            <p className="muted small">
               Account types are read from words like bank, receivable, payable, equity, income, sales, cost and expense.
               A type we can&apos;t read is listed in the summary so you can add that account by hand.
             </p>
           )}
 
-          <h3>First {preview.length} rows, as they will be saved</h3>
+          <h3 style={{ margin: 0 }}>First {preview.length} rows, as they will be saved</h3>
           <div className="table-wrap">
             <table>
-              <thead><tr><th>Row</th>{mappedFields.map(({ key, label }) => <th key={key}>{label}</th>)}</tr></thead>
+              <thead><tr><th className="num">Row</th>{mappedFields.map(({ key, label }) => <th key={key}>{label}</th>)}</tr></thead>
               <tbody>
                 {preview.map((row, index) => (
                   <tr key={index}>
-                    <td>{index + 1}</td>
-                    {mappedFields.map(({ key }) => <td key={key} className="wrap">{valueOf(row, key) || '—'}</td>)}
+                    <td className="num muted">{index + 1}</td>
+                    {mappedFields.map(({ key }) => <td key={key} className="wrap">{valueOf(row, key) || <span className="muted">Empty</span>}</td>)}
                   </tr>
                 ))}
                 {!mappedFields.length && <tr><td className="empty">Pick at least one column above</td></tr>}
@@ -560,20 +594,25 @@ function ImportApp() {
 
       {headers.length > 0 && !summary && (
         <div className="card stack">
-          <h2>3. Look for records you already have</h2>
-          <p className="muted">Rows are skipped when the {DUPLICATE_BY[kind]} is already here, or appears earlier in the file.</p>
+          <div>
+            <h2 style={{ margin: 0 }}>Look for records you already have</h2>
+            <p className="muted small" style={{ margin: '4px 0 0' }}>Rows are skipped when the {DUPLICATE_BY[kind]} is already here, or appears earlier in the file.</p>
+          </div>
           {!plan && <div><button className="primary" disabled={busy || !mappedFields.length} onClick={check}>{busy ? 'Checking…' : 'Check for duplicates'}</button></div>}
           {plan && (
             <>
-              <p>
-                <strong>{plan.add.length.toLocaleString()}</strong> new {kindLabel?.what} to add,{' '}
-                <strong>{plan.duplicates.length.toLocaleString()}</strong> already here,{' '}
-                <strong>{plan.failed.length.toLocaleString()}</strong> missing something they need.
-              </p>
+              <div className="stats">
+                <div className="card"><div className="stat-label">New {kindLabel?.what} to add</div><div className="stat-value">{plan.add.length.toLocaleString()}</div></div>
+                <div className="card"><div className="stat-label">Already here</div><div className="stat-value">{plan.duplicates.length.toLocaleString()}</div></div>
+                <div className="card"><div className="stat-label">Missing something</div><div className="stat-value">{plan.failed.length.toLocaleString()}</div></div>
+              </div>
               {running && (
-                <div className="stack">
-                  <progress max={progress.total} value={progress.done} style={{ width: '100%' }} aria-label="Import progress" />
-                  <p className="muted">Added {progress.done.toLocaleString()} of {progress.total.toLocaleString()}… keep this page open until it finishes.</p>
+                <div role="progressbar" aria-label="Import progress" aria-valuemin={0} aria-valuemax={progress.total} aria-valuenow={progress.done}>
+                  <div className={s.progress}><span style={{ width: `${percent}%` }} /></div>
+                  <div className={s.progressText}>
+                    <span>Added {progress.done.toLocaleString()} of {progress.total.toLocaleString()}. Keep this page open until it finishes.</span>
+                    <span>{percent}%</span>
+                  </div>
                 </div>
               )}
               <div className="row-actions" style={{ justifyContent: 'flex-start' }}>
@@ -588,27 +627,31 @@ function ImportApp() {
       )}
 
       {summary && (
-        <div className="card stack">
-          <h2>4. Done</h2>
-          <p>
-            <strong>{summary.added.toLocaleString()}</strong> added, <strong>{summary.duplicates.toLocaleString()}</strong> skipped
-            because they were already here, <strong>{summary.failed.length.toLocaleString()}</strong> not imported.
-          </p>
-          {summary.failed.length > 0 && (
-            <p className="muted">
-              Download the rows that were not imported, with the reason for each. Fix them in the file and import that file again.
-            </p>
-          )}
-          <div className="row-actions" style={{ justifyContent: 'flex-start' }}>
-            {summary.failed.length > 0 && <button onClick={downloadFailed}>Download rows not imported</button>}
-            <button className="primary always" onClick={reset}>Import another file</button>
-            <Link className="button" href={LINKS[kind]}>Open {kindLabel?.label.toLowerCase()}</Link>
-          </div>
+        <div className="card" ref={doneRef}>
+          <EmptyState
+            tone={summary.added > 0 ? 'done' : 'plain'}
+            icon={summary.added > 0 ? 'party' : 'import'}
+            title={summary.added > 0 ? `${summary.added.toLocaleString()} ${kindLabel?.what} moved in` : 'Nothing new to add'}
+            line={<>
+              {summary.duplicates.toLocaleString()} skipped because they were already here
+              {summary.failed.length > 0 ? `, ${summary.failed.length.toLocaleString()} not imported. Download those rows with the reason for each, fix them and import that file again.` : '.'}
+            </>}
+            action={{ label: `Open ${kindLabel?.label.toLowerCase()}`, href: LINKS[kind] }}
+            secondary={{ label: 'Import another file', onClick: reset }}
+          >
+            <span data-celebrate aria-hidden="true" />
+            <div className={s.progress} style={{ width: 'min(320px, 100%)', marginTop: 8 }}><span className={s.done} style={{ width: '100%' }} /></div>
+            {summary.failed.length > 0 && (
+              <button type="button" className="small always" style={{ marginTop: 8 }} onClick={downloadFailed}>Download rows not imported</button>
+            )}
+          </EmptyState>
         </div>
       )}
     </div>
   );
 }
+
+const STEPS = ['Choose a file', 'Match columns', 'Check and import', 'Done'];
 
 const LINKS: Record<Kind, string> = {
   contacts: '/saas/crm/contacts',

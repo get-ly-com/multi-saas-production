@@ -1,5 +1,7 @@
 import { useEffect, useRef, useState } from 'react';
 import AppShell from '@/components/AppShell';
+import { SkeletonTable } from '@/components/Skeleton';
+import EmptyState from '@/components/EmptyState';
 import { BookingDetails } from '@/components/SchedulerForms';
 import SchedulerNav, { LOCATIONS, dayLabel } from '@/components/SchedulerNav';
 import { api } from '@/lib/api';
@@ -52,7 +54,7 @@ function FollowUpList() {
     }
   });
 
-  if (!data || !lists) return <div className="stack"><SchedulerNav />{error ? <p className="error">{error}</p> : <p>Loading…</p>}</div>;
+  if (!data || !lists) return <div className="stack"><SchedulerNav />{error ? <p className="error">{error}</p> : <SkeletonTable rows={4} columns={5} />}</div>;
   const edit = data.can_edit;
 
   return (
@@ -76,7 +78,7 @@ function FollowUpList() {
           <table>
             <thead><tr><th>When</th><th>Customer</th><th>How to reach them</th><th>Service</th><th>With</th><th>Reminded</th></tr></thead>
             <tbody>
-              {lists.to_remind.length === 0 && <tr><td colSpan={6} className="empty">Nobody to remind in the next 2 days</td></tr>}
+              {lists.to_remind.length === 0 && <tr><td colSpan={6}><EmptyState compact tone="done" icon="bell" title="Nobody to remind" line="No bookings in the next 2 days need a reminder." /></td></tr>}
               {lists.to_remind.map((row: any) => (
                 <tr key={row.id}>
                   <td>{dayLabel(row.local_date)} {row.start_time}</td>
@@ -109,7 +111,7 @@ function FollowUpList() {
           <table>
             <thead><tr><th>When</th><th>Customer</th><th>Service</th><th>With</th><th /></tr></thead>
             <tbody>
-              {lists.to_mark.length === 0 && <tr><td colSpan={5} className="empty">Everything is marked</td></tr>}
+              {lists.to_mark.length === 0 && <tr><td colSpan={5}><EmptyState compact tone="done" icon="paid" title="Everything is marked" line="Every past booking says who came. Nice and tidy." /></td></tr>}
               {lists.to_mark.map((row: any) => (
                 <tr key={row.id}>
                   <td>{dayLabel(row.local_date)} {row.start_time}</td>

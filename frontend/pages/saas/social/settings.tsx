@@ -1,6 +1,8 @@
 import { FormEvent, useEffect, useState } from 'react';
 import AppShell from '@/components/AppShell';
+import Skeleton from '@/components/Skeleton';
 import SocialNav from '@/components/SocialNav';
+import { toast } from '@/components/Toast';
 import { fileSize } from '@/components/SocialForms';
 import { api } from '@/lib/api';
 import useSubmit from '@/lib/useSubmit';
@@ -54,7 +56,7 @@ function Settings() {
       setNotice('');
       try {
         await api.put('/api/social-media/settings', form);
-        setNotice('Saved.');
+        toast.success('Settings saved');
         await load();
       } catch (err: any) {
         setError(err.message);
@@ -62,7 +64,7 @@ function Settings() {
     });
   };
 
-  if (!overview) return <div className="stack"><SocialNav />{error ? <p className="error">{error}</p> : <p className="muted">Loading…</p>}</div>;
+  if (!overview) return <div className="stack"><SocialNav />{error ? <p className="error">{error}</p> : <div className="stack" aria-busy="true"><Skeleton width={200} height={28} /><div className="card"><Skeleton width="40%" height={18} /><Skeleton height={80} style={{ marginTop: 12 }} /></div></div>}</div>;
 
   const list = zones();
   const used = Number(overview.space_used || 0);
@@ -71,7 +73,7 @@ function Settings() {
   return (
     <div className="stack">
       <SocialNav />
-      <div className="page-head"><h1>Social settings</h1></div>
+      <div className="page-head"><div><h1>Social settings</h1><p className="muted">How posts get approved, and how much image space you have.</p></div></div>
 
       <form className="card" onSubmit={submit}>
         <h2>Approval and time zone</h2>

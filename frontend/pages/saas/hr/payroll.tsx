@@ -2,9 +2,12 @@ import Link from 'next/link';
 import { useRouter } from 'next/router';
 import { FormEvent, useEffect, useState } from 'react';
 import AppShell from '@/components/AppShell';
-import { monthName } from '@/components/HrForms';
+import EmptyState from '@/components/EmptyState';
+import { PayStepper, monthName } from '@/components/HrForms';
 import HrNav from '@/components/HrNav';
 import Modal from '@/components/Modal';
+import Skeleton, { SkeletonTable } from '@/components/Skeleton';
+import { toast } from '@/components/Toast';
 import { api, formatDate, money, today } from '@/lib/api';
 import useSubmit from '@/lib/useSubmit';
 
@@ -32,7 +35,11 @@ function PayrollApp() {
       <div className="stack">
         <HrNav />
         <h1>Payroll</h1>
-        <p className="muted">Only owners and admins can run payroll, and accountants if HR settings allow it. Your own payslips are on the People page.</p>
+        <div className="card">
+          <EmptyState icon="money" title="Payroll is for the people who run it"
+            line="Only owners and admins can run payroll, and accountants if HR settings allow it. Your own payslips are on the People page."
+            action={{ label: 'See my payslips', href: '/saas/hr' }} />
+        </div>
       </div>
     );
   }
@@ -41,37 +48,59 @@ function PayrollApp() {
     <div className="stack">
       <HrNav />
       <div className="page-head">
-        <h1>Payroll</h1>
+        <div>
+          <h1>Payroll</h1>
+          <p className="muted">Each month: work out pay, approve it, then mark it paid.</p>
+        </div>
         <button className="primary" onClick={() => setCreating(true)}>New pay run</button>
       </div>
       {error && <p className="error">{error}</p>}
-      <p className="muted">
-        Each month's pay run works out everyone's pay from their salary or hours, less unpaid leave. Approving it books
-        the cost in Accounting, and marking it paid takes the wages out of your bank account.
-      </p>
 
-      <div className="card table-wrap">
-        {!runs ? <p className="empty">Loading…</p> : (
+      {runs && runs[0] && runs[0].status !== 'void' && (
+        <Link href={`/saas/hr/payroll/${runs[0].id}`} className="card stat-link" style={{ display: 'grid', gap: 12 }}>
+          <div className="page-head" style={{ margin: 0 }}>
+            <div>
+              <div className="stat-label">Latest pay run</div>
+              <div className="stat-value">{monthName(runs[0].period_start)}</div>
+            </div>
+            <PayStepper status={runs[0].status} large />
+          </div>
+          <div className="muted">
+            {money(runs[0].net)} take-home, paid on {formatDate(runs[0].pay_date)}.{' '}
+            {runs[0].status === 'draft' ? 'Check it over, then approve.' : runs[0].status === 'approved' ? 'Approved. Mark it paid when the money leaves.' : 'All paid.'}
+          </div>
+        </Link>
+      )}
+
+      {!runs ? <SkeletonTable rows={4} columns={6} /> : runs.length === 0 ? (
+        <div className="card">
+          <EmptyState icon="money" title="No pay runs yet"
+            line="Start this month's run. Everyone's pay is worked out from their salary or hours, less unpaid leave, and you can check it before approving."
+            action={{ label: 'New pay run', onClick: () => setCreating(true) }} />
+        </div>
+      ) : (
+        <div className="card table-wrap">
           <table>
-            <thead><tr><th>#</th><th>Month</th><th>Pay date</th><th>Status</th><th className="num">Gross</th><th className="num">Deductions</th><th className="num">Employer costs</th><th className="num">Take-home</th></tr></thead>
+            <thead><tr><th>Month</th><th>Pay date</th><th>Progress</th><th className="num">Gross</th><th className="num">Deductions</th><th className="num">Employer costs</th><th className="num">Take-home</th></tr></thead>
             <tbody>
-              {runs.length === 0 && <tr><td colSpan={8} className="empty">No pay runs yet</td></tr>}
               {runs.map((run) => (
                 <tr key={run.id}>
-                  <td>{run.run_number}</td>
-                  <td><Link href={`/saas/hr/payroll/${run.id}`}>{monthName(run.period_start)}</Link></td>
+                  <td><Link href={`/saas/hr/payroll/${run.id}`}><strong>{monthName(run.period_start)}</strong></Link><div className="muted small">Run {run.run_number}</div></td>
                   <td>{formatDate(run.pay_date)}</td>
-                  <td><span className={`badge ${run.status === 'approved' ? 'open' : run.status}`}>{run.status}</span></td>
+                  <td>{run.status === 'void' ? <span className="badge void">Void</span> : <PayStepper status={run.status} />}</td>
                   <td className="num">{money(run.gross)}</td>
                   <td className="num">{money(run.deductions)}</td>
                   <td className="num">{money(run.employer_costs)}</td>
-                  <td className="num">{money(run.net)}</td>
+                  <td className="num"><strong>{money(run.net)}</strong></td>
                 </tr>
               ))}
             </tbody>
           </table>
-        )}
-      </div>
+        </div>
+      )}
+      <p className="muted small">
+        Approving a run books the cost in Accounting. Marking it paid takes the wages out of your bank account.
+      </p>
 
       {payroll && <Liabilities />}
 
@@ -111,6 +140,7 @@ function Liabilities() {
       setSaving(true);
       try {
         await api.post('/api/hr/liabilities/pay', form);
+        toast.success('Payment recorded', { detail: `${money(form.amount)} of tax and contributions paid.` });
         setForm((current) => ({ ...current, memo: '' }));
         await load();
         setError('');
@@ -127,9 +157,10 @@ function Liabilities() {
   return (
     <div className="card stack">
       <h2>Tax and contributions owed</h2>
-      {!data ? <p className="empty">{error || 'Loading…'}</p> : (
+      {!data ? (error ? <p className="error">{error}</p> : <Skeleton width={160} height={28} />) : (
         <>
           <div className="stat-value">{money(data.owed)}</div>
+          {owed <= 0 && <span className="badge paid" style={{ justifySelf: 'start' }}>Nothing owed</span>}
           <p className="muted">Income tax and contributions from approved pay runs, less what you have paid. Paying it takes the money out of a bank or cash account in Accounting.</p>
           {owed > 0 && (
             <form onSubmit={submit}>
@@ -158,7 +189,7 @@ function Liabilities() {
                     <tr key={payment.id}>
                       <td>{formatDate(payment.entry_date)}</td>
                       <td>#{payment.entry_number}</td>
-                      <td className="wrap">{payment.memo}{payment.reversed && <span className="badge void"> reversed</span>}</td>
+                      <td className="wrap">{payment.memo}{payment.reversed && <> <span className="badge void">reversed</span></>}</td>
                       <td>{payment.paid_from}</td>
                       <td className="num">{money(payment.amount)}</td>
                     </tr>

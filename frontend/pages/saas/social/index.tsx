@@ -1,12 +1,15 @@
-import Link from 'next/link';
 import { useRouter } from 'next/router';
 import { useEffect, useRef, useState } from 'react';
 import AppShell from '@/components/AppShell';
+import EmptyState from '@/components/EmptyState';
+import Icon from '@/components/Icon';
+import Skeleton, { SkeletonStats } from '@/components/Skeleton';
 import SocialNav from '@/components/SocialNav';
 import {
-  PLATFORMS, PostForm, PostView, formatWhen, memberName, statusClass, statusLabel, toLocalInput
+  PLATFORMS, PlatformMark, PlatformMarks, PostForm, PostView, formatWhen, memberName, statusClass, statusLabel, toLocalInput
 } from '@/components/SocialForms';
 import { api, isUuid } from '@/lib/api';
+import ss from '@/styles/social.module.css';
 
 export default function Social() {
   return <AppShell><Planner /></AppShell>;
@@ -106,7 +109,20 @@ function Planner() {
     if (router.query.post) router.replace('/saas/social', undefined, { shallow: true });
   };
 
-  if (!overview) return <div className="stack"><SocialNav />{error ? <p className="error">{error}</p> : <p className="muted">Loading…</p>}</div>;
+  if (!overview) {
+    return (
+      <div className="stack">
+        <SocialNav />
+        {error ? <p className="error">{error}</p> : (
+          <div className="stack" role="status" aria-label="Loading the planner">
+            <div className="page-head"><Skeleton width={190} height={28} /><Skeleton width={104} height={34} /></div>
+            <SkeletonStats count={4} />
+            <div className="card"><Skeleton width="45%" height={30} /><Skeleton height={520} radius={12} style={{ marginTop: 14 }} /></div>
+          </div>
+        )}
+      </div>
+    );
+  }
 
   const counts = overview.counts || {};
   const approvalOn = overview.require_approval;
@@ -125,11 +141,19 @@ function Planner() {
 
   const setFilter = (field: string, value: string) => setFilters({ ...filters, [field]: value });
   const moveMonth = (by: number) => setMonth(new Date(month.getFullYear(), month.getMonth() + by, 1));
+  const platformsOf = (post: any) => (post.targets || []).map((target: any) => target.platform);
+  const filtered = Object.values(filters).some(Boolean);
 
-  const chip = (post: any) => (
-    <button key={post.id} className={`social-chip ${post.status}`} onClick={() => setOpen(post)}
-      title={`${post.title} · ${statusLabel(post.status, approvalOn)}`}>
-      <span>{new Date(post.scheduled_at).toLocaleTimeString(undefined, { hour: '2-digit', minute: '2-digit' })}</span> {post.title}
+  const card = (post: any, withTime = true) => (
+    <button key={post.id} type="button" className={`${ss.card} ${ss[post.status] || ''}`} onClick={() => setOpen(post)}
+      title={`${post.title}, ${statusLabel(post.status, approvalOn)}`}>
+      <span className={ss.cardTop}>
+        {withTime && post.scheduled_at
+          ? <time>{new Date(post.scheduled_at).toLocaleTimeString(undefined, { hour: '2-digit', minute: '2-digit' })}</time>
+          : <span className={`badge ${statusClass(post.status)}`}>{statusLabel(post.status, approvalOn)}</span>}
+        <PlatformMarks platforms={platformsOf(post)} />
+      </span>
+      <span className={ss.cardTitle}>{post.title}</span>
     </button>
   );
 
@@ -137,28 +161,35 @@ function Planner() {
     <div className="stack">
       <SocialNav />
       <div className="page-head">
-        <h1>Social planner</h1>
-        {overview.can_edit && <button className="primary" onClick={() => newOn()} disabled={accounts.length === 0}>New post</button>}
+        <div>
+          <h1>Social planner</h1>
+          <p className="muted">Plan and approve posts here, then publish them yourself from each platform. We never post for you or ask for your passwords.</p>
+        </div>
+        {overview.can_edit && <button className="primary" onClick={() => newOn()} disabled={accounts.length === 0}><Icon name="plus" size={16} />New post</button>}
       </div>
-      <p className="muted">Plan and approve posts here, then publish them yourself from each platform. This app doesn’t post to your accounts and never asks for their passwords.</p>
-      {accounts.length === 0 && (
-        <p className="notice">Start by listing your company’s accounts under <Link href="/saas/social/accounts">Accounts</Link>.</p>
-      )}
       {error && <p className="error">{error}</p>}
 
-      <div className="stats">
-        {approvalOn && <div className="card"><div className="stat-label">Needs approval</div><div className="stat-value">{counts.needs_approval || 0}</div></div>}
-        <div className="card"><div className="stat-label">Scheduled</div><div className="stat-value">{counts.scheduled || 0}</div></div>
-        <div className="card"><div className="stat-label">{approvalOn ? 'Approved, no date' : 'Ready, no date'}</div><div className="stat-value">{counts.approved || 0}</div></div>
-        <div className="card"><div className="stat-label">Drafts</div><div className="stat-value">{counts.draft || 0}</div></div>
-        <div className="card"><div className="stat-label">Posted</div><div className="stat-value">{counts.posted || 0}</div></div>
-      </div>
+      {accounts.length === 0 ? (
+        <div className="card">
+          <EmptyState icon="social" title="Add your accounts to start planning"
+            line="List the company's X, LinkedIn, Facebook and Instagram accounts. Then plan posts for each one here."
+            action={{ label: 'Add accounts', href: '/saas/social/accounts' }} />
+        </div>
+      ) : (
+        <div className="stats">
+          {approvalOn && <div className="card"><div className="stat-label">Needs approval</div><div className="stat-value">{counts.needs_approval || 0}</div></div>}
+          <div className="card"><div className="stat-label">Scheduled</div><div className="stat-value">{counts.scheduled || 0}</div></div>
+          <div className="card"><div className="stat-label">{approvalOn ? 'Approved, no date' : 'Ready, no date'}</div><div className="stat-value">{counts.approved || 0}</div></div>
+          <div className="card"><div className="stat-label">Drafts</div><div className="stat-value">{counts.draft || 0}</div></div>
+          <div className="card"><div className="stat-label">Posted</div><div className="stat-value">{counts.posted || 0}</div></div>
+        </div>
+      )}
 
       <div className="card">
-        <div className="social-toolbar">
-          <div className="tabs">
-            <button className={view === 'calendar' ? 'active' : ''} onClick={() => setView('calendar')}>Calendar</button>
-            <button className={view === 'list' ? 'active' : ''} onClick={() => setView('list')}>List</button>
+        <div className={ss.toolbar}>
+          <div className={ss.segment} role="group" aria-label="View">
+            <button type="button" className={view === 'calendar' ? ss.on : ''} aria-pressed={view === 'calendar'} onClick={() => setView('calendar')}>Calendar</button>
+            <button type="button" className={view === 'list' ? ss.on : ''} aria-pressed={view === 'list'} onClick={() => setView('list')}>List</button>
           </div>
           <div className="report-filters">
             <label>Campaign
@@ -191,51 +222,70 @@ function Planner() {
 
         {view === 'calendar' ? (
           <>
-            <div className="page-head social-month">
-              <button onClick={() => moveMonth(-1)} aria-label="Previous month">‹</button>
+            <div className={ss.monthBar}>
+              <button className="icon-button" onClick={() => moveMonth(-1)} aria-label="Previous month"><Icon name="chevron-left" size={18} /></button>
+              <button className="icon-button" onClick={() => moveMonth(1)} aria-label="Next month"><Icon name="chevron-right" size={18} /></button>
               <h2>{month.toLocaleDateString(undefined, { month: 'long', year: 'numeric' })}</h2>
-              <button onClick={() => moveMonth(1)} aria-label="Next month">›</button>
-              <button className="link" onClick={() => setMonth(new Date(new Date().getFullYear(), new Date().getMonth(), 1))}>This month</button>
+              <button className="small" onClick={() => setMonth(new Date(new Date().getFullYear(), new Date().getMonth(), 1))}>This month</button>
             </div>
-            <div className="social-calendar">
-              {WEEKDAYS.map((name) => <div key={name} className="social-weekday">{name}</div>)}
+            <ul className={ss.legend} aria-label="Status colours">
+              {STATUSES.filter((status) => approvalOn || status !== 'needs_approval').map((status) => (
+                <li key={status} className={ss[status]}><i style={{ background: 'var(--dot)' }} />{statusLabel(status, approvalOn)}</li>
+              ))}
+            </ul>
+            <div className={ss.calendar}>
+              {WEEKDAYS.map((name) => <div key={name} className={ss.weekday}>{name}</div>)}
               {monthGrid(month).map((date) => {
                 const key = dayKey(date);
                 const items = byDay.get(key) || [];
+                const other = date.getMonth() !== month.getMonth();
                 return (
-                  <div key={key} className={`social-day${date.getMonth() !== month.getMonth() ? ' other' : ''}${key === today ? ' today' : ''}`}>
-                    <div className="social-day-head">
-                      <span>{date.getDate()}</span>
+                  <div key={key} className={`${ss.day} ${other ? ss.other : ''} ${key === today ? ss.today : ''} ${key < today ? ss.past : ''}`}>
+                    <div className={ss.dayHead}>
+                      <span className={ss.date} aria-label={date.toLocaleDateString(undefined, { weekday: 'long', day: 'numeric', month: 'long' })}>{date.getDate()}</span>
                       {overview.can_edit && accounts.length > 0 && (
-                        <button className="link social-add" onClick={() => newOn(date)} aria-label={`New post on ${date.toLocaleDateString()}`}>+</button>
+                        <button className={ss.add} onClick={() => newOn(date)} aria-label={`New post on ${date.toLocaleDateString()}`}><Icon name="plus" size={14} /></button>
                       )}
                     </div>
-                    {items.map(chip)}
+                    {items.slice(0, 4).map((post) => card(post))}
+                    {items.length > 4 && <span className={ss.more}>{items.length - 4} more in the list view</span>}
                   </div>
                 );
               })}
             </div>
             {undated.length > 0 && (
-              <div className="social-undated">
-                <h2>No date yet</h2>
-                {undated.map((post) => (
-                  <button key={post.id} className={`social-chip ${post.status}`} onClick={() => setOpen(post)}>{post.title}</button>
-                ))}
+              <div className={ss.undated}>
+                <h3>No date yet</h3>
+                <div className={ss.undatedList}>{undated.map((post) => card(post, false))}</div>
               </div>
             )}
           </>
+        ) : posts.length === 0 ? (
+          filtered
+            ? <EmptyState compact icon="search" title="No posts match these filters" line="Try another campaign, tag or status." action={{ label: 'Clear filters', onClick: () => setFilters({ campaign: '', tag: '', status: '', account_id: '' }) }} />
+            : <EmptyState compact icon="social" title="No posts yet" line="Plan your first post. It can wait as a draft until you're ready."
+                action={overview.can_edit && accounts.length > 0 ? { label: 'New post', onClick: () => newOn() } : undefined} />
         ) : (
           <div className="table-wrap">
             <table>
               <thead><tr><th>When</th><th>Post</th><th>Accounts</th><th>Campaign</th><th>Looked after by</th><th>Status</th></tr></thead>
               <tbody>
-                {posts.length === 0 && <tr><td colSpan={6} className="empty">No posts yet</td></tr>}
                 {posts.map((post) => (
                   <tr key={post.id}>
                     <td>{formatWhen(post.scheduled_at)}</td>
-                    <td><button className="link" onClick={() => setOpen(post)}>{post.title}</button></td>
-                    <td className="wrap">{post.targets.map((target: any) => `${PLATFORMS[target.platform].name}${target.posted_at ? ' ✓' : ''}`).join(', ') || '—'}</td>
-                    <td>{post.campaign || '—'}</td>
+                    <td className="wrap"><button className="link" onClick={() => setOpen(post)}>{post.title}</button></td>
+                    <td>
+                      {post.targets.length === 0 ? <span className="muted">None yet</span> : (
+                        <span className={ss.postCell}>
+                          {post.targets.map((target: any) => (
+                            <span key={target.id || target.platform} title={`${PLATFORMS[target.platform].name}${target.posted_at ? ', posted' : ''}`} style={{ opacity: target.posted_at ? 1 : 0.7 }}>
+                              <PlatformMark platform={target.platform} />
+                            </span>
+                          ))}
+                        </span>
+                      )}
+                    </td>
+                    <td>{post.campaign || <span className="muted">None</span>}</td>
                     <td>{memberName(overview.members, post.assigned_to)}</td>
                     <td><span className={`badge ${statusClass(post.status)}`}>{statusLabel(post.status, approvalOn)}</span></td>
                   </tr>
@@ -245,6 +295,7 @@ function Planner() {
           </div>
         )}
       </div>
+
 
       {open && !editing && (
         <PostView post={open} overview={overview} onClose={close} onChanged={refresh}

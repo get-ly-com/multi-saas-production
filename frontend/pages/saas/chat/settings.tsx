@@ -1,7 +1,11 @@
-import { FormEvent, useEffect, useState } from 'react';
+import { CSSProperties, FormEvent, useEffect, useState } from 'react';
 import AppShell from '@/components/AppShell';
 import ChatNav, { PRIORITY } from '@/components/ChatNav';
+import Icon from '@/components/Icon';
+import Skeleton from '@/components/Skeleton';
+import { toast } from '@/components/Toast';
 import { api } from '@/lib/api';
+import c from '@/styles/chat.module.css';
 import useSubmit from '@/lib/useSubmit';
 
 export default function ChatSettingsPage() {
@@ -41,7 +45,6 @@ function ChatSettings() {
   const [manager, setManager] = useState(false);
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState('');
-  const [notice, setNotice] = useState('');
   const set = (field: string, value: any) => setForm({ ...form, [field]: value });
 
   useEffect(() => {
@@ -59,7 +62,6 @@ function ChatSettings() {
     return run(async () => {
       setSaving(true);
       setError('');
-      setNotice('');
       try {
         const saved = await api.put('/api/chatbot/settings', {
           enabled: form.enabled,
@@ -76,7 +78,7 @@ function ChatSettings() {
           sla_hours: form.sla_hours
         });
         setForm({ ...saved, whatsapp: form.whatsapp });
-        setNotice('Saved');
+        toast.success('Chat settings saved');
       } catch (err: any) {
         setError(err.message);
       } finally {
@@ -90,7 +92,7 @@ function ChatSettings() {
     try {
       const { public_key } = await api.post('/api/chatbot/settings/key', {});
       setForm({ ...form, public_key });
-      setNotice('The chat has a new address. Update the link or code on your website.');
+      toast.success('The chat has a new address', { detail: 'Update the link or code on your website.' });
     } catch (err: any) {
       setError(err.message);
     }
@@ -99,20 +101,37 @@ function ChatSettings() {
   const copy = async (value: string) => {
     try {
       await navigator.clipboard.writeText(value);
-      setNotice('Copied');
+      toast.success('Copied', { detail: 'Paste it into your website.' });
     } catch {
       setError('Could not copy. Select the text and copy it yourself.');
     }
   };
 
-  if (!form) return <div className="stack"><ChatNav />{error ? <p className="error">{error}</p> : <p className="empty">Loading…</p>}</div>;
+  if (!form) {
+    return (
+      <div className="stack">
+        <ChatNav />
+        {error ? <p className="error">{error}</p> : (
+          <div className="stack" role="status" aria-label="Loading settings">
+            <Skeleton width={200} height={28} />
+            <div className="card stack"><Skeleton width="40%" height={16} /><Skeleton height={64} /><Skeleton height={64} /><Skeleton width="60%" /></div>
+          </div>
+        )}
+      </div>
+    );
+  }
 
   const url = linkFor(form.public_key);
 
   return (
     <div className="stack">
       <ChatNav />
-      <div className="page-head"><h1>Chat settings</h1></div>
+      <div className="page-head">
+        <div>
+          <h1>Chat settings</h1>
+          <p className="muted">How the chat looks and behaves for your visitors.</p>
+        </div>
+      </div>
       {!manager && <p className="muted">Only owners and admins can change these settings.</p>}
 
       <form className="card stack" onSubmit={save}>
@@ -123,7 +142,15 @@ function ChatSettings() {
           <label>Welcome message<textarea rows={2} maxLength={500} value={form.welcome_message} onChange={(e) => set('welcome_message', e.target.value)} /></label>
           <label>When the bot hands over to a person, it says<textarea rows={2} maxLength={500} required value={form.handoff_message} onChange={(e) => set('handoff_message', e.target.value)} /></label>
           <label>Opening hours (shown to visitors)<input maxLength={200} placeholder="Mon to Fri, 9am to 5pm" value={form.opening_hours} onChange={(e) => set('opening_hours', e.target.value)} /></label>
-          <label className="chat-colour">Colour<input type="color" value={form.colour} onChange={(e) => set('colour', e.target.value)} /></label>
+          <div className="form-grid" style={{ alignItems: 'end' }}>
+            <label className="chat-colour">Colour<input type="color" value={form.colour} onChange={(e) => set('colour', e.target.value)} /></label>
+            <div className={c.public} style={{ '--chat-colour': form.colour, padding: 0, minHeight: 0, background: 'none' } as CSSProperties} aria-label="Preview of the chat header">
+              <div className={c.wHead} style={{ borderRadius: 'var(--r-lg)', padding: '10px 12px' }}>
+                <span className={c.wLogo} style={{ width: 32, height: 32, fontSize: 14 }} aria-hidden="true">A</span>
+                <div style={{ display: 'grid', gap: 2 }}><strong>Preview</strong><span className={c.wStatus}>Online now</span></div>
+              </div>
+            </div>
+          </div>
 
           <h2>When your team is in</h2>
           <label className="check"><input type="checkbox" checked={form.hours_enabled} onChange={(e) => set('hours_enabled', e.target.checked)} /> Use these hours</label>
@@ -173,24 +200,24 @@ function ChatSettings() {
           </div>
         </fieldset>
         {error && <p className="error">{error}</p>}
-        {notice && <p className="notice">{notice}</p>}
-        {manager && <div className="form-actions"><button className="primary" disabled={busy || saving}>{saving ? 'Saving…' : 'Save'}</button></div>}
+        {manager && <div className="form-actions"><button className="primary" disabled={busy || saving}>{saving ? 'Saving…' : 'Save settings'}</button></div>}
       </form>
 
       <div className="card stack">
         <h2>Put the chat on your website</h2>
         {!form.enabled && <p className="muted">Turn chat on above first, or visitors will see that it isn't available.</p>}
         <label>Link to the chat page
-          <div className="chat-try"><input readOnly value={url} onFocus={(e) => e.target.select()} /><button type="button" className="always" onClick={() => copy(url)}>Copy</button></div>
+          <div className="chat-try"><input readOnly value={url} onFocus={(e) => e.target.select()} /><button type="button" className="always" onClick={() => copy(url)}><Icon name="copy" size={14} />Copy</button>
+            <a className="button always" href={url} target="_blank" rel="noopener noreferrer"><Icon name="external" size={14} />Open</a></div>
         </label>
         <label>Chat box inside a page (paste where it should appear)
-          <textarea readOnly rows={5} value={iframeSnippet(url)} onFocus={(e) => e.target.select()} />
+          <textarea readOnly rows={5} style={{ fontFamily: 'var(--font-mono)', fontSize: 12 }} value={iframeSnippet(url)} onFocus={(e) => e.target.select()} />
         </label>
-        <div><button type="button" className="always" onClick={() => copy(iframeSnippet(url))}>Copy chat box code</button></div>
+        <div><button type="button" className="always" onClick={() => copy(iframeSnippet(url))}><Icon name="copy" size={14} />Copy chat box code</button></div>
         <label>Floating "Chat with us" button (paste just before &lt;/body&gt;)
-          <textarea readOnly rows={7} value={buttonSnippet(url, form.colour)} onFocus={(e) => e.target.select()} />
+          <textarea readOnly rows={7} style={{ fontFamily: 'var(--font-mono)', fontSize: 12 }} value={buttonSnippet(url, form.colour)} onFocus={(e) => e.target.select()} />
         </label>
-        <div><button type="button" className="always" onClick={() => copy(buttonSnippet(url, form.colour))}>Copy button code</button></div>
+        <div><button type="button" className="always" onClick={() => copy(buttonSnippet(url, form.colour))}><Icon name="copy" size={14} />Copy button code</button></div>
         <p className="muted">Anyone with this address can chat with you. If it is being misused, get a new address.</p>
         {manager && <div><button disabled={busy} type="button" className="danger" onClick={newKey}>Get a new address</button></div>}
       </div>
@@ -206,7 +233,6 @@ const WHATSAPP_WEBHOOK = 'https://api-gateway-production-7b38.up.railway.app/api
 function WhatsAppSettings({ form, manager, onSaved }: { form: any; manager: boolean; onSaved: (saved: any) => void }) {
   const [phoneId, setPhoneId] = useState(form.whatsapp_phone_number_id || '');
   const [error, setError] = useState('');
-  const [notice, setNotice] = useState('');
   const { busy, run } = useSubmit();
   const status = form.whatsapp || {};
   const connected = Boolean(status.app_ready && form.whatsapp_phone_number_id);
@@ -215,11 +241,11 @@ function WhatsAppSettings({ form, manager, onSaved }: { form: any; manager: bool
     event.preventDefault();
     return run(async () => {
       setError('');
-      setNotice('');
       try {
         const saved = await api.put('/api/chatbot/settings', { whatsapp_phone_number_id: phoneId.trim() });
         onSaved(saved);
-        setNotice(saved.whatsapp_phone_number_id ? 'Saved' : 'WhatsApp is disconnected from this company');
+        if (saved.whatsapp_phone_number_id) toast.success('WhatsApp number saved');
+        else toast.info('WhatsApp is disconnected from this company');
       } catch (err: any) {
         setError(err.message);
       }
@@ -228,9 +254,11 @@ function WhatsAppSettings({ form, manager, onSaved }: { form: any; manager: bool
 
   return (
     <form className="card stack" onSubmit={save}>
-      <h2>WhatsApp</h2>
+      <div className="section-head">
+        <div><h2>WhatsApp</h2><p className="muted">Answer WhatsApp messages from the same inbox.</p></div>
+        <span className={`badge ${connected ? 'connected' : 'inactive'}`}>{connected ? 'Connected' : 'Not connected'}</span>
+      </div>
       <p>
-        <span className={`badge ${connected ? 'paid' : ''}`}>{connected ? 'Connected' : 'Not connected'}</span>
         {status.last_received_at && <span className="muted"> Last message received {new Date(status.last_received_at).toLocaleString()}</span>}
       </p>
       <p className="muted">Messages to your WhatsApp Business number show up in the inbox with a WhatsApp label, and your
@@ -247,7 +275,6 @@ function WhatsAppSettings({ form, manager, onSaved }: { form: any; manager: bool
         <p className="muted">Not your phone number: the long ID Meta shows next to it. Leave empty to disconnect.</p>
       </fieldset>
       {error && <p className="error">{error}</p>}
-      {notice && <p className="notice">{notice}</p>}
       {manager && <div className="form-actions"><button className="primary" disabled={busy}>Save WhatsApp number</button></div>}
 
       <h3>How to set it up</h3>

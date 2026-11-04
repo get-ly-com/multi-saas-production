@@ -1,6 +1,6 @@
 import Link from 'next/link';
 import AppShell from '@/components/AppShell';
-import IntegrationsNav from '@/components/IntegrationsNav';
+import IntegrationsNav, { CodeBlock } from '@/components/IntegrationsNav';
 
 export default function ApiGuide() {
   return <AppShell><Guide /></AppShell>;
@@ -56,8 +56,14 @@ function Guide() {
   return (
     <div className="stack">
       <IntegrationsNav />
-      <h1>API guide</h1>
-      <p className="muted">
+      <div className="page-head">
+        <div>
+          <h1>API guide</h1>
+          <p className="muted">Read your data from your own tools, and add contacts and leads.</p>
+        </div>
+        <Link className="button" href="/saas/integrations/keys">Make an API key</Link>
+      </div>
+      <p className="muted small">
         The API lets your own tools read this company's data, and add contacts and leads. Nothing else can be changed through it.
         Owners and admins make keys on the <Link href="/saas/integrations/keys">API keys</Link> page. A key is either read only, or
         can read and add contacts and leads.
@@ -66,8 +72,8 @@ function Guide() {
       <div className="card">
         <h2>Signing in</h2>
         <p>Send the key in the <code>Authorization</code> header of every request. The key decides which company you read.</p>
-        <pre className="code-block">{`curl ${base}/contacts \\
-  -H "Authorization: Bearer gk_your_key"`}</pre>
+        <CodeBlock label="Code copied" value={`curl ${base}/contacts \\
+  -H "Authorization: Bearer gk_your_key"`} />
         <p className="muted">Keep keys out of web pages and app code that others can see. Use them from your own server.</p>
       </div>
 
@@ -77,7 +83,7 @@ function Guide() {
           <code>GET {base}/&lt;resource&gt;?limit=25&amp;offset=0</code> returns the oldest records first. <code>limit</code> is 1 to 100
           (25 if left out). When <code>has_more</code> is true, ask again with <code>offset</code> set to <code>next_offset</code>.
         </p>
-        <pre className="code-block">{`curl "${base}/invoices?limit=2" -H "Authorization: Bearer gk_your_key"
+        <CodeBlock label="Code copied" value={`curl "${base}/invoices?limit=2" -H "Authorization: Bearer gk_your_key"
 
 {
   "object": "list",
@@ -87,11 +93,11 @@ function Guide() {
   "offset": 0,
   "has_more": true,
   "next_offset": 2
-}`}</pre>
+}`} />
         <p>
           <code>GET {base}/&lt;resource&gt;/&lt;id&gt;</code> returns one record.
         </p>
-        <pre className="code-block">{`curl ${base}/deals/2b1e…-…-…  -H "Authorization: Bearer gk_your_key"`}</pre>
+        <CodeBlock label="Code copied" value={`curl ${base}/deals/2b1e…-…-…  -H "Authorization: Bearer gk_your_key"`} />
       </div>
 
       <div className="card">
@@ -100,11 +106,11 @@ function Guide() {
           <code>POST {base}/contacts</code> or <code>POST {base}/leads</code> with a JSON body. This needs a key that can read and write.
           A name (or <code>first_name</code> and <code>last_name</code>) is needed; a lead also needs an email or a phone number.
         </p>
-        <pre className="code-block">{`curl -X POST ${base}/leads   -H "Authorization: Bearer gk_your_key"   -H "Content-Type: application/json"   -d '{"name": "Ada Lovelace", "email": "ada@example.com", "company": "Analytical Engines",
+        <CodeBlock label="Code copied" value={`curl -X POST ${base}/leads   -H "Authorization: Bearer gk_your_key"   -H "Content-Type: application/json"   -d '{"name": "Ada Lovelace", "email": "ada@example.com", "company": "Analytical Engines",
        "phone": "+44 20 7946 0000", "job_title": "Engineer", "message": "Wants a demo",
        "source": "Website", "campaign": "autumn"}'
 
-{ "created": true, "data": { "id": "…", "name": "Ada Lovelace", "status": "new", "source": "Website", … } }`}</pre>
+{ "created": true, "data": { "id": "…", "name": "Ada Lovelace", "status": "new", "source": "Website", … } }`} />
         <p className="muted">
           The answer is <code>201</code> with <code>created: true</code> for a new record. If a contact with that email already exists, or an
           open lead does, you get <code>200</code> with <code>created: false</code> and that record, so sending the same person twice is safe

@@ -1,8 +1,12 @@
 import { useEffect, useState } from 'react';
 import AccountingNav from '@/components/AccountingNav';
-import AppShell from '@/components/AppShell';
+import { Amount, PageHead, styles } from '@/components/AccountingKit';
+import AppShell, { useAccount } from '@/components/AppShell';
+import EmptyState from '@/components/EmptyState';
 import Modal from '@/components/Modal';
-import { api, money, today } from '@/lib/api';
+import { SkeletonTable } from '@/components/Skeleton';
+import { toast } from '@/components/Toast';
+import { api, today } from '@/lib/api';
 import useSubmit from '@/lib/useSubmit';
 
 const MONTHS = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
@@ -20,6 +24,9 @@ function BudgetsApp() {
   const [report, setReport] = useState<any>(null);
   const [form, setForm] = useState<any>(null);
   const [error, setError] = useState('');
+  const [loaded, setLoaded] = useState(false);
+  const canEdit = useAccount()?.canEdit;
+  const newBudget = () => setForm({ name: '', fiscal_year: Number(today().slice(0, 4)), lines: [] });
 
   const load = async () => {
     try {
@@ -33,6 +40,8 @@ function BudgetsApp() {
       setError('');
     } catch (err: any) {
       setError(err.message);
+    } finally {
+      setLoaded(true);
     }
   };
 
@@ -59,6 +68,7 @@ function BudgetsApp() {
     if (!window.confirm(`Delete ${selected.name}? This can't be undone.`)) return;
     try {
       await api.delete(`/api/accounting/budgets/${budgetId}`);
+      toast.success('Budget deleted', { detail: `${selected.name} ${selected.fiscal_year} is gone` });
       setBudgetId('');
       await load();
     } catch (err: any) {
@@ -69,14 +79,18 @@ function BudgetsApp() {
   return (
     <div className="stack">
       <AccountingNav />
-      <div className="page-head">
-        <h1>Budgets</h1>
-        <button className="primary" onClick={() => setForm({ name: '', fiscal_year: Number(today().slice(0, 4)), lines: [] })}>New budget</button>
-      </div>
+      <PageHead title="Budgets" line="Plan income and spending by month, then see how the year is really going.">
+        <button className="primary" onClick={newBudget}>New budget</button>
+      </PageHead>
 
       {error && <p className="error">{error}</p>}
 
-      {budgets.length === 0 ? <div className="card"><p className="empty">No budgets yet</p></div> : (
+      {!loaded ? <SkeletonTable rows={5} columns={4} /> : budgets.length === 0 ? (
+        <div className="card">
+          <EmptyState icon="analytics" title="No budgets yet" line="Set a monthly target for each income and expense account, then compare it with what really happened."
+            action={canEdit ? { label: 'New budget', onClick: newBudget } : undefined} />
+        </div>
+      ) : (
         <>
           <div className="report-filters">
             <label>Budget
@@ -103,20 +117,21 @@ function BudgetsApp() {
 
           <div className="card table-wrap">
             <h2>Budget against actual</h2>
-            {!report ? <p className="empty">Loading…</p> : (
+            {!report ? <SkeletonTable rows={4} columns={4} /> : report.rows.length === 0 ? (
+              <EmptyState compact icon="analytics" title="Nothing budgeted or posted in these months" line="Pick other months, or edit the budget to add amounts." />
+            ) : (
               <table>
                 <thead><tr><th>Account</th><th className="num">Budget</th><th className="num">Actual</th><th className="num">Better or worse</th></tr></thead>
                 <tbody>
-                  {report.rows.length === 0 && <tr><td colSpan={4} className="empty">Nothing budgeted or posted in these months</td></tr>}
                   {report.rows.map((row: any) => (
                     <tr key={row.account_id}>
-                      <td className="wrap">{row.code} {row.name}</td>
-                      <td className="num">{money(row.budgeted)}</td>
-                      <td className="num">{money(row.actual)}</td>
-                      <td className="num">{money(row.variance)}</td>
+                      <td className="wrap"><span className="muted">{row.code}</span> {row.name}</td>
+                      <td className="num"><Amount value={row.budgeted} /></td>
+                      <td className="num"><Amount value={row.actual} /></td>
+                      <td className="num"><Amount value={row.variance} /></td>
                     </tr>
                   ))}
-                  <tr className="total"><td colSpan={3}>Overall</td><td className="num">{money(report.total_variance)}</td></tr>
+                  <tr className={styles.totalRow}><td colSpan={3}>Overall</td><td className="num"><Amount value={report.total_variance} strong /></td></tr>
                 </tbody>
               </table>
             )}
@@ -170,6 +185,7 @@ function BudgetForm({ initial, accounts, onClose, onSaved }: { initial: any; acc
     try {
       const result = await api.post('/api/accounting/budgets', { id: initial.id, name, fiscal_year: year, lines });
       await onSaved(result.id);
+      toast.success(initial.id ? 'Budget saved' : 'Budget created', { detail: `${name} ${year} is ready to compare` });
       onClose();
     } catch (err: any) {
       setError(err.message);

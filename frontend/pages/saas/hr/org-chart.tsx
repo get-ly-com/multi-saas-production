@@ -1,8 +1,10 @@
 import Link from 'next/link';
 import { useEffect, useState } from 'react';
 import AppShell from '@/components/AppShell';
-import { fullName } from '@/components/HrForms';
+import EmptyState from '@/components/EmptyState';
+import { PersonCell, fullName } from '@/components/HrForms';
 import HrNav from '@/components/HrNav';
+import Skeleton from '@/components/Skeleton';
 import { api, today } from '@/lib/api';
 
 export default function OrgChart() {
@@ -46,8 +48,7 @@ function OrgChartApp() {
     return (
       <li key={person.id}>
         <Link href={`/saas/hr/employee/${person.id}`} className={`org-card${dim ? ' dim' : ''}`}>
-          <strong>{fullName(person)}</strong>
-          <span>{person.job_title || 'No job title'}</span>
+          <PersonCell person={person} name={fullName(person)} sub={person.job_title || 'No job title'} />
           {person.department && <span className="muted">{person.department.name}</span>}
           {reports.length > 0 && <span className="muted">{reports.length} {reports.length === 1 ? 'report' : 'reports'}</span>}
         </Link>
@@ -72,7 +73,10 @@ function OrgChartApp() {
         )}
       </div>
       {error && <p className="error">{error}</p>}
-      {!people ? <p className="empty">Loading…</p> : current.length === 0 ? <p className="empty">No one yet.</p> : (
+      {!people ? (error ? null : <div className="card" aria-hidden="true" style={{ display: 'grid', justifyItems: 'center', gap: 16 }}><Skeleton width={220} height={56} radius={12} /><div style={{ display: 'flex', gap: 16 }}><Skeleton width={200} height={56} radius={12} /><Skeleton width={200} height={56} radius={12} /></div></div>)
+        : current.length === 0 ? (
+          <div className="card"><EmptyState icon="team" title="No one yet" line="Add people and set each one's manager, and the chart draws itself." action={{ label: 'Go to people', href: '/saas/hr' }} /></div>
+        ) : (
         <div className="card org-chart-wrap">
           <ul className="org-chart">{tops.map((row) => branch(row, seen))}</ul>
         </div>

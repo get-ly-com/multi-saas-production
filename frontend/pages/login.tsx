@@ -40,7 +40,7 @@ export default function Login() {
     } else {
       const { error } = await auth.signInWithPassword({ email, password });
       if (error) setError(error.message);
-      else router.push('/saas/accounting');
+      else router.push('/saas/today');
     }
 
     setBusy(false);

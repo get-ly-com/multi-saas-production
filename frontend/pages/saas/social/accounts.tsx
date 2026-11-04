@@ -1,10 +1,15 @@
 import { FormEvent, useEffect, useState } from 'react';
 import AppShell from '@/components/AppShell';
+import EmptyState from '@/components/EmptyState';
+import Icon from '@/components/Icon';
 import Modal from '@/components/Modal';
+import { SkeletonTable } from '@/components/Skeleton';
 import SocialNav from '@/components/SocialNav';
-import { PLATFORMS } from '@/components/SocialForms';
+import { PLATFORMS, PlatformMark } from '@/components/SocialForms';
+import { toast } from '@/components/Toast';
 import { api } from '@/lib/api';
 import useSubmit from '@/lib/useSubmit';
+import ss from '@/styles/social.module.css';
 
 export default function SocialAccounts() {
   return <AppShell><Accounts /></AppShell>;
@@ -13,7 +18,7 @@ export default function SocialAccounts() {
 const EMPTY = { platform: 'x', handle: '', profile_url: '' };
 
 function Accounts() {
-  const [accounts, setAccounts] = useState<any[]>([]);
+  const [accounts, setAccounts] = useState<any[] | null>(null);
   const [canEdit, setCanEdit] = useState(false);
   const [editing, setEditing] = useState<any>(null);
   const [error, setError] = useState('');
@@ -26,6 +31,7 @@ function Accounts() {
       setError('');
     } catch (err: any) {
       setError(err.message);
+      setAccounts((current) => current || []);
     }
   };
 
@@ -35,10 +41,11 @@ function Accounts() {
 
   const { busy, run: once } = useSubmit();
   // One action at a time, so a double click cannot repeat it
-  const act = (work: () => Promise<any>) => once(async () => {
+  const act = (work: () => Promise<any>, done?: string) => once(async () => {
     try {
       await work();
       await load();
+      if (done) toast.success(done);
     } catch (err: any) {
       setError(err.message);
     }
@@ -48,45 +55,63 @@ function Accounts() {
     <div className="stack">
       <SocialNav />
       <div className="page-head">
-        <h1>Accounts</h1>
-        {canEdit && <button className="primary" onClick={() => setEditing({ ...EMPTY })}>Add account</button>}
+        <div>
+          <h1>Accounts</h1>
+          <p className="muted">The company&apos;s profiles you plan posts for. Only the name and profile link are kept here.</p>
+        </div>
+        {canEdit && <button className="primary" onClick={() => setEditing({ ...EMPTY })}><Icon name="plus" size={16} />Add account</button>}
       </div>
-      <p className="muted">List the company’s accounts so posts can be planned for them. Only the name and profile link are kept here. Never enter passwords: you sign in on each platform yourself when you post.</p>
+      <p className="notice" style={{ margin: 0 }}>Never enter passwords here. You sign in on each platform yourself when you post.</p>
       {error && <p className="error">{error}</p>}
 
-      <div className="card table-wrap">
-        <table>
-          <thead><tr><th>Platform</th><th>Account</th><th>Profile</th><th className="num">Text limit</th><th>Status</th><th /></tr></thead>
-          <tbody>
-            {accounts.length === 0 && <tr><td colSpan={6} className="empty">No accounts yet</td></tr>}
-            {accounts.map((account) => (
-              <tr key={account.id}>
-                <td>{PLATFORMS[account.platform].name}</td>
-                <td>{account.handle}</td>
-                <td>{account.profile_url ? <a href={account.profile_url} target="_blank" rel="noopener noreferrer">Open profile</a> : '—'}</td>
-                <td className="num">{PLATFORMS[account.platform].limit.toLocaleString()}</td>
-                <td><span className={`badge ${account.is_active ? 'paid' : ''}`}>{account.is_active ? 'On' : 'Off'}</span></td>
-                <td>
-                  {canEdit && (
-                    <div className="row-actions">
-                      <button onClick={() => setEditing({ ...account, profile_url: account.profile_url || '' })}>Edit</button>
-                      <button onClick={() => act(() => api.put(`/api/social-media/accounts/${account.id}`, { ...account, is_active: !account.is_active }))}>
-                        {account.is_active ? 'Turn off' : 'Turn on'}
-                      </button>
-                      <button className="danger" onClick={() => window.confirm(`Remove ${account.handle} from the list?`) && act(() => api.delete(`/api/social-media/accounts/${account.id}`))}>Delete</button>
-                    </div>
-                  )}
-                </td>
-              </tr>
-            ))}
-          </tbody>
-        </table>
-      </div>
+      {accounts === null && <SkeletonTable rows={3} columns={5} />}
+      {accounts?.length === 0 && (
+        <div className="card">
+          <EmptyState icon="social" title="No accounts yet"
+            line="Add your company's X, LinkedIn, Facebook or Instagram profile to start planning posts."
+            action={canEdit ? { label: 'Add account', onClick: () => setEditing({ ...EMPTY }) } : undefined} />
+        </div>
+      )}
+      {accounts && accounts.length > 0 && (
+        <div className="card table-wrap">
+          <table>
+            <thead><tr><th>Account</th><th>Profile</th><th className="num">Text limit</th><th>Status</th><th /></tr></thead>
+            <tbody>
+              {accounts.map((account) => (
+                <tr key={account.id}>
+                  <td>
+                    <span className={ss.accountRow}>
+                      <PlatformMark platform={account.platform} large />
+                      <span><strong>{account.handle}</strong><small>{PLATFORMS[account.platform].name}</small></span>
+                    </span>
+                  </td>
+                  <td>{account.profile_url ? <a href={account.profile_url} target="_blank" rel="noopener noreferrer">Open profile <Icon name="external" size={13} /></a> : <span className="muted">No link</span>}</td>
+                  <td className="num">{PLATFORMS[account.platform].limit.toLocaleString()}</td>
+                  <td><span className={`badge ${account.is_active ? 'active' : 'inactive'}`}>{account.is_active ? 'On' : 'Off'}</span></td>
+                  <td>
+                    {canEdit && (
+                      <div className="row-actions">
+                        <button className="small" onClick={() => setEditing({ ...account, profile_url: account.profile_url || '' })}>Edit</button>
+                        <button className="small" disabled={busy} onClick={() => act(() => api.put(`/api/social-media/accounts/${account.id}`, { ...account, is_active: !account.is_active }),
+                          account.is_active ? 'Account turned off' : 'Account turned on')}>
+                          {account.is_active ? 'Turn off' : 'Turn on'}
+                        </button>
+                        <button className="small danger" disabled={busy} onClick={() => window.confirm(`Remove ${account.handle} from the list?`) && act(() => api.delete(`/api/social-media/accounts/${account.id}`), 'Account removed')}>Delete</button>
+                      </div>
+                    )}
+                  </td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
+      )}
 
-      {editing && <AccountForm initial={editing} onClose={() => setEditing(null)} onSaved={load} />}
+      {editing && <AccountForm initial={editing} onClose={() => setEditing(null)} onSaved={async () => { await load(); toast.success(editing.id ? 'Account saved' : 'Account added'); }} />}
     </div>
   );
 }
+
 
 function AccountForm({ initial, onClose, onSaved }: { initial: any; onClose: () => void; onSaved: () => void }) {
   const [form, setForm] = useState(initial);

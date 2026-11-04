@@ -1,5 +1,7 @@
 import { FormEvent, useEffect, useState } from 'react';
+import EmptyState from '@/components/EmptyState';
 import Modal from '@/components/Modal';
+import { SkeletonTable } from '@/components/Skeleton';
 import { fullName } from '@/components/HrForms';
 import ReceiptReader, { ReceiptFields } from '@/components/ReceiptReader';
 import { api, formatDate, today } from '@/lib/api';
@@ -264,8 +266,14 @@ export function EmployeeChecklists({ employee, manager, isMe, isTheirManager }: 
   });
 
   const canTick = (task: any) => manager || (task.who === 'employee' && isMe) || (task.who === 'manager' && isTheirManager);
-  if (tasks === null && !error) return null;
-  if (!manager && !tasks?.length) return null;
+  if (tasks === null && !error) return <SkeletonTable rows={3} columns={4} />;
+  if (!manager && !tasks?.length) {
+    return (
+      <div className="card">
+        <EmptyState compact icon="check" title="No checklist yet" line="Onboarding and offboarding steps show up here when HR starts one." />
+      </div>
+    );
+  }
 
   const addStep = async (event: FormEvent) => {
     event.preventDefault();
@@ -304,7 +312,7 @@ export function EmployeeChecklists({ employee, manager, isMe, isTheirManager }: 
           </div>
         );
       })}
-      {!tasks?.length && <p className="empty">No checklist yet.</p>}
+      {!tasks?.length && <EmptyState compact icon="check" title="No checklist yet" line="Start one from a template below, or add steps one by one." />}
       {manager && (
         <>
           {templates.length > 0 && (

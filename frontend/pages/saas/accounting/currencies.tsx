@@ -1,6 +1,10 @@
 import { FormEvent, useEffect, useState } from 'react';
 import AccountingNav from '@/components/AccountingNav';
+import { PageHead } from '@/components/AccountingKit';
 import AppShell from '@/components/AppShell';
+import EmptyState from '@/components/EmptyState';
+import Skeleton, { SkeletonTable } from '@/components/Skeleton';
+import { toast } from '@/components/Toast';
 import { api, formatDate, setBaseCurrency, today } from '@/lib/api';
 import useSubmit from '@/lib/useSubmit';
 
@@ -13,7 +17,6 @@ function CurrenciesApp() {
   const [form, setForm] = useState({ currency: '', rate_date: today(), rate: '' });
   const [base, setBase] = useState('');
   const [error, setError] = useState('');
-  const [notice, setNotice] = useState('');
 
   const load = async () => {
     try {
@@ -36,11 +39,10 @@ function CurrenciesApp() {
     return run(async () => {
       try {
         await api.post('/api/accounting/currencies/rates', form);
-        setNotice(`Saved the ${form.currency.toUpperCase()} rate.`);
+        toast.success('Rate saved', { detail: `1 ${form.currency.toUpperCase()} is ${Number(form.rate)} ${overview?.base || ''} from ${formatDate(form.rate_date)}` });
         setForm({ ...form, currency: '', rate: '' });
         await load();
       } catch (err: any) {
-        setNotice('');
         setError(err.message);
       }
     });
@@ -50,23 +52,30 @@ function CurrenciesApp() {
     try {
       await api.put('/api/accounting/currencies/base', { currency: base });
       setBaseCurrency(base.toUpperCase());
-      setNotice(`Base currency set to ${base.toUpperCase()}.`);
+      toast.success('Base currency set', { detail: `Your books and reports are now kept in ${base.toUpperCase()}` });
       await load();
     } catch (err: any) {
-      setNotice('');
       setError(err.message);
     }
   });
 
-  if (!overview) return error ? <p className="error">{error}</p> : <p className="empty">Loading…</p>;
+  if (!overview) {
+    return error ? <p className="error">{error}</p> : (
+      <div className="stack" role="status" aria-label="Loading">
+        <AccountingNav />
+        <Skeleton width={180} height={26} />
+        <div className="card"><Skeleton width="40%" height={18} /><Skeleton width="80%" style={{ marginTop: 10 }} /></div>
+        <SkeletonTable rows={3} columns={3} />
+      </div>
+    );
+  }
 
   return (
     <div className="stack">
       <AccountingNav />
-      <div className="page-head"><h1>Currencies</h1></div>
+      <PageHead title="Currencies" line="Invoice and pay in other currencies. Rates turn them into your base currency." />
 
       {error && <p className="error">{error}</p>}
-      {notice && <p className="notice">{notice}</p>}
 
       <div className="card">
         <h2>Base currency: {overview.base}</h2>
@@ -95,10 +104,12 @@ function CurrenciesApp() {
 
       <div className="card table-wrap">
         <h2>Latest rates</h2>
+        {overview.rates.length === 0 ? (
+          <EmptyState compact icon="money" title="No exchange rates yet" line="Add a rate above before you invoice or pay in another currency." />
+        ) : (
         <table>
           <thead><tr><th>Currency</th><th>Date</th><th className="num">1 unit in {overview.base}</th></tr></thead>
           <tbody>
-            {overview.rates.length === 0 && <tr><td colSpan={3} className="empty">No exchange rates yet</td></tr>}
             {overview.rates.map((row: any) => (
               <tr key={row.currency}>
                 <td>{row.currency}</td>
@@ -108,6 +119,7 @@ function CurrenciesApp() {
             ))}
           </tbody>
         </table>
+        )}
       </div>
     </div>
   );

@@ -1,7 +1,11 @@
 import { FormEvent, useEffect, useState } from 'react';
 import AppShell from '@/components/AppShell';
 import ChatNav from '@/components/ChatNav';
+import EmptyState from '@/components/EmptyState';
+import Icon from '@/components/Icon';
 import Modal from '@/components/Modal';
+import { SkeletonTable } from '@/components/Skeleton';
+import { toast } from '@/components/Toast';
 import { api } from '@/lib/api';
 import useSubmit from '@/lib/useSubmit';
 
@@ -18,6 +22,7 @@ function Replies() {
   const [editing, setEditing] = useState<Reply | null>(null);
   const [search, setSearch] = useState('');
   const [error, setError] = useState('');
+  const [loading, setLoading] = useState(true);
 
   const load = async () => {
     try {
@@ -27,6 +32,8 @@ function Replies() {
       setError('');
     } catch (err: any) {
       setError(err.message);
+    } finally {
+      setLoading(false);
     }
   };
 
@@ -39,6 +46,7 @@ function Replies() {
     if (!window.confirm(`Delete the saved reply /${row.shortcut}?`)) return;
     try {
       await api.delete(`/api/chatbot/canned/${row.id}`);
+      toast.success(`/${row.shortcut} deleted`);
       load();
     } catch (err: any) {
       setError(err.message);
@@ -52,25 +60,34 @@ function Replies() {
     <div className="stack">
       <ChatNav />
       <div className="page-head">
-        <h1>Saved replies</h1>
-        {canEdit && <button className="primary" onClick={() => setEditing({ shortcut: '', body: '' })} disabled={rows.length >= 200}>New saved reply</button>}
+        <div>
+          <h1>Saved replies</h1>
+          <p className="muted">Answers you write once and drop into any chat.</p>
+        </div>
+        {canEdit && <button className="primary" onClick={() => setEditing({ shortcut: '', body: '' })} disabled={rows.length >= 200}><Icon name="plus" size={16} />New saved reply</button>}
       </div>
-      <p className="muted">In a chat, type / and the shortcut (for example /refund), then press Tab or Enter to put the reply in. Write {'{name}'} for the visitor's first name. Up to 200.</p>
+      <p className="muted small">In a chat, type <span className="kbd">/</span> and the shortcut (for example /refund), then press <span className="kbd">Tab</span> or <span className="kbd">Enter</span> to put the reply in. Write {'{name}'} for the visitor's first name. Up to 200.</p>
       {error && <p className="error">{error}</p>}
-      <input aria-label="Search saved replies" placeholder="Search" value={search} onChange={(e) => setSearch(e.target.value)} />
-      <div className="table-wrap">
+      {loading ? <SkeletonTable rows={4} columns={3} /> : rows.length === 0 ? (
+        <div className="card">
+          <EmptyState icon="chat" title="No saved replies yet" line="Save the answers you type most, like refunds or delivery times, and reply in a keystroke."
+            action={canEdit ? { label: 'New saved reply', onClick: () => setEditing({ shortcut: '', body: '' }) } : undefined} />
+        </div>
+      ) : (<>
+      <div className="report-filters"><input type="search" aria-label="Search saved replies" placeholder="Search saved replies" value={search} onChange={(e) => setSearch(e.target.value)} /></div>
+      <div className="card table-wrap">
         <table>
           <thead><tr><th>Shortcut</th><th>Reply</th><th /></tr></thead>
           <tbody>
-            {shown.length === 0 && <tr><td colSpan={3} className="empty">No saved replies yet</td></tr>}
+            {shown.length === 0 && <tr><td colSpan={3} className="empty">No saved replies match your search</td></tr>}
             {shown.map((row) => (
               <tr key={row.id}>
-                <td><code>/{row.shortcut}</code></td>
+                <td><span className="chip" style={{ fontFamily: 'var(--font-mono)' }}>/{row.shortcut}</span></td>
                 <td className="wrap">{row.body}</td>
                 <td>{canEdit && (
                   <div className="row-actions">
-                    <button onClick={() => setEditing(row)}>Edit</button>
-                    <button disabled={busy} className="danger" onClick={() => remove(row)}>Delete</button>
+                    <button className="small" onClick={() => setEditing(row)}>Edit</button>
+                    <button disabled={busy} className="small ghost danger" onClick={() => remove(row)}>Delete</button>
                   </div>
                 )}</td>
               </tr>
@@ -78,7 +95,8 @@ function Replies() {
           </tbody>
         </table>
       </div>
-      {editing && <ReplyForm row={editing} onClose={() => setEditing(null)} onSaved={() => { setEditing(null); load(); }} />}
+      </>)}
+      {editing && <ReplyForm row={editing} onClose={() => setEditing(null)} onSaved={() => { toast.success(editing.id ? 'Saved reply updated' : 'Saved reply added'); setEditing(null); load(); }} />}
     </div>
   );
 }

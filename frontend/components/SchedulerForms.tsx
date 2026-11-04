@@ -1,6 +1,7 @@
 import Link from 'next/link';
 import { FormEvent, useEffect, useState } from 'react';
 import Modal from '@/components/Modal';
+import Skeleton from '@/components/Skeleton';
 import { LOCATIONS, dayLabel, googleCalendarLink, placesText } from '@/components/SchedulerNav';
 import { api, money } from '@/lib/api';
 import useSubmit from '@/lib/useSubmit';
@@ -42,7 +43,7 @@ function TimePicker({ service, staff, date, booking, time, onPick }: {
   return (
     <div style={{ marginTop: 12 }}>
       <div className="stat-label">Free times{staff ? '' : ' (anyone)'}</div>
-      {slots === null && <p className="muted">Loading…</p>}
+      {slots === null && <div className="slot-list" aria-busy="true">{[0, 1, 2, 3].map((n) => <Skeleton key={n} width={72} height={34} radius={8} />)}</div>}
       {slots?.length === 0 && <p className="muted">No free times in opening hours on this day.</p>}
       <div className="slot-list">
         {slots?.map((slot) => (

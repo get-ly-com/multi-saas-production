@@ -2,9 +2,15 @@ import Link from 'next/link';
 import { useRouter } from 'next/router';
 import { FormEvent, useEffect, useState } from 'react';
 import AppShell from '@/components/AppShell';
-import { fullName, monthName } from '@/components/HrForms';
+import { celebrate } from '@/components/Celebrate';
+import EmptyState from '@/components/EmptyState';
+import { PayStepper, PersonCell, fullName, monthName } from '@/components/HrForms';
 import HrNav from '@/components/HrNav';
+import Icon from '@/components/Icon';
 import Modal from '@/components/Modal';
+import Skeleton, { SkeletonStats, SkeletonTable } from '@/components/Skeleton';
+import { toast } from '@/components/Toast';
+import styles from '@/styles/hr.module.css';
 import { api, formatDate, money, today, queryId } from '@/lib/api';
 import { downloadCsv } from '@/lib/csv';
 import useSubmit from '@/lib/useSubmit';
@@ -38,14 +44,15 @@ function PayRunApp() {
     load();
   }, [id]);
 
-  const act = async (work: () => Promise<unknown>, question?: string) => {
+  const act = async (work: () => Promise<unknown>, question?: string, done?: { title: string; detail?: string }) => {
     if (question && !window.confirm(question)) return;
     setBusy(true);
     try {
       await work();
       await load();
+      if (done) toast.success(done.title, { detail: done.detail });
     } catch (err: any) {
-      setError(err.message);
+      toast.error('That did not go through', { detail: err.message });
     } finally {
       setBusy(false);
     }
@@ -55,9 +62,10 @@ function PayRunApp() {
     if (!window.confirm('Delete this draft pay run?')) return;
     try {
       await api.delete(`/api/hr/pay-runs/${run.id}`);
+      toast.success('Draft deleted', { detail: `Pay run for ${monthName(run.period_start)}` });
       router.push('/saas/hr/payroll');
     } catch (err: any) {
-      setError(err.message);
+      toast.error('Could not delete', { detail: err.message });
     }
   };
 
@@ -69,39 +77,64 @@ function PayRunApp() {
     ]);
   };
 
-  if (!run) return <div className="stack"><HrNav />{error ? <p className="error">{error}</p> : <p className="empty">Loading…</p>}</div>;
+  if (!run) {
+    return (
+      <div className="stack">
+        <HrNav />
+        {error ? <p className="error">{error}</p> : (
+          <div className="stack" role="status" aria-label="Loading">
+            <div className="card"><Skeleton width={260} height={26} /><Skeleton width={200} height={14} style={{ marginTop: 12 }} /></div>
+            <SkeletonStats count={4} />
+            <SkeletonTable rows={6} columns={7} />
+          </div>
+        )}
+      </div>
+    );
+  }
 
   const draft = run.status === 'draft';
+  const sum = (field: string) => run.lines.reduce((total: number, line: any) => total + Number(line[field] || 0), 0);
+  const totalDeductions = run.lines.reduce((total: number, line: any) => total + deductions(line), 0);
+  const next = draft ? 'Check each line, then approve.' : run.status === 'approved' ? 'Approved and booked. Mark it paid when the wages leave the bank.'
+    : run.status === 'paid' ? `Paid${run.paid_on ? ` on ${formatDate(run.paid_on)}` : ''}. Payslips are ready.` : 'This run was voided and its entries reversed.';
 
   return (
     <div className="stack">
       <HrNav />
-      <div className="page-head">
-        <div>
-          <h1>Payroll for {monthName(run.period_start)}</h1>
-          <p className="muted">Pay run {run.run_number} · pay date {formatDate(run.pay_date)} · <span className={`badge ${run.status === 'approved' ? 'open' : run.status}`}>{run.status}</span>
-            {run.paid_on && ` · paid ${formatDate(run.paid_on)}`}</p>
+      <div className={`card ${styles.runCard}`}>
+        <div className={styles.runTop}>
+          <div>
+            <h1 style={{ margin: 0 }}>Payroll for {monthName(run.period_start)}</h1>
+            <div className={styles.chips} style={{ marginTop: 8 }}>
+              <span className="chip">Run {run.run_number}</span>
+              <span className="chip">Pay date {formatDate(run.pay_date)}</span>
+              <span className="chip">{run.lines.length} {run.lines.length === 1 ? 'person' : 'people'}</span>
+              {run.status === 'void' && <span className="badge void">Void</span>}
+            </div>
+          </div>
+          <PayStepper status={run.status} large />
         </div>
-        <div className="row-actions">
+        <p className="muted" style={{ margin: 0 }}>{next}</p>
+        <div className="row-actions" style={{ justifyContent: 'flex-start' }}>
           <button onClick={exportCsv}>Download CSV</button>
           {draft && (
             <>
-              <button disabled={busy} onClick={() => act(() => api.post(`/api/hr/pay-runs/${run.id}/recalculate`, {}), 'Work everyone\'s pay out again from their current pay and leave? Your changes to this run will be lost.')}>Recalculate</button>
+              <button disabled={busy} onClick={() => act(() => api.post(`/api/hr/pay-runs/${run.id}/recalculate`, {}), 'Work everyone\'s pay out again from their current pay and leave? Your changes to this run will be lost.', { title: 'Pay worked out again', detail: 'From everyone\'s current pay and leave.' })}>Recalculate</button>
               {run.lines.some((line: any) => line.pay_type === 'hourly') && (
                 <button disabled={busy} onClick={() => act(async () => {
                   const result = await api.post(`/api/hr/pay-runs/${run.id}/attendance-hours`, {});
                   const kept = result.kept_usual_hours?.length ? ` Kept usual hours for ${result.kept_usual_hours.join(', ')}, who have no approved time.` : '';
                   const waiting = result.waiting_entries ? ` ${result.waiting_entries} time entries this month still need approving.` : '';
-                  window.alert(`Hours taken from attendance for ${result.updated} ${result.updated === 1 ? 'person' : 'people'}.${kept}${waiting}`);
+                  toast.success(`Hours taken from attendance for ${result.updated} ${result.updated === 1 ? 'person' : 'people'}`, { detail: `${kept}${waiting}`.trim() || undefined, duration: kept || waiting ? 10000 : undefined });
                 }, 'Set hourly staff\'s hours to their approved attendance this month? Their taxes are worked out again from your rates.')}>Use attendance hours</button>
               )}
               <button className="danger" disabled={busy} onClick={remove}>Delete</button>
-              <button className="primary" disabled={busy || !run.lines.length} onClick={() => act(() => api.post(`/api/hr/pay-runs/${run.id}/approve`, {}), `Approve ${money(run.gross)} of pay? It's booked in Accounting and can't be changed after, only voided.`)}>Approve</button>
+              <button className="primary" disabled={busy || !run.lines.length} onClick={() => act(() => api.post(`/api/hr/pay-runs/${run.id}/approve`, {}), `Approve ${money(run.gross)} of pay? It's booked in Accounting and can't be changed after, only voided.`, { title: 'Pay run approved', detail: 'The cost is booked in Accounting. Mark it paid when the wages go out.' })}><Icon name="check" size={15} /> Approve</button>
             </>
           )}
           {run.status === 'approved' && <button className="primary" disabled={busy} onClick={() => setPaying(true)}>Mark as paid</button>}
           {['approved', 'paid'].includes(run.status) && (
-            <button className="danger" disabled={busy} onClick={() => act(() => api.post(`/api/hr/pay-runs/${run.id}/void`, {}), 'Void this pay run? Its entries in Accounting are reversed.')}>Void</button>
+            <button className="danger" disabled={busy} onClick={() => act(() => api.post(`/api/hr/pay-runs/${run.id}/void`, {}), 'Void this pay run? Its entries in Accounting are reversed.', { title: 'Pay run voided', detail: 'Its entries in Accounting are reversed.' })}>Void</button>
           )}
         </div>
       </div>
@@ -115,44 +148,71 @@ function PayRunApp() {
         <div className="card"><div className="stat-label">Take-home to pay staff</div><div className="stat-value">{money(run.net)}</div></div>
       </div>
 
-      <div className="card table-wrap">
+      {run.lines.length === 0 ? (
+        <div className="card">
+          <EmptyState icon="team" title="No one on this pay run"
+            line={draft ? 'Recalculate to bring in everyone employed this month, except contractors.' : 'This run has no lines.'} />
+        </div>
+      ) : (
+      <div className={`card table-wrap ${styles.sheet}`}>
         <table>
           <thead>
             <tr><th>Person</th><th className="num">Hours</th><th className="num">Base pay</th><th className="num">Unpaid leave</th><th className="num">Additions</th>
               <th className="num">Gross</th><th className="num">Deductions</th><th className="num">Take-home</th><th className="num">Employer</th><th /></tr>
           </thead>
           <tbody>
-            {run.lines.length === 0 && <tr><td colSpan={10} className="empty">No one on this pay run</td></tr>}
             {run.lines.map((line: any) => (
               <tr key={line.id}>
                 <td className="wrap">
-                  <Link href={`/saas/hr/employee/${line.employee_id}`}>{fullName(line.employee)}</Link>
-                  {line.note && <div className="muted">{line.note}</div>}
+                  <Link href={`/saas/hr/employee/${line.employee_id}`}>
+                    <PersonCell person={line.employee} size="small" sub={line.note || (line.pay_type === 'hourly' ? 'Hourly' : 'Salary')} />
+                  </Link>
                 </td>
                 <td className="num">{line.hours ?? '—'}</td>
                 <td className="num">{money(line.base_pay)}</td>
-                <td className="num">{Number(line.unpaid_deduction) ? `−${money(line.unpaid_deduction)} (${Number(line.unpaid_days)} days)` : '—'}</td>
+                <td className="num">{Number(line.unpaid_deduction) ? <span className={styles.minus}>−{money(line.unpaid_deduction)}<div className="muted small">{Number(line.unpaid_days)} days</div></span> : '—'}</td>
                 <td className="num">{Number(line.additions) ? money(line.additions) : '—'}</td>
                 <td className="num">{money(line.gross)}</td>
                 <td className="num">{money(deductions(line))}</td>
-                <td className="num"><strong>{money(line.net)}</strong></td>
+                <td className={`num ${styles.net}`}>{money(line.net)}</td>
                 <td className="num">{money(line.employer_contributions)}</td>
                 <td>
                   <div className="row-actions">
-                    <Link href={`/saas/hr/payslip/${line.id}`}>Payslip</Link>
-                    {draft && <button onClick={() => setEditing(line)}>Change</button>}
-                    {draft && <button className="danger" onClick={() => act(() => api.delete(`/api/hr/pay-lines/${line.id}`), `Take ${fullName(line.employee)} off this pay run?`)}>Remove</button>}
+                    <Link href={`/saas/hr/payslip/${line.id}`} className="button small ghost always">Payslip</Link>
+                    {draft && <button className="small" onClick={() => setEditing(line)}>Change</button>}
+                    {draft && <button className="danger small" onClick={() => act(() => api.delete(`/api/hr/pay-lines/${line.id}`), `Take ${fullName(line.employee)} off this pay run?`, { title: 'Taken off this run', detail: fullName(line.employee) })}>Remove</button>}
                   </div>
                 </td>
               </tr>
             ))}
           </tbody>
+          <tfoot>
+            <tr>
+              <td>Total, {run.lines.length} {run.lines.length === 1 ? 'person' : 'people'}</td>
+              <td className="num">{run.lines.some((line: any) => line.hours !== null && line.hours !== undefined) ? sum('hours') : '—'}</td>
+              <td className="num">{money(sum('base_pay'))}</td>
+              <td className="num">{sum('unpaid_deduction') ? `−${money(sum('unpaid_deduction'))}` : '—'}</td>
+              <td className="num">{sum('additions') ? money(sum('additions')) : '—'}</td>
+              <td className="num">{money(run.gross)}</td>
+              <td className="num">{money(totalDeductions)}</td>
+              <td className="num">{money(run.net)}</td>
+              <td className="num">{money(sum('employer_contributions'))}</td>
+              <td />
+            </tr>
+          </tfoot>
         </table>
       </div>
-      {draft && <p className="muted">Taxes start from the rates in HR settings. Change any line to add a bonus or overtime, or to enter the exact tax for that person.</p>}
+      )}
+      {draft && <p className="muted small">Taxes start from the rates in HR settings. Change any line to add a bonus or overtime, or to enter the exact tax for that person.</p>}
 
-      {editing && <LineForm line={editing} onClose={() => setEditing(null)} onSaved={load} />}
-      {paying && <PayForm run={run} onClose={() => setPaying(false)} onSaved={load} />}
+      {editing && <LineForm line={editing} onClose={() => setEditing(null)} onSaved={async () => { await load(); toast.success('Line saved', { detail: fullName(editing.employee) }); }} />}
+      {paying && (
+        <PayForm run={run} onClose={() => setPaying(false)} onSaved={async () => {
+          await load();
+          toast.success('Pay run paid', { detail: `${money(run.net)} of take-home pay is on its way. Payslips are ready.` });
+          celebrate();
+        }} />
+      )}
     </div>
   );
 }

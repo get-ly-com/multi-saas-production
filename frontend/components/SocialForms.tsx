@@ -1,9 +1,24 @@
 import { FormEvent, useEffect, useState } from 'react';
 import Modal from '@/components/Modal';
+import { toast } from '@/components/Toast';
 import { api } from '@/lib/api';
 import { withTracking } from '@/lib/campaign';
 import { getSupabase } from '@/lib/supabase';
 import useSubmit from '@/lib/useSubmit';
+import ss from '@/styles/social.module.css';
+
+// A small tile with the platform's initial, in its own colour, so posts read at a glance
+export function PlatformMark({ platform, large = false }: { platform: string; large?: boolean }) {
+  const name = PLATFORMS[platform]?.name || platform;
+  const letter = platform === 'linkedin' ? 'in' : platform === 'instagram' ? 'IG' : (name || '?').charAt(0).toUpperCase();
+  return <span className={`${ss.mark} ${ss[platform] || ''} ${large ? ss.large : ''}`} title={name} aria-label={name} role="img">{letter}</span>;
+}
+
+export function PlatformMarks({ platforms }: { platforms: string[] }) {
+  const unique = Array.from(new Set(platforms));
+  if (!unique.length) return null;
+  return <span className={ss.marks}>{unique.map((platform) => <PlatformMark key={platform} platform={platform} />)}</span>;
+}
 
 // Nothing here posts for you. Each platform needs its own approved developer app to post
 // automatically, so people post from the platform and record the live link here.
@@ -34,8 +49,9 @@ export const statusLabel = (status: string, approvalOn: boolean) => ({
   posted: 'Posted'
 } as Record<string, string>)[status] || status;
 
+// The shared pill colours: draft grey, needs approval amber, approved and posted green, scheduled accent
 export const statusClass = (status: string) =>
-  status === 'posted' ? 'paid' : status === 'needs_approval' ? 'open' : status === 'scheduled' ? 'sent' : '';
+  ['needs_approval', 'approved', 'scheduled', 'posted'].includes(status) ? status : '';
 
 export const imageUrl = (path: string) => getSupabase().storage.from(IMAGE_BUCKET).getPublicUrl(path).data.publicUrl;
 
@@ -225,7 +241,7 @@ export function PostForm({ overview, accounts, post, startDate, onClose, onSaved
           {usable.map((account) => (
             <label key={account.id} className="check">
               <input type="checkbox" checked={chosen.includes(account.id)} onChange={() => toggle(account.id)} />
-              {accountLabel(account)}{account.is_active ? '' : ' (turned off)'}
+              <PlatformMark platform={account.platform} />{accountLabel(account)}{account.is_active ? '' : ' (turned off)'}
             </label>
           ))}
         </div>
@@ -234,7 +250,7 @@ export function PostForm({ overview, accounts, post, startDate, onClose, onSaved
           if (!account) return null;
           return (
             <div key={accountId} className="social-target">
-              <label>{accountLabel(account)}
+              <label><span style={{ display: 'inline-flex', gap: 6, alignItems: 'center' }}><PlatformMark platform={account.platform} />{accountLabel(account)}</span>
                 <textarea rows={account.platform === 'x' ? 3 : 5} value={bodies[accountId] || ''}
                   onChange={(e) => setBodies({ ...bodies, [accountId]: e.target.value })} />
               </label>
@@ -336,7 +352,7 @@ export function PostView({ post, overview, onClose, onEdit, onChanged }: {
     setNotice('');
     try {
       await work();
-      if (done) setNotice(done);
+      if (done) toast.success(done.replace(/\.$/, ''));
       onChanged();
     } catch (err: any) {
       setError(err.message);
@@ -352,7 +368,7 @@ export function PostView({ post, overview, onClose, onEdit, onChanged }: {
     const body = post.link_url && link !== post.link_url ? (target.body || '').split(post.link_url).join(link) : target.body;
     try {
       await navigator.clipboard.writeText(body);
-      setNotice('Text copied.');
+      toast.success('Text copied', { detail: `Paste it into ${PLATFORMS[target.platform]?.name || 'the platform'}, which just opened.` });
     } catch {
       setNotice('Copy the text yourself, then paste it on the platform.');
     }
@@ -407,8 +423,8 @@ export function PostView({ post, overview, onClose, onEdit, onChanged }: {
         {post.targets.map((target: any) => (
           <div key={target.id} className="social-target">
             <div className="social-target-foot">
-              <strong>{accountLabel(target.account)}</strong>
-              {target.posted_at ? <span className="badge paid">Posted</span> : null}
+              <strong style={{ display: 'inline-flex', gap: 8, alignItems: 'center' }}><PlatformMark platform={target.platform} large />{accountLabel(target.account)}</strong>
+              {target.posted_at ? <span className="badge posted">Posted</span> : <span className="badge">Not posted yet</span>}
             </div>
             <p className="social-body">{target.body || <span className="muted">No text</span>}</p>
             <TextCounter platform={target.platform} body={target.body} />

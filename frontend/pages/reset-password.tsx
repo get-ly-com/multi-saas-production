@@ -11,7 +11,7 @@ export default function ResetPassword() {
     event.preventDefault();
     const { error } = await getSupabase().auth.updateUser({ password });
     if (error) setError(error.message);
-    else router.push('/saas/accounting');
+    else router.push('/saas/today');
   };
 
   return (

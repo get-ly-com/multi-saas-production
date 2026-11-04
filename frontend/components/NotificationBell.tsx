@@ -1,5 +1,6 @@
 import { useRouter } from 'next/router';
 import { useEffect, useRef, useState } from 'react';
+import Icon from '@/components/Icon';
 import { CRM_SAVED, api, formatDate } from '@/lib/api';
 
 const CHECK_EVERY = 60 * 1000;
@@ -46,18 +47,26 @@ export default function NotificationBell() {
 
   return (
     <div className="bell" ref={box}>
-      <button className="link" onClick={() => setOpen(!open)}>
-        Alerts{data.unread > 0 && <span className="badge lost"> {data.unread}</span>}
+      <button
+        type="button"
+        className="icon-button always"
+        aria-label={data.unread > 0 ? `Alerts, ${data.unread} unread` : 'Alerts'}
+        aria-expanded={open}
+        title="Alerts"
+        onClick={() => setOpen(!open)}
+      >
+        <Icon name="bell" />
+        {data.unread > 0 && <span className="bell-count">{data.unread > 99 ? '99+' : data.unread}</span>}
       </button>
       {open && (
         <div className="bell-menu">
           <div className="bell-head">
             <strong>Alerts</strong>
-            {data.unread > 0 && <button className="link" onClick={() => markRead(null)}>Mark all read</button>}
+            {data.unread > 0 && <button className="link always" onClick={() => markRead(null)}>Mark all read</button>}
           </div>
-          {data.items.length === 0 && <p className="empty">No alerts yet</p>}
+          {data.items.length === 0 && <p className="empty">You&apos;re all caught up. New alerts show up here.</p>}
           {data.items.map((item) => (
-            <button key={item.id} className={`bell-item ${item.read_at ? '' : 'unread'}`} onClick={() => choose(item)}>
+            <button key={item.id} className={`bell-item always ${item.read_at ? '' : 'unread'}`} onClick={() => choose(item)}>
               {item.title}
               <small>{[item.body, formatDate(item.created_at)].filter(Boolean).join(' · ')}</small>
             </button>

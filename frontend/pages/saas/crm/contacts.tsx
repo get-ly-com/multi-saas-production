@@ -2,12 +2,17 @@ import Link from 'next/link';
 import { ChangeEvent, useEffect, useState } from 'react';
 import AppShell from '@/components/AppShell';
 import CrmNav from '@/components/CrmNav';
+import { RecordDrawer, openInDrawer } from '@/components/CrmRecord';
+import EmptyState from '@/components/EmptyState';
+import { SkeletonTable } from '@/components/Skeleton';
+import { toast } from '@/components/Toast';
 import { ContactForm, useTeam } from '@/components/CrmForms';
 import { useCustomFields } from '@/components/CustomFields';
 import SavedViews, { Filters, ListFilters, matchesFilters } from '@/components/SavedViews';
 import BulkBar, { useSelection } from '@/components/BulkBar';
 import { TagChips, TagFilter, tagNames, useTags } from '@/components/Tags';
 import { api, formatDate, today } from '@/lib/api';
+import styles from '@/styles/crm.module.css';
 import { downloadCsv, readPeople } from '@/lib/csv';
 
 export default function Contacts() {
@@ -22,7 +27,7 @@ function ContactsApp() {
   const [filters, setFilters] = useState<Filters>({});
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState('');
-  const [notice, setNotice] = useState('');
+  const [opened, setOpened] = useState<any>(null);
   const [form, setForm] = useState<any>(null);
 
   const load = async () => {
@@ -46,10 +51,9 @@ function ContactsApp() {
     if (!file) return;
     try {
       const result = await api.post('/api/crm/contacts/import', { rows: readPeople(await file.text()) });
-      setNotice(`Imported ${result.created} contacts. Skipped ${result.skipped} with no name or an email already here.`);
+      toast.success(`Imported ${result.created} contacts`, { detail: `Skipped ${result.skipped} with no name or an email already here.` });
       await load();
     } catch (err: any) {
-      setNotice('');
       setError(err.message);
     }
   };
@@ -79,7 +83,6 @@ function ContactsApp() {
       </div>
 
       {error && <p className="error">{error}</p>}
-      {notice && <p className="notice">{notice}</p>}
 
       <div className="card stack">
         <SavedViews entity="contact" filters={filters} onApply={setFilters} />
@@ -91,18 +94,24 @@ function ContactsApp() {
       </div>
 
       <BulkBar entity="contact" selected={selection.selected} onClear={selection.clear} tags={tags} members={members}
-        onDone={async (message) => { setNotice(message); await load(); }} />
+        onDone={async (message) => { toast.success('Done', { detail: message }); await load(); }} />
 
-      <div className="card table-wrap">
-        {loading ? <p className="empty">Loading…</p> : (
+      {loading ? <SkeletonTable rows={8} columns={7} /> : (
+        <div className="card table-wrap">
           <table>
             <thead><tr><th className="pick"><input type="checkbox" aria-label="Select all shown" checked={selection.all} onChange={selection.toggleAll} /></th><th>Name</th><th>Job title</th><th>Company</th><th>Email</th><th>Phone</th><th>Tags</th></tr></thead>
             <tbody>
-              {visible.length === 0 && <tr><td colSpan={7} className="empty">{contacts.length ? 'No matches' : 'No contacts yet'}</td></tr>}
+              {visible.length === 0 && (
+                <tr><td colSpan={7}>
+                  {contacts.length
+                    ? <EmptyState compact icon="search" title="No contacts match" line="Try a different search or clear a filter." />
+                    : <EmptyState compact icon="contact" title="No contacts yet" line="Add someone you sell to, or import a CSV from your old tool." action={{ label: 'New contact', onClick: () => setForm({}) }} />}
+                </td></tr>
+              )}
               {visible.map((contact) => (
                 <tr key={contact.id} className={selection.has(contact.id) ? 'picked' : ''}>
                   <td className="pick"><input type="checkbox" aria-label={`Select ${contact.name}`} checked={selection.has(contact.id)} onChange={() => selection.toggle(contact.id)} /></td>
-                  <td className="wrap"><Link href={`/saas/crm/contact/${contact.id}`}>{contact.name}</Link></td>
+                  <td className="wrap"><Link href={`/saas/crm/contact/${contact.id}`} className={styles.rowOpen} onClick={openInDrawer(() => setOpened(contact))}>{contact.name}</Link></td>
                   <td className="wrap">{contact.job_title || '—'}</td>
                   <td className="wrap">{contact.company ? <Link href={`/saas/crm/company/${contact.company.id}`}>{contact.company.name}</Link> : '—'}</td>
                   <td>{contact.email || '—'}</td>
@@ -112,10 +121,11 @@ function ContactsApp() {
               ))}
             </tbody>
           </table>
-        )}
-      </div>
+        </div>
+      )}
 
-      {form && <ContactForm initial={form} onClose={() => setForm(null)} onSaved={load} />}
+      {form && <ContactForm initial={form} onClose={() => setForm(null)} onSaved={async () => { toast.success('Contact saved'); await load(); }} />}
+      <RecordDrawer kind="contact" record={opened} onClose={() => setOpened(null)} onChanged={load} ownerName={ownerName} tags={tags} />
     </div>
   );
 }

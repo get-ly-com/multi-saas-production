@@ -1,9 +1,12 @@
 import Link from 'next/link';
 import { useRouter } from 'next/router';
 import { FormEvent, useEffect, useState } from 'react';
+import { Amount, StatusPill, shownStatus, styles } from '@/components/AccountingKit';
 import AppShell from '@/components/AppShell';
 import Modal from '@/components/Modal';
 import PaymentLinkModal, { payLinkUrl } from '@/components/PaymentLinkModal';
+import Skeleton, { SkeletonText } from '@/components/Skeleton';
+import { toast } from '@/components/Toast';
 import WriteOffForm from '@/components/WriteOffForm';
 import { api, formatDate, money, today, queryId } from '@/lib/api';
 import useSubmit from '@/lib/useSubmit';
@@ -39,18 +42,31 @@ function InvoiceDocument() {
 
   const { busy, run: once } = useSubmit();
   // One action at a time, so a double click cannot repeat it
-  const run = (question: string, action: () => Promise<unknown>) => once(async () => {
+  const run = (question: string, action: () => Promise<unknown>, title: string, detail?: string) => once(async () => {
     if (!window.confirm(question)) return;
     try {
       await action();
       await load();
+      toast.success(title, { detail });
     } catch (err: any) {
       setError(err.message);
     }
   });
 
   if (error && !invoice) return <p className="error">{error}</p>;
-  if (!invoice) return <p className="empty">Loading…</p>;
+  if (!invoice) return (
+    <div className="stack" role="status" aria-label="Loading invoice">
+      <div className="page-head"><Skeleton width={90} height={14} /><Skeleton width={180} height={34} radius={8} /></div>
+      <div className="card document">
+        <div className="document-head">
+          <div style={{ display: 'grid', gap: 8 }}><Skeleton width={200} height={24} /><Skeleton width={70} height={12} /></div>
+          <div style={{ display: 'grid', gap: 8, justifyItems: 'end' }}><Skeleton width={110} height={14} /><Skeleton width={130} height={12} /><Skeleton width={130} height={12} /></div>
+        </div>
+        <SkeletonText lines={4} />
+        <div style={{ display: 'grid', gap: 8, justifyItems: 'end' }}><Skeleton width={220} height={14} /><Skeleton width={220} height={20} /></div>
+      </div>
+    </div>
+  );
 
   const balance = Number(invoice.amount) - Number(invoice.amount_paid) - Number(invoice.amount_credited);
   const sales = Math.round(Number(invoice.subtotal) * Number(invoice.exchange_rate) * 100) / 100;
@@ -64,7 +80,10 @@ function InvoiceDocument() {
   return (
     <div className="stack">
       <div className="page-head no-print">
-        <Link href="/saas/accounting">← Invoices</Link>
+        <div className="row-actions">
+          <Link href="/saas/accounting">← Invoices</Link>
+          <StatusPill status={shownStatus(invoice)} />
+        </div>
         <div className="row-actions">
           {invoice.customer_id && <Link href={`/saas/accounting/statements?customer=${invoice.customer_id}`}>Customer statement</Link>}
           {payable && <button onClick={() => setLinking(true)}>Get payment link</button>}
@@ -75,7 +94,9 @@ function InvoiceDocument() {
           {invoice.status === 'sent' && (
             <button className="danger" disabled={busy} onClick={() => run(
               `Void ${invoice.invoice_number}? Its ledger entry will be reversed.`,
-              () => api.put(`/api/accounting/invoices/${invoice.id}`, { status: 'void' })
+              () => api.put(`/api/accounting/invoices/${invoice.id}`, { status: 'void' }),
+              `${invoice.invoice_number} voided`,
+              'Its ledger entry was reversed. The customer no longer owes it.'
             )}>Void invoice</button>
           )}
           <button className="primary always" onClick={() => window.print()}>Print or save as PDF</button>
@@ -88,7 +109,7 @@ function InvoiceDocument() {
         <div className="document-head">
           <div>
             <h1>{company}</h1>
-            <p className="muted">Invoice {invoice.status === 'void' && '(void)'}</p>
+            <p className="muted">Invoice {invoice.status === 'void' && <StatusPill status="void" />}</p>
           </div>
           <div className="document-meta">
             <div><strong>{invoice.invoice_number}</strong></div>
@@ -114,8 +135,8 @@ function InvoiceDocument() {
                 <tr key={index}>
                   <td className="wrap">{line.description}</td>
                   <td className="num">{line.quantity}</td>
-                  <td className="num">{money(line.unit_price, invoice.currency)}</td>
-                  <td className="num">{money(line.quantity * line.unit_price, invoice.currency)}</td>
+                  <td className="num"><Amount value={line.unit_price} currency={invoice.currency} /></td>
+                  <td className="num"><Amount value={line.quantity * line.unit_price} currency={invoice.currency} /></td>
                 </tr>
               ))}
             </tbody>
@@ -132,7 +153,7 @@ function InvoiceDocument() {
           <div><span>Total</span><span>{money(invoice.amount, invoice.currency)}</span></div>
           {Number(invoice.amount_paid) > 0 && <div><span>Paid</span><span>{money(invoice.amount_paid, invoice.currency)}</span></div>}
           {Number(invoice.amount_credited) > 0 && <div><span>Credited</span><span>{money(invoice.amount_credited, invoice.currency)}</span></div>}
-          <div className="due"><span>Balance due</span><span>{money(invoice.status === 'void' ? 0 : balance, invoice.currency)}</span></div>
+          <div className="due"><span>Balance due</span><Amount value={invoice.status === 'void' ? 0 : balance} currency={invoice.currency} strong /></div>
         </div>
 
         {invoice.description && <p className="wrap">{invoice.description}</p>}
@@ -175,21 +196,30 @@ function InvoiceDocument() {
               {invoice.payments.map((payment: any) => (
                 <tr key={payment.id}>
                   <td>{formatDate(payment.payment_date)}</td>
-                  <td>{payment.account?.code} {payment.account?.name}{payment.is_write_off && <span className="badge">write-off</span>}</td>
+                  <td>{payment.account?.code} {payment.account?.name}{payment.is_write_off && <> <span className="badge">Write-off</span></>}</td>
                   <td className="wrap">{payment.reference || '—'}</td>
-                  <td className="num">{money(payment.amount, invoice.currency)}</td>
+                  <td className="num"><Amount value={payment.amount} currency={invoice.currency} dim={Boolean(payment.voided_at)} /></td>
                   <td className="num">
                     {payment.voided_at
-                      ? <span className="badge void">void</span>
-                      : <button className="danger" disabled={busy} onClick={() => run(
+                      ? <StatusPill status="void" />
+                      : <button className="small danger" disabled={busy} onClick={() => run(
                           payment.is_write_off
                             ? 'Undo this write-off? Its ledger entry will be reversed and the balance will be owed again.'
                             : 'Void this payment? Its ledger entry will be reversed.',
-                          () => api.post(`/api/accounting/payments/${payment.id}/void`, {})
-                        )}>Void</button>}
+                          () => api.post(`/api/accounting/payments/${payment.id}/void`, {}),
+                          payment.is_write_off ? 'Write-off undone' : 'Payment voided',
+                          `${money(payment.amount, invoice.currency)} is owed again.`
+                        )}>{payment.is_write_off ? 'Undo write-off' : 'Void'}</button>}
                   </td>
                 </tr>
               ))}
+              {invoice.payments.length > 1 && (
+                <tr className={styles.totalRow}>
+                  <td colSpan={3}>Total received</td>
+                  <td className="num"><Amount value={invoice.payments.filter((payment: any) => !payment.voided_at && !payment.is_write_off).reduce((sum: number, payment: any) => sum + Number(payment.amount), 0)} currency={invoice.currency} strong /></td>
+                  <td />
+                </tr>
+              )}
             </tbody>
           </table>
         </div>
@@ -203,16 +233,18 @@ function InvoiceDocument() {
             <tbody>
               {invoice.credit_notes.map((credit: any) => (
                 <tr key={credit.id}>
-                  <td>{credit.credit_number}{credit.refund_account_id && <span className="badge">refund</span>}</td>
+                  <td>{credit.credit_number}{credit.refund_account_id && <> <span className="badge">Refund</span></>}</td>
                   <td>{formatDate(credit.credit_date)}</td>
                   <td className="wrap">{credit.reason}</td>
-                  <td className="num">{money(credit.amount, invoice.currency)}</td>
+                  <td className="num"><Amount value={credit.amount} currency={invoice.currency} dim={Boolean(credit.voided_at)} /></td>
                   <td className="num">
                     {credit.voided_at
-                      ? <span className="badge void">void</span>
-                      : <button className="danger" disabled={busy} onClick={() => run(
+                      ? <StatusPill status="void" />
+                      : <button className="small danger" disabled={busy} onClick={() => run(
                           `Void ${credit.credit_number}? Its ledger entry will be reversed.`,
-                          () => api.post(`/api/accounting/credit-notes/${credit.id}/void`, {})
+                          () => api.post(`/api/accounting/credit-notes/${credit.id}/void`, {}),
+                          `${credit.credit_number} voided`,
+                          `${money(credit.amount, invoice.currency)} is back on the invoice.`
                         )}>Void</button>}
                   </td>
                 </tr>
@@ -261,6 +293,7 @@ function RefundForm({ invoice, onClose, onSaved }: { invoice: any; onClose: () =
     return run(async () => {
       try {
         await api.post('/api/accounting/refunds', { invoice_id: invoice.id, ...form });
+        toast.success('Refund recorded', { detail: `${money(form.amount, invoice.currency)} paid back on ${invoice.invoice_number}.` });
         await onSaved();
         onClose();
       } catch (err: any) {

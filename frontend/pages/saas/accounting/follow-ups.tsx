@@ -1,8 +1,12 @@
 import Link from 'next/link';
 import { FormEvent, useEffect, useState } from 'react';
+import { Amount, PageHead } from '@/components/AccountingKit';
 import AccountingNav from '@/components/AccountingNav';
 import AppShell from '@/components/AppShell';
+import EmptyState from '@/components/EmptyState';
 import Modal from '@/components/Modal';
+import { SkeletonStats, SkeletonTable } from '@/components/Skeleton';
+import { toast } from '@/components/Toast';
 import { api, formatDate, money, today } from '@/lib/api';
 import useSubmit from '@/lib/useSubmit';
 
@@ -55,7 +59,7 @@ function FollowUpsApp() {
     api.get('/api/me').then((me) => setCompany(me.tenant.name)).catch((err) => setError(err.message));
   }, []);
 
-  if (!data) return <div className="stack"><AccountingNav />{error ? <p className="error">{error}</p> : <p className="empty">Loading…</p>}</div>;
+  if (!data) return <div className="stack"><AccountingNav />{error ? <p className="error">{error}</p> : <><SkeletonStats count={3} /><SkeletonTable rows={5} columns={5} /></>}</div>;
 
   const rows = data.rows.filter((row: any) => showSnoozed || !row.snoozed);
   const open = data.rows.find((row: any) => row.customer_id === openId);
@@ -63,18 +67,16 @@ function FollowUpsApp() {
   return (
     <div className="stack">
       <AccountingNav />
-      <div className="page-head">
-        <h1>Follow-ups</h1>
+      <PageHead title="Follow-ups" line="Customers with overdue invoices, oldest first. Copy the reminder into your own email, then log what you did.">
         <button onClick={() => setEditingSteps(true)}>Reminder steps</button>
-      </div>
-      <p className="muted">Customers with overdue invoices, oldest first. Copy the suggested reminder into your own email, then log what you did and when to check again.</p>
+      </PageHead>
 
       {error && <p className="error">{error}</p>}
 
       <div className="stats">
         <div className="card"><div className="stat-label">To chase today</div><div className="stat-value">{data.totals.to_chase}</div></div>
         <div className="card"><div className="stat-label">Customers overdue</div><div className="stat-value">{data.totals.customers}</div></div>
-        <div className="card"><div className="stat-label">Overdue in total</div><div className="stat-value">{money(data.totals.overdue, data.currency)}</div></div>
+        <div className="card"><div className="stat-label">Overdue in total</div><div className="stat-value"><Amount value={data.totals.overdue} currency={data.currency} /></div></div>
       </div>
 
       <label className="check">
@@ -82,21 +84,39 @@ function FollowUpsApp() {
         Show customers waiting for a later follow-up date
       </label>
 
+      {rows.length === 0 ? (
+        <div className="card">
+          {data.rows.length ? (
+            <EmptyState
+              tone="done"
+              icon="clock"
+              title="Nobody to chase today"
+              line="Everyone overdue is waiting for a later follow-up date."
+              secondary={{ label: 'Show them anyway', onClick: () => setShowSnoozed(true) }}
+            />
+          ) : (
+            <EmptyState
+              tone="done"
+              icon="paid"
+              title="No overdue invoices. Nice work."
+              line="Everyone has paid on time. Time is yours again."
+              action={{ label: 'See invoices', href: '/saas/accounting' }}
+            />
+          )}
+        </div>
+      ) : (
       <div className="card table-wrap">
         <table>
           <thead>
             <tr><th>Customer</th><th className="num">Overdue</th><th className="num">Oldest</th><th>Suggested step</th><th>Last follow-up</th><th /></tr>
           </thead>
           <tbody>
-            {rows.length === 0 && (
-              <tr><td colSpan={6} className="empty">{data.rows.length ? 'Everyone is waiting for a later follow-up date' : 'No overdue invoices. Nice work.'}</td></tr>
-            )}
             {rows.map((row: any) => (
               <tr key={row.customer_id}>
                 <td className="wrap">{row.name}<div className="muted">{row.overdue_count} overdue {row.overdue_count === 1 ? 'invoice' : 'invoices'}</div></td>
-                <td className="num">{money(row.overdue_total, data.currency)}</td>
+                <td className="num"><Amount value={row.overdue_total} currency={data.currency} strong /></td>
                 <td className="num">{row.oldest_days} days</td>
-                <td>{row.level_name || '—'}</td>
+                <td>{row.level_name ? <span className="badge overdue">{row.level_name}</span> : <span className="muted">None yet</span>}</td>
                 <td className="wrap">
                   {row.last_at ? (
                     <>
@@ -111,6 +131,7 @@ function FollowUpsApp() {
           </tbody>
         </table>
       </div>
+      )}
 
       {open && <FollowUpPanel row={open} company={company} currency={data.currency} onClose={() => setOpenId('')} onSaved={load} />}
       {editingSteps && <StepsForm levels={data.levels} usingDefaults={data.using_defaults} onClose={() => setEditingSteps(false)} onSaved={load} />}
@@ -124,7 +145,6 @@ function FollowUpPanel({ row, company, currency, onClose, onSaved }: { row: any;
   const [nextDate, setNextDate] = useState(addDays(7));
   const [history, setHistory] = useState<any[]>([]);
   const [error, setError] = useState('');
-  const [notice, setNotice] = useState('');
 
   useEffect(() => {
     api.get(`/api/accounting/follow-ups/${row.customer_id}/history`).then(setHistory).catch((err) => setError(err.message));
@@ -133,7 +153,7 @@ function FollowUpPanel({ row, company, currency, onClose, onSaved }: { row: any;
   const copy = async () => {
     try {
       await navigator.clipboard.writeText(message);
-      setNotice('Reminder copied. Paste it into your email.');
+      toast.success('Reminder copied', { detail: `Paste it into your email to ${row.name}.` });
     } catch {
       setError('Your browser did not allow copying. Select the text and copy it yourself.');
     }
@@ -149,6 +169,7 @@ function FollowUpPanel({ row, company, currency, onClose, onSaved }: { row: any;
     return run(async () => {
       try {
         await api.post('/api/accounting/follow-ups', { customer_id: row.customer_id, level_name: row.level_name, note, next_date: nextDate || null });
+        toast.success('Follow-up logged', { detail: nextDate ? `We will bring ${row.name} back up on ${formatDate(nextDate)}.` : `Saved on ${row.name}'s history.` });
         await onSaved();
         onClose();
       } catch (err: any) {
@@ -168,7 +189,7 @@ function FollowUpPanel({ row, company, currency, onClose, onSaved }: { row: any;
                 <tr key={invoice.id}>
                   <td><Link href={`/saas/accounting/invoice/${invoice.id}`}>{invoice.invoice_number}</Link></td>
                   <td>{formatDate(invoice.due_date || invoice.invoice_date)}</td>
-                  <td className="num">{money(invoice.balance, invoice.currency)}</td>
+                  <td className="num"><Amount value={invoice.balance} currency={invoice.currency} /></td>
                   <td className="num">{invoice.days}</td>
                 </tr>
               ))}
@@ -184,7 +205,6 @@ function FollowUpPanel({ row, company, currency, onClose, onSaved }: { row: any;
           {mailto ? <a href={mailto}>Open in email app</a> : <span className="muted">No email saved for this customer</span>}
           <Link href={`/saas/accounting/statements?customer=${row.customer_id}`}>Statement</Link>
         </div>
-        {notice && <p className="notice">{notice}</p>}
 
         <form onSubmit={save}>
           <h2>Log this follow-up</h2>
@@ -240,6 +260,7 @@ function StepsForm({ levels, usingDefaults, onClose, onSaved }: { levels: any[];
     return run(async () => {
       try {
         await api.put('/api/accounting/follow-ups/levels', { levels: steps });
+        toast.success('Reminder steps saved', { detail: `${steps.length} ${steps.length === 1 ? 'step' : 'steps'}, used from the next follow-up on.` });
         await onSaved();
         onClose();
       } catch (err: any) {

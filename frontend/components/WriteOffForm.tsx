@@ -1,5 +1,6 @@
 import { FormEvent, useEffect, useState } from 'react';
 import Modal from '@/components/Modal';
+import { toast } from '@/components/Toast';
 import { api, money, today } from '@/lib/api';
 import useSubmit from '@/lib/useSubmit';
 
@@ -30,6 +31,7 @@ export default function WriteOffForm({ invoice, onClose, onSaved }: Props) {
     return run(async () => {
       try {
         await api.post(`/api/accounting/invoices/${invoice.id}/write-off`, form);
+        toast.success(`${invoice.invoice_number} written off`, { detail: `${money(balance, invoice.currency)} moved to expenses. You can undo it from the invoice page.` });
         await onSaved();
         onClose();
       } catch (err: any) {

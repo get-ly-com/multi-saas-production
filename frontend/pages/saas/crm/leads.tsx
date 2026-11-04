@@ -2,6 +2,10 @@ import Link from 'next/link';
 import { ChangeEvent, useEffect, useState } from 'react';
 import AppShell from '@/components/AppShell';
 import CrmNav from '@/components/CrmNav';
+import { RecordDrawer, openInDrawer } from '@/components/CrmRecord';
+import EmptyState from '@/components/EmptyState';
+import { SkeletonTable } from '@/components/Skeleton';
+import { toast } from '@/components/Toast';
 import { useTeam } from '@/components/CrmForms';
 import { useCustomFields } from '@/components/CustomFields';
 import { LeadForm, SOURCES, scoreBadge, scoreLabel, statusBadge, statusLabel } from '@/components/LeadForms';
@@ -9,6 +13,7 @@ import SavedViews, { Filters, ListFilters, matchesFilters } from '@/components/S
 import BulkBar, { useSelection } from '@/components/BulkBar';
 import { TagChips, TagFilter, tagNames, useTags } from '@/components/Tags';
 import { api, formatDate, today } from '@/lib/api';
+import styles from '@/styles/crm.module.css';
 import { downloadCsv, readPeople } from '@/lib/csv';
 
 export default function Leads() {
@@ -23,7 +28,7 @@ function LeadsApp() {
   const [filters, setFilters] = useState<Filters>({ status: 'open' });
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState('');
-  const [notice, setNotice] = useState('');
+  const [opened, setOpened] = useState<any>(null);
   const [adding, setAdding] = useState(false);
 
   const load = async () => {
@@ -47,10 +52,9 @@ function LeadsApp() {
     if (!file) return;
     try {
       const result = await api.post('/api/crm/leads/import', { rows: readPeople(await file.text()) });
-      setNotice(`Imported ${result.created} leads. Skipped ${result.skipped} with no name or an email already here.`);
+      toast.success(`Imported ${result.created} leads`, { detail: `Skipped ${result.skipped} with no name or an email already here.` });
       await load();
     } catch (err: any) {
-      setNotice('');
       setError(err.message);
     }
   };
@@ -91,7 +95,6 @@ function LeadsApp() {
       </div>
 
       {error && <p className="error">{error}</p>}
-      {notice && <p className="notice">{notice}</p>}
 
       <div className="card stack">
         <SavedViews entity="lead" filters={filters} onApply={setFilters} />
@@ -127,18 +130,24 @@ function LeadsApp() {
       </div>
 
       <BulkBar entity="lead" selected={selection.selected} onClear={selection.clear} tags={tags} members={members}
-        onDone={async (message) => { setNotice(message); await load(); }} />
+        onDone={async (message) => { toast.success('Done', { detail: message }); await load(); }} />
 
-      <div className="card table-wrap">
-        {loading ? <p className="empty">Loading…</p> : (
+      {loading ? <SkeletonTable rows={8} columns={8} /> : (
+        <div className="card table-wrap">
           <table>
             <thead><tr><th className="pick"><input type="checkbox" aria-label="Select all shown" checked={selection.all} onChange={selection.toggleAll} /></th><th>Name</th><th>Company</th><th className="num">Score</th><th>Status</th><th>Source</th><th>Owner</th><th>Tags</th><th>Added</th></tr></thead>
             <tbody>
-              {visible.length === 0 && <tr><td colSpan={9} className="empty">{leads.length ? 'No matches' : 'No leads yet'}</td></tr>}
+              {visible.length === 0 && (
+                <tr><td colSpan={9}>
+                  {leads.length
+                    ? <EmptyState compact icon="search" title="No leads match" line="Try a different search or clear a filter." />
+                    : <EmptyState compact icon="lead" title="No leads yet" line="Add a lead by hand, import a CSV, or connect a web form in settings." action={{ label: 'New lead', onClick: () => setAdding(true) }} />}
+                </td></tr>
+              )}
               {visible.map((lead) => (
                 <tr key={lead.id} className={selection.has(lead.id) ? 'picked' : ''}>
                   <td className="pick"><input type="checkbox" aria-label={`Select ${lead.name}`} checked={selection.has(lead.id)} onChange={() => selection.toggle(lead.id)} /></td>
-                  <td className="wrap"><Link href={`/saas/crm/lead/${lead.id}`}>{lead.name}</Link></td>
+                  <td className="wrap"><Link href={`/saas/crm/lead/${lead.id}`} className={styles.rowOpen} onClick={openInDrawer(() => setOpened(lead))}>{lead.name}</Link></td>
                   <td className="wrap">{lead.company_name || '—'}</td>
                   <td className="num">{lead.score} <span className={`badge ${scoreBadge(lead.score)}`}>{scoreLabel(lead.score)}</span></td>
                   <td><span className={`badge ${statusBadge[lead.status]}`}>{statusLabel[lead.status]}</span></td>
@@ -150,10 +159,11 @@ function LeadsApp() {
               ))}
             </tbody>
           </table>
-        )}
-      </div>
+        </div>
+      )}
 
-      {adding && <LeadForm onClose={() => setAdding(false)} onSaved={load} />}
+      {adding && <LeadForm onClose={() => setAdding(false)} onSaved={async () => { toast.success('Lead added'); await load(); }} />}
+      <RecordDrawer kind="lead" record={opened} onClose={() => setOpened(null)} onChanged={load} ownerName={ownerName} tags={tags} />
     </div>
   );
 }
