@@ -1175,7 +1175,7 @@ a.crumb:hover { background: var(--hover); color: var(--text); }
 .eyebrow { font-size: var(--text-sm); font-weight: 600; color: var(--muted); margin: 0; letter-spacing: 0.01em; }
 .greeting { font-size: clamp(26px, 3.4vw, var(--text-4xl)); font-weight: 650; letter-spacing: -0.03em; }
 
-.flow-track { list-style: none; margin: 0; padding: 0; display: grid; grid-template-columns: repeat(auto-fit, minmax(150px, 1fr)); gap: 10px; }
+.flow-track { list-style: none; margin: 0; padding: 0; display: grid; grid-template-columns: repeat(5, minmax(0, 1fr)); gap: 10px; }
 .flow-step { position: relative; display: flex; min-width: 0; }
 .flow-card {
   flex: 1; display: grid; align-content: start; gap: 2px; padding: 14px 16px 14px; border-radius: var(--r-lg); background: var(--surface);
@@ -1382,4 +1382,14 @@ a.crumb:hover { background: var(--hover); color: var(--text); }
   .kiosk-keys button { min-height: 56px; }
   .kiosk-value { letter-spacing: 4px; }
   .kiosk-pad .form-actions, .kiosk-pad .row-actions { flex-wrap: wrap; }
+}
+
+/* The lead-to-paid strip stays one row: below 1000px wide it scrolls sideways instead of wrapping */
+@media (max-width: 1000px) {
+  .flow-track { grid-template-columns: none; grid-auto-flow: column; grid-auto-columns: minmax(150px, 30%); overflow-x: auto; scroll-snap-type: x mandatory; padding-bottom: 4px; scrollbar-width: none; }
+  .flow-track::-webkit-scrollbar { display: none; }
+  .flow-step { scroll-snap-align: start; }
+}
+@media (max-width: 640px) {
+  .flow-track { grid-auto-columns: minmax(150px, 46%); }
 }
